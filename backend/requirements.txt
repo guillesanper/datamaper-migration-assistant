@@ -3,7 +3,7 @@ annotated-types==0.7.0
 anyio==4.9.0
 fastapi==0.116.1
 pydantic==2.9.2
-pydantic_core==2.23.4
+pydantic_core==2.47.0
 starlette==0.47.2
 uvicorn==0.35.0
 gunicorn==23.0.0
