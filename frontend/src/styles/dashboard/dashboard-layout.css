@@ -1,0 +1,118 @@
+/* src/styles/dashboard-layout.css */
+.dashboard-container {
+  display: flex;
+  height: 100vh;
+  background-color: var(--color-background);
+  overflow: hidden;
+}
+
+.main-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--color-background);
+  min-width: 0;
+  overflow: hidden;
+}
+
+.page-container {
+  flex: 1;
+  padding: 1.5rem;
+  overflow: auto;
+}
+
+/* Scrollbar styles for page-container (matching ProjectVersions) */
+.page-container::-webkit-scrollbar {
+  width: 8px !important;
+}
+
+.page-container::-webkit-scrollbar-track {
+  background: #2a2a2a !important;
+  border-radius: 4px !important;
+}
+
+.page-container::-webkit-scrollbar-thumb {
+  background: #5a5a5a !important;
+  border-radius: 4px !important;
+}
+
+.page-container::-webkit-scrollbar-thumb:hover {
+  background: #7a7a7a !important;
+}
+
+/* Firefox scrollbar */
+.page-container {
+  scrollbar-width: thin !important;
+  scrollbar-color: #5a5a5a #2a2a2a !important;
+}
+
+/* Contenedor especial para páginas de mapping - sin padding */
+.mapping-page-container {
+  flex: 1;
+  padding: 0;
+  overflow: hidden;
+  height: 100%;
+  position: relative;
+}
+
+.fullscreen-content {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 40;
+  background-color: var(--color-background);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+@media (max-width: 768px) {
+  .page-container {
+    padding: 1rem;
+  }
+}
+
+@media (max-width: 640px) {
+  .page-container {
+    padding: 0.75rem;
+  }
+}
+
+/* Overlay para mobile */
+.sidebar-overlay {
+  display: none;
+}
+
+@media (max-width: 1024px) {
+  .sidebar-overlay {
+    display: block;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.5);
+    z-index: 999;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s ease;
+  }
+
+  .sidebar-overlay.active {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+/* Mejoras para modo de alto contraste */
+@media (prefers-contrast: high) {
+  .sidebar-overlay {
+    background-color: rgba(0, 0, 0, 0.75);
+  }
+
+  .sidebar-overlay.active {
+    backdrop-filter: none;
+  }
+}

@@ -1,0 +1,265 @@
+{
+  "greeting": {
+    "afternoon": "Buenas tardes, {{name}}",
+    "evening": "Buenas noches, {{name}}",
+    "morning": "Buenos días, {{name}}"
+  },
+  "migrations": {
+    "empty": "Sin migraciones recientes",
+    "emptyHint": "Las ejecuciones aparecerán aquí",
+    "failed": "Fallida",
+    "pending": "Pendiente",
+    "running": "En ejecución",
+    "success": "Exitosa"
+  },
+  "modals": {
+    "create": {
+      "budgetLabel": "Presupuesto ($)",
+      "creatingBtn": "Creando...",
+      "db": {
+        "compatibleNote": "Compatible con generación automática de scripts",
+        "incompatibleNote": "Podrás crear mappings, pero la generación automática de scripts no está disponible para este tipo de BD",
+        "mysql": "MySQL",
+        "oracle": "Oracle",
+        "other": "Otro",
+        "postgres": "PostgreSQL",
+        "sqlserver": "SQL Server"
+      },
+      "descLabel": "Descripción",
+      "descPlaceholder": "Describe brevemente el proyecto...",
+      "destLabel": "Base de Datos de Destino",
+      "destPlaceholder": "Selecciona la BD de destino",
+      "encryptionError": "Proyecto creado, pero falló la configuración del cifrado: {{error}}",
+      "encryptionHint": "Los datos del proyecto serán cifrados con AES-256-GCM",
+      "encryptionSection": "Configuración de Cifrado",
+      "encryptionToggle": "Activar cifrado para este proyecto",
+      "nameLabel": "Nombre del Proyecto",
+      "namePlaceholder": "Ej: Migración de Base de Datos",
+      "originLabel": "Base de Datos de Origen",
+      "originPlaceholder": "Selecciona la BD de origen",
+      "passphraseHint": "Requisitos: mínimo 12 caracteres, mayúsculas, minúsculas y números",
+      "passphraseImportant": "Importante: Guarda esta passphrase en un lugar seguro. No podrás recuperar los datos si la olvidas.",
+      "passphraseLabel": "Passphrase",
+      "passphrasePlaceholder": "Mínimo 12 caracteres",
+      "progressLabel": "Progreso (%)",
+      "statusLabel": "Estado",
+      "submitBtn": "Crear Proyecto",
+      "title": "Crear Nuevo Proyecto",
+      "validation": {
+        "budgetNegative": "El presupuesto no puede ser negativo",
+        "destRequired": "La base de datos de destino es obligatoria",
+        "nameMax": "El nombre no puede exceder 100 caracteres",
+        "nameMin": "El nombre debe tener al menos 3 caracteres",
+        "nameRequired": "El nombre es obligatorio",
+        "originRequired": "La base de datos de origen es obligatoria",
+        "passphraseCasing": "La passphrase debe contener mayúsculas y minúsculas",
+        "passphraseMin": "La passphrase debe tener al menos 12 caracteres",
+        "passphraseNumber": "La passphrase debe contener al menos un número",
+        "passphraseRequired": "La passphrase es obligatoria si activas el cifrado",
+        "progressRange": "El progreso debe estar entre 0 y 100"
+      }
+    },
+    "delete": {
+      "aboutToDelete": "Estás a punto de eliminar el proyecto:",
+      "confirmError": "El nombre del proyecto no coincide",
+      "confirmInstruction": "Para confirmar, escribe el nombre del proyecto:",
+      "confirmPlaceholder": "Escribe el nombre del proyecto",
+      "consequence1": "Todos los mappeos configurados",
+      "consequence2": "Todas las tablas y columnas asociadas",
+      "consequence3": "Todo el historial del proyecto",
+      "consequencesIntro": "Al eliminar este proyecto se perderán permanentemente:",
+      "deletingBtn": "Eliminando...",
+      "error": "Error al eliminar el proyecto",
+      "progress": "Progreso: {{percent}}%",
+      "submitBtn": "Eliminar Proyecto",
+      "success": "Proyecto \"{{name}}\" eliminado correctamente",
+      "title": "Eliminar Proyecto",
+      "warning": "⚠️ Esta acción es irreversible"
+    },
+    "edit": {
+      "activateEncryption": "Activar Cifrado",
+      "confirmPassphrasePlaceholder": "Confirma con tu passphrase",
+      "deactivateEncryption": "Desactivar Cifrado",
+      "encryptDanger": "⚠️ PELIGRO: Desactivar el cifrado dejará los datos sin protección. Esta acción es irreversible.",
+      "encryptedHint": "Introduce una passphrase para cifrar este proyecto. Asegúrate de guardarla en un lugar seguro.",
+      "encryptionActiveDesc": "Los datos están cifrados con AES-256-GCM",
+      "encryptionActive": "Cifrado activo",
+      "encryptionActivate": "Activar cifrado",
+      "encryptionError": "Proyecto actualizado, pero falló el cambio de cifrado: {{error}}",
+      "encryptionInactiveDesc": "Cifrar los datos del proyecto con AES-256-GCM",
+      "newPassphrasePlaceholder": "Nueva passphrase (mín. 12 caracteres)",
+      "savingBtn": "Guardando...",
+      "submitBtn": "Guardar Cambios",
+      "title": "Editar Proyecto",
+      "validation": {
+        "passphraseForChange": "La passphrase es obligatoria para cambiar el estado del cifrado"
+      }
+    },
+    "members": {
+      "addBtn": "Añadir",
+      "addSection": "Añadir Miembro",
+      "closeBtn": "Cerrar",
+      "emailPlaceholder": "Email o nombre de usuario",
+      "emailRequired": "Ingresa un email o nombre de usuario",
+      "empty": "No hay miembros en este proyecto",
+      "emptyHint": "Añade colaboradores usando el formulario de arriba",
+      "errors": {
+        "add": "Error al añadir el miembro",
+        "load": "Error al cargar los miembros",
+        "remove": "Error al eliminar el miembro",
+        "updateRole": "Error al actualizar el rol"
+      },
+      "membersSection_one": "Miembros del Proyecto ({{count}})",
+      "membersSection_other": "Miembros del Proyecto ({{count}})",
+      "ownerBadge": "PROPIETARIO",
+      "projectCreator": "Creador del proyecto",
+      "removeConfirm": "¿Estás seguro de que deseas eliminar a {{email}} del proyecto?",
+      "title": "Gestionar Miembros",
+      "you": "Tú (Propietario)"
+    }
+  },
+  "notifications": {
+    "daysAgo_one": "hace {{count}}d",
+    "daysAgo_other": "hace {{count}}d",
+    "empty": "Sin notificaciones",
+    "hoursAgo_one": "hace {{count}}h",
+    "hoursAgo_other": "hace {{count}}h",
+    "markAllRead": "Marcar todo como leído",
+    "markRead": "Marcar como leída",
+    "minutesAgo_one": "hace {{count}}m",
+    "minutesAgo_other": "hace {{count}}m",
+    "now": "Ahora",
+    "title": "Notificaciones"
+  },
+  "projectRow": {
+    "actions": {
+      "delete": "Eliminar proyecto",
+      "edit": "Editar proyecto",
+      "leave": "Salir del Proyecto",
+      "members": "Gestionar Miembros",
+      "team": "Ver Equipo",
+      "versions": "Control de Versiones"
+    },
+    "badge": {
+      "member": "Miembro"
+    },
+    "dbDest": "Destino",
+    "dbOrigin": "Origen",
+    "moreOptions": "Más opciones",
+    "status": {
+      "active": "Activo",
+      "completed": "Completado",
+      "paused": "Pausado"
+    }
+  },
+  "quickActions": {
+    "addDbConnection": "Agregar conexión DB",
+    "addDbConnectionSub": "Conectar base de datos",
+    "createProject": "Crear proyecto",
+    "createProjectSub": "Nuevo proyecto de migración",
+    "newMigration": "Nueva migración",
+    "newMigrationSub": "Ejecutar migración de datos"
+  },
+  "recent": {
+    "migrations": {
+      "title": "Migraciones"
+    },
+    "projects": {
+      "empty": "Sin proyectos recientes",
+      "neverAccessed": "Nunca abierto",
+      "title": "Proyectos"
+    },
+    "versions": {
+      "title": "Versiones"
+    }
+  },
+  "sections": {
+    "activitySocial": "Actividad & Social",
+    "recent": "Recientes"
+  },
+  "sidebar": {
+    "aria": {
+      "closeMenu": "Cerrar menú",
+      "collapse": "Colapsar sidebar",
+      "expand": "Expandir sidebar"
+    },
+    "nav": {
+      "admin": "Admin",
+      "dashboard": "Dashboard",
+      "projects": "Proyectos",
+      "settings": "Configuración",
+      "team": "Equipo"
+    },
+    "user": {
+      "account": "Mi Cuenta",
+      "billing": "Facturación",
+      "help": "Ayuda & Soporte",
+      "logout": "Cerrar Sesión",
+      "profile": "Perfil",
+      "settings": "Configuración"
+    }
+  },
+  "stat_card": {
+    "changeNegative": "{{percent}} {{since}}",
+    "changePositive": "{{percent}} {{since}}"
+  },
+  "stats": {
+    "activeProjects": "Proyectos Activos",
+    "completed": "Completados",
+    "totalBudget": "Presupuesto Total",
+    "totalProjects": "Total Proyectos"
+  },
+  "table": {
+    "empty": "No hay proyectos que coincidan con los filtros",
+    "error": "Error al cargar datos",
+    "exportTitle": "Exportar",
+    "filter": {
+      "active": "Activos",
+      "all": "Todos los estados",
+      "completed": "Completados",
+      "paused": "Pausados"
+    },
+    "header": {
+      "budget": "Presupuesto",
+      "databases": "Bases de Datos",
+      "progress": "Progreso",
+      "project": "Proyecto",
+      "status": "Estado",
+      "updatedAt": "Última actualización"
+    },
+    "importTitle": "Importar",
+    "migrateHint": "Selecciona un proyecto para generar y ejecutar su migración de datos.",
+    "newProject": "Nuevo Proyecto",
+    "retry": "Reintentar",
+    "searchPlaceholder": "Buscar proyectos...",
+    "title": "Proyectos"
+  },
+  "topbar": {
+    "aria": {
+      "notifications": "Notificaciones",
+      "openMenu": "Abrir menú",
+      "settings": "Configuración",
+      "theme": "Cambiar tema",
+      "toggleLanguage": "Cambiar idioma"
+    },
+    "search": {
+      "placeholder": "Buscar proyectos..."
+    }
+  },
+  "versions": {
+    "added": "Añadido",
+    "created": "Creado",
+    "deleted": "Eliminado",
+    "empty": "Sin versiones recientes",
+    "emptyHint": "Los snapshots aparecerán aquí",
+    "entity": {
+      "column": "Columna",
+      "index": "Índice",
+      "schema": "Schema",
+      "table": "Tabla",
+      "view": "Vista"
+    },
+    "renamed": "Renombrado",
+    "updated": "Actualizado"
+  }
+}

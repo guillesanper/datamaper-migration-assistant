@@ -1,0 +1,235 @@
+/* src/styles/mapping/mapping-modals.module.css */
+
+/* ============================================
+   MODALS
+   ============================================ */
+.modalOverlay {
+  position: fixed;
+  inset: 0;
+  padding: 1rem;
+  padding-left: calc(var(--nav-sidebar-width, 0rem) + 1rem);
+  background-color: rgb(0 0 0 / 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+  backdrop-filter: blur(4px);
+  animation: fadeIn 0.2s ease-in-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.modalContent {
+  background-color: var(--color-card);
+  border-radius: calc(var(--mapping-border-radius) * 1.5);
+  box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.25);
+  width: 100%;
+  max-width: 48rem;
+  max-height: 90vh;
+  overflow: hidden;
+  animation: slideUp 0.3s ease-out;
+  border: 1px solid hsl(var(--border) / 0.5);
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.modalHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.5rem 2rem;
+  border-bottom: 1px solid var(--color-border);
+  background: linear-gradient(to bottom, hsl(var(--muted) / 0.3), transparent);
+}
+
+.modalTitle {
+  font-size: 1.375rem;
+  font-weight: 700;
+  color: var(--color-foreground);
+  letter-spacing: -0.025em;
+}
+
+.modalCloseButton {
+  padding: 0.5rem;
+  border-radius: var(--mapping-border-radius);
+  transition: all 0.2s ease-in-out;
+  border: 1px solid transparent;
+  background: transparent;
+  cursor: pointer;
+  color: var(--color-foreground);
+}
+
+.modalCloseButton:hover {
+  background-color: var(--color-muted);
+  border-color: hsl(var(--border));
+  transform: rotate(90deg);
+}
+
+.modalBody {
+  padding: 2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.75rem;
+  overflow-y: auto;
+  max-height: calc(90vh - 200px);
+  background-color: var(--color-card);
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-muted-foreground) var(--color-muted);
+}
+
+.modalBody::-webkit-scrollbar {
+  width: 8px;
+}
+
+.modalBody::-webkit-scrollbar-track {
+  background: var(--color-muted);
+  border-radius: 4px;
+}
+
+.modalBody::-webkit-scrollbar-thumb {
+  background: var(--color-muted-foreground);
+  border-radius: 4px;
+  opacity: 0.5;
+}
+
+.modalBody::-webkit-scrollbar-thumb:hover {
+  background: var(--color-foreground);
+  opacity: 0.7;
+}
+
+.guideModalScrollable {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-muted-foreground) var(--color-muted);
+}
+
+.guideModalScrollable::-webkit-scrollbar {
+  width: 8px;
+}
+
+.guideModalScrollable::-webkit-scrollbar-track {
+  background: var(--color-muted);
+  border-radius: 4px;
+}
+
+.guideModalScrollable::-webkit-scrollbar-thumb {
+  background: var(--color-muted-foreground);
+  border-radius: 4px;
+  opacity: 0.5;
+}
+
+.guideModalScrollable::-webkit-scrollbar-thumb:hover {
+  background: var(--color-foreground);
+  opacity: 0.7;
+}
+
+.modalFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.25rem 2rem;
+  border-top: 1px solid var(--color-border);
+  background: linear-gradient(to top, hsl(var(--muted) / 0.4), transparent);
+}
+
+.modalFooterLeft {
+  font-size: 0.875rem;
+  color: var(--color-muted-foreground);
+  font-weight: 500;
+}
+
+.modalFooterRight {
+  display: flex;
+  gap: 0.75rem;
+}
+
+/* Dropzone */
+.dropzone {
+  border: 3px dashed var(--color-border);
+  border-radius: calc(var(--mapping-border-radius) * 1.5);
+  padding: 2.5rem;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.3s ease-in-out;
+  background-color: hsl(var(--muted) / 0.3);
+  position: relative;
+}
+
+.dropzone::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: calc(var(--mapping-border-radius) * 1.5);
+  background: linear-gradient(135deg, hsl(var(--primary) / 0.05), hsl(var(--primary) / 0.02));
+  opacity: 0;
+  transition: opacity 0.3s ease-in-out;
+}
+
+.dropzone:hover::before {
+  opacity: 1;
+}
+
+.dropzone:hover {
+  border-color: hsl(var(--primary) / 0.6);
+  background-color: hsl(var(--primary) / 0.05);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 16px hsl(var(--primary) / 0.1);
+}
+
+.dropzoneActive {
+  border-color: hsl(var(--primary));
+  background-color: hsl(var(--primary) / 0.1);
+  box-shadow: 0 0 0 4px hsl(var(--primary) / 0.1);
+  border-style: solid;
+}
+
+.dropzoneIcon {
+  width: 3.5rem;
+  height: 3.5rem;
+  margin: 0 auto 1rem;
+  color: hsl(var(--primary));
+  transition: all 0.3s ease-in-out;
+}
+
+.dropzone:hover .dropzoneIcon {
+  transform: scale(1.1) translateY(-4px);
+}
+
+.dropzoneTitle {
+  font-weight: 600;
+  font-size: 1rem;
+  color: var(--color-foreground);
+}
+
+.dropzoneDescription {
+  font-size: 0.875rem;
+  color: var(--color-muted-foreground);
+  margin-top: 0.5rem;
+}
+
+.dropzoneFileName {
+  font-weight: 600;
+  font-size: 1rem;
+  color: hsl(var(--primary));
+}
+
+.dropzoneFileSize {
+  font-size: 0.875rem;
+  color: var(--color-muted-foreground);
+  margin-top: 0.25rem;
+}

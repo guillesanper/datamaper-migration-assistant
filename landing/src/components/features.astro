@@ -1,0 +1,82 @@
+---
+import { Icon } from "astro-icon/components";
+import ContentSection from "~/components/content-section.astro";
+import type { FeatureItem } from "~/types";
+
+const features: Array<FeatureItem> = [
+  {
+    title: "Interfaz Visual Intuitiva",
+    description:
+      "Mapea tus tablas y campos con una interfaz drag-and-drop fácil de usar. No necesitas ser un experto en bases de datos.",
+    icon: "mdi:cursor-default-click",
+  },
+  {
+    title: "Múltiples Bases de Datos",
+    description:
+      "Soporta PostgreSQL, MySQL, SQL Server y más. Conecta diferentes tipos de bases de datos sin complicaciones.",
+    icon: "mdi:database-sync",
+  },
+  {
+    title: "Mapeo Automático",
+    description:
+      "Detecta automáticamente relaciones y sugiere mapeos basados en nombres de campos y tipos de datos similares.",
+    icon: "mdi:auto-fix",
+  },
+  {
+    title: "Precio Asequible",
+    description:
+      "Plan gratuito con funcionalidades básicas y planes premium desde 30€/mes. Sin costes ocultos ni sorpresas.",
+    icon: "mdi:currency-eur",
+  },
+  {
+    title: "Exportación Flexible",
+    description:
+      "Exporta tus mapeos a SQL, scripts de migración o documentación. Compatible con herramientas populares de migración.",
+    icon: "mdi:file-export",
+  },
+  {
+    title: "Colaboración en Equipo",
+    description:
+      "Comparte proyectos con tu equipo, comenta mapeos y trabaja en conjunto en migraciones complejas.",
+    icon: "mdi:account-group",
+  },
+];
+---
+
+<ContentSection title="Características" id="features">
+  <Fragment slot="lead">
+    DataMapper es la <span class="gradient-text-alt font-bold">solución completa</span> para tus
+    migraciones de bases de datos. Ahorra tiempo y evita errores con nuestras
+    <span class="gradient-text-alt font-bold">herramientas inteligentes</span>.
+  </Fragment>
+  <ul class="grid max-w-6xl grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+    {
+      features.map(({ title, description, icon }, index) => (
+        <li
+          class="card card-glass group hover:scale-105 transition-all duration-300 animate-fade-in-up"
+          style={`animation-delay: ${index * 0.1}s`}
+        >
+          <div class="flex flex-col items-center gap-4 p-8 relative">
+            <div class="absolute inset-0 bg-gradient-to-br from-blue-500/5 via-purple-500/5 to-pink-500/5 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+
+            <div class="size-20 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 p-1 group-hover:scale-110 group-hover:rotate-12 transition-all duration-300 relative z-10">
+              <div class="size-full rounded-full bg-slate-900 flex items-center justify-center">
+                <Icon name={icon} class="size-10 text-blue-400 group-hover:text-purple-400 transition-colors" />
+              </div>
+            </div>
+
+            <div class="absolute top-4 right-4 w-2 h-2 bg-blue-400 rounded-full animate-pulse opacity-0 group-hover:opacity-100"></div>
+
+            <h3 class="text-center font-extrabold text-xl relative z-10 group-hover:text-blue-400 transition-colors font-display" style="color: var(--color-text);">
+              {title}
+            </h3>
+
+            <p class="text-center text-base leading-relaxed relative z-10" style="color: var(--color-text);">
+              {description}
+            </p>
+          </div>
+        </li>
+      ))
+    }
+  </ul>
+</ContentSection>

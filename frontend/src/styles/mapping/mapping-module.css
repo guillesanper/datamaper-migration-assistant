@@ -1,0 +1,148 @@
+/* src/styles/mapping/mapping.module.css */
+.mappingContainer {
+  @apply h-screen flex flex-col bg-background;
+}
+
+.mappingHeader {
+  @apply border-b px-4 py-3;
+}
+
+.mappingCanvas {
+  @apply flex-1 relative overflow-hidden;
+}
+
+/* Node styles */
+.tableNode {
+  @apply bg-card rounded-lg border-2 shadow-lg min-w-[250px] max-w-[350px];
+}
+
+.tableNode.origin {
+  @apply border-l-4 border-l-blue-500;
+}
+
+.tableNode.destination {
+  @apply border-r-4 border-r-green-500;
+}
+
+.tableNodeHeader {
+  @apply px-3 py-2 bg-muted/50 border-b cursor-pointer flex items-center gap-2;
+}
+
+.columnItem {
+  @apply px-3 py-1.5 hover:bg-muted/50 cursor-pointer flex items-center gap-2 relative group;
+}
+
+.columnHandle {
+  @apply absolute w-3 h-3 border-2 border-white rounded-full;
+  @apply transition-all duration-200;
+}
+
+.columnHandle.source {
+  @apply bg-blue-500 -right-2;
+}
+
+.columnHandle.target {
+  @apply bg-green-500 -left-2;
+}
+
+.columnHandle:hover {
+  @apply scale-125;
+}
+
+/* Connection line styles */
+.connectionLine {
+  @apply stroke-primary stroke-2;
+}
+
+.connectionLine.animated {
+  animation: dash 1s linear infinite;
+}
+
+@keyframes dash {
+  to {
+    stroke-dashoffset: -10;
+  }
+}
+
+/* Search panel */
+.searchPanel {
+  @apply bg-card/95 backdrop-blur border rounded-lg shadow-lg p-2 min-w-[250px];
+}
+
+/* Toolbar */
+.toolbar {
+  @apply flex items-center justify-between px-4 py-2 border-b bg-muted/30;
+}
+
+.toolbarButton {
+  @apply p-2 hover:bg-muted rounded-lg transition-colors group;
+}
+
+.toolbarButton:hover svg {
+  @apply text-primary;
+}
+
+.toolbarDivider {
+  @apply w-px h-6 bg-border mx-1;
+}
+
+/* Modal styles */
+.modal {
+  @apply fixed inset-0 bg-black/50 flex items-center justify-center z-50;
+}
+
+.modalContent {
+  @apply bg-card rounded-lg shadow-xl w-full max-w-3xl max-h-[90vh] overflow-hidden;
+}
+
+.modalHeader {
+  @apply flex items-center justify-between p-6 border-b;
+}
+
+.modalBody {
+  @apply p-6 space-y-6 overflow-y-auto max-h-[calc(90vh-200px)];
+}
+
+.modalFooter {
+  @apply flex items-center justify-end gap-3 px-6 py-4 border-t bg-muted/50;
+}
+
+/* Dropzone */
+.dropzone {
+  @apply border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-all;
+}
+
+.dropzone.active {
+  @apply border-primary bg-primary/5;
+}
+
+.dropzone:hover {
+  @apply border-primary/50;
+}
+
+/* Stats */
+.statsCard {
+  @apply bg-muted/50 rounded-lg p-4 text-center;
+}
+
+.statsValue {
+  @apply text-2xl font-bold;
+}
+
+.statsLabel {
+  @apply text-sm text-muted-foreground;
+}
+
+/* Validation messages */
+.validationSuccess {
+  @apply bg-green-50 dark:bg-green-950/20 border-green-200 dark:border-green-900;
+}
+
+.validationError {
+  @apply bg-red-50 dark:bg-red-950/20 border-red-200 dark:border-red-900;
+}
+
+.validationWarning {
+  @apply bg-yellow-50 dark:bg-yellow-950/20 border-yellow-200 dark:border-yellow-900;
+}
+

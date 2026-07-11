@@ -1,0 +1,68 @@
+/* src/styles/mapping/mapping-utils.module.css */
+
+/* ============================================
+   LOADING STATES
+   ============================================ */
+.loadingContainer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+}
+
+.loadingContent {
+  text-align: center;
+}
+
+.loadingSpinner {
+  animation: spin 1s linear infinite;
+  border-radius: 9999px;
+  height: 3rem;
+  width: 3rem;
+  border: 2px solid transparent;
+  border-bottom-color: hsl(var(--primary));
+  margin: 0 auto 1rem;
+}
+
+.loadingText {
+  font-size: 0.875rem;
+  color: hsl(var(--muted-foreground));
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ============================================
+   SCROLLBAR CUSTOM
+   ============================================ */
+.columnPanelContent::-webkit-scrollbar,
+.sidebarContent::-webkit-scrollbar,
+.gridTableWrapper::-webkit-scrollbar,
+.modalBody::-webkit-scrollbar {
+  width: 0.5rem;
+}
+
+.columnPanelContent::-webkit-scrollbar-track,
+.sidebarContent::-webkit-scrollbar-track,
+.gridTableWrapper::-webkit-scrollbar-track,
+.modalBody::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.columnPanelContent::-webkit-scrollbar-thumb,
+.sidebarContent::-webkit-scrollbar-thumb,
+.gridTableWrapper::-webkit-scrollbar-thumb,
+.modalBody::-webkit-scrollbar-thumb {
+  background-color: hsl(var(--muted));
+  border-radius: 9999px;
+}
+
+.columnPanelContent::-webkit-scrollbar-thumb:hover,
+.sidebarContent::-webkit-scrollbar-thumb:hover,
+.gridTableWrapper::-webkit-scrollbar-thumb:hover,
+.modalBody::-webkit-scrollbar-thumb:hover {
+  background-color: hsl(var(--muted-foreground) / 0.5);
+}

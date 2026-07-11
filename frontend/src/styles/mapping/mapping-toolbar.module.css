@@ -1,0 +1,226 @@
+/* src/styles/mapping/mapping-toolbar.module.css */
+
+/* ============================================
+   TOOLBAR
+   ============================================ */
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1.5rem;
+  border-bottom: 1px solid hsl(var(--border));
+  background-color: hsl(var(--muted) / 0.3);
+  flex-shrink: 0;
+}
+
+.toolbarLeft,
+.toolbarRight {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.toolbarButton {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  border-radius: var(--mapping-border-radius);
+  transition: all 0.2s ease-in-out;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+}
+
+.toolbarButton::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: hsl(var(--muted));
+  opacity: 0;
+  transition: opacity 0.2s ease-in-out;
+}
+
+.toolbarButton:hover::before {
+  opacity: 1;
+}
+
+.toolbarButton:hover {
+  border-color: hsl(var(--border) / 0.8);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px hsl(var(--foreground) / 0.1);
+}
+
+.toolbarButton:active {
+  transform: translateY(0);
+  box-shadow: 0 1px 4px hsl(var(--foreground) / 0.08);
+}
+
+.toolbarButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.toolbarButton > * {
+  position: relative;
+  z-index: 1;
+}
+
+.toolbarButtonPrimary {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  background: linear-gradient(135deg, hsl(var(--primary)) 0%, hsl(var(--primary) / 0.9) 100%);
+  color: hsl(var(--primary-foreground));
+  font-size: 0.875rem;
+  font-weight: 600;
+  border-radius: var(--mapping-border-radius);
+  transition: all 0.2s ease-in-out;
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 2px 4px hsl(var(--primary) / 0.2);
+  position: relative;
+  overflow: hidden;
+}
+
+.toolbarButtonPrimary::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(135deg, hsl(var(--primary) / 0.9) 0%, hsl(var(--primary) / 0.8) 100%);
+  opacity: 0;
+  transition: opacity 0.2s ease-in-out;
+}
+
+.toolbarButtonPrimary:hover::before {
+  opacity: 1;
+}
+
+.toolbarButtonPrimary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px hsl(var(--primary) / 0.3);
+}
+
+.toolbarButtonPrimary:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 6px hsl(var(--primary) / 0.25);
+}
+
+.toolbarButtonPrimary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.toolbarButtonPrimary > * {
+  position: relative;
+  z-index: 1;
+}
+
+.toolbarDivider {
+  width: 1px;
+  height: 1.5rem;
+  background-color: hsl(var(--border));
+  margin: 0 0.5rem;
+}
+
+.toolbarInfo {
+  font-size: 0.875rem;
+  color: hsl(var(--muted-foreground));
+}
+
+/* Selection Banner */
+.selectionBanner {
+  padding: 0.75rem 1.5rem;
+  background-color: #dbeafe;
+  border-bottom: 1px solid hsl(var(--border));
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+}
+
+.dark .selectionBanner {
+  background-color: rgb(30 58 138 / 0.2);
+}
+
+.selectionBannerContent {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.selectionBannerIcon {
+  width: 1rem;
+  height: 1rem;
+  color: #2563eb;
+}
+
+.dark .selectionBannerIcon {
+  color: #60a5fa;
+}
+
+.selectionBannerText {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #1e3a8a;
+}
+
+.dark .selectionBannerText {
+  color: #dbeafe;
+}
+
+.selectionBannerHint {
+  font-size: 0.75rem;
+  color: #1e40af;
+}
+
+.dark .selectionBannerHint {
+  color: #93c5fd;
+}
+
+.selectionBannerClose {
+  padding: 0.25rem;
+  border-radius: 0.25rem;
+  transition: var(--mapping-transition);
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.selectionBannerClose:hover {
+  background-color: #bfdbfe;
+}
+
+.dark .selectionBannerClose:hover {
+  background-color: rgb(30 64 175);
+}
+
+/* Responsive Toolbar */
+@media (max-width: 768px) {
+  .toolbar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.5rem;
+    padding: 0.625rem 1rem;
+  }
+
+  .toolbarLeft,
+  .toolbarRight {
+    justify-content: center;
+  }
+}

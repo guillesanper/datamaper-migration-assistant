@@ -1,0 +1,30 @@
+/* src/styles/mapping/mapping-base.module.css */
+
+/* ============================================
+   VARIABLES Y CONFIGURACIÓN BASE
+   ============================================ */
+:root {
+  --mapping-spacing: 1rem;
+  --mapping-border-radius: 0.5rem;
+  --mapping-transition: all 0.2s ease;
+}
+
+/* ============================================
+   LAYOUT PRINCIPAL
+   ============================================ */
+.mappingContainer {
+  height: 100%;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  background-color: hsl(var(--background));
+  overflow: hidden;
+}
+
+.mappingContent {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}

@@ -1,0 +1,80 @@
+/* team.module.css */
+/* Styles for Team page */
+
+.teamContainer {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  margin: -1.5rem;
+  padding: 0;
+}
+
+/* Header (static, not sticky) */
+.header {
+  padding: 20px 1.5rem;
+  background: hsl(var(--background));
+  border-bottom: 1px solid hsl(var(--border) / 0.5);
+  flex-shrink: 0;
+}
+
+/* For light mode */
+@media (prefers-color-scheme: light) {
+  .header {
+    background: hsl(210 20% 96%);
+    border-bottom: 1px solid hsl(var(--border));
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  }
+}
+
+/* Content */
+.content {
+  flex: 1;
+  padding: 28px 1.5rem;
+  padding-bottom: 48px;
+}
+
+/* Sticky Panel */
+.stickyPanel {
+  position: sticky;
+  top: 20px;
+  background: hsl(var(--card) / 0.6);
+  backdrop-filter: blur(8px);
+  border: 1px solid hsl(var(--border) / 0.5);
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 2px 8px hsl(var(--foreground) / 0.05);
+  transition: all 0.3s ease;
+}
+
+.stickyPanel:hover {
+  box-shadow: 0 4px 12px hsl(var(--foreground) / 0.08);
+  border-color: hsl(var(--primary) / 0.2);
+}
+
+/* Project Selector */
+.projectSelector {
+  padding: 10px 16px !important;
+  height: auto !important;
+  min-height: 52px !important;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .teamContainer {
+    margin: -1rem;
+  }
+
+  .header {
+    padding: 16px 1rem;
+  }
+
+  .content {
+    padding: 20px 1rem;
+  }
+
+  .stickyPanel {
+    position: relative;
+    top: 0;
+  }
+}

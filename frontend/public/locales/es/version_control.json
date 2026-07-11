@@ -1,0 +1,255 @@
+{
+  "activityFeed": {
+    "empty": "No hay actividad reciente",
+    "filters": {
+      "all": "Todas",
+      "comments": "Comentarios",
+      "locks": "Bloqueos",
+      "versions": "Versiones"
+    },
+    "loading": "Cargando actividades...",
+    "loadingMore": "Cargando...",
+    "title": "Actividad reciente",
+    "today": "Hoy",
+    "types": {
+      "comment_added": "Comentario agregado",
+      "default": "Actividad",
+      "lock_acquired": "Bloqueado para edición",
+      "lock_released": "Desbloqueado",
+      "mapping_created": "Mapeo creado",
+      "mapping_deleted": "Mapeo eliminado",
+      "mapping_updated": "Mapeo actualizado",
+      "member_added": "Miembro agregado",
+      "member_removed": "Miembro removido",
+      "member_role_changed": "Rol cambiado",
+      "project_updated": "Proyecto actualizado",
+      "table_imported": "Tabla importada",
+      "tag_created": "Etiqueta agregada",
+      "version_created": "Versión creada",
+      "version_restored": "Versión restaurada"
+    },
+    "yesterday": "Ayer"
+  },
+  "collaboration": {
+    "disconnected": "Desconectado",
+    "online_one": "{{count}} usuario en línea",
+    "online_other": "{{count}} usuarios en línea",
+    "startEditing": "Comenzar edición",
+    "stopEditing": "Finalizar edición",
+    "tabs": {
+      "activity": "Actividad",
+      "comments": "Comentarios",
+      "users": "Usuarios",
+      "versions": "Versiones"
+    },
+    "title": "Colaboración",
+    "user": {
+      "editing": "{{user}} está editando",
+      "viewing": "{{user}} está viendo"
+    }
+  },
+  "commentThread": {
+    "delete": "Eliminar",
+    "edit": "Editar",
+    "edited": "(editado)",
+    "empty": "No hay comentarios aún",
+    "emptyHint": "Sé el primero en comentar",
+    "placeholder": "Escribe un comentario...",
+    "react": "Reaccionar",
+    "reopen": "Reabrir",
+    "replies_one": "{{count}} respuesta",
+    "replies_other": "{{count}} respuestas",
+    "reply": "Responder",
+    "replyTo": "Responder a {{username}}...",
+    "resolve": "Resolver",
+    "resolved": "Resuelto",
+    "send": "Enviar",
+    "submit": "Comentar"
+  },
+  "compare": {
+    "base": "Base",
+    "changes": {
+      "added": "Añadido",
+      "modified": "Modificado",
+      "removed": "Eliminado"
+    },
+    "changes_one": "{{count}} cambio",
+    "changes_other": "{{count}} cambios",
+    "diff": {
+      "after": "Después:",
+      "before": "Antes:",
+      "newValue": "Nuevo valor:",
+      "oldValue": "Valor anterior:"
+    },
+    "noChanges": "Sin cambios entre versiones",
+    "section": {
+      "added": "Campos añadidos ({{count}})",
+      "modified": "Campos modificados ({{count}})",
+      "removed": "Campos eliminados ({{count}})"
+    },
+    "summary": {
+      "added_one": "{{count}} añadido",
+      "added_other": "{{count}} añadidos",
+      "modified_one": "{{count}} modificado",
+      "modified_other": "{{count}} modificados",
+      "removed_one": "{{count}} eliminado",
+      "removed_other": "{{count}} eliminados"
+    },
+    "target": "Comparar con",
+    "title": "Comparar versiones",
+    "versionA": "Versión anterior",
+    "versionB": "Versión nueva"
+  },
+  "filters": {
+    "active_one": "{{count}} filtro activo",
+    "active_other": "{{count}} filtros activos",
+    "allTypes": "Todos los tipos",
+    "author": {
+      "all": "Todos los usuarios",
+      "label": "Usuario"
+    },
+    "changeType": "Tipo de cambio",
+    "clear": "Limpiar filtros",
+    "date": {
+      "custom": "Rango personalizado",
+      "label": "Rango de fechas",
+      "month": "Último mes",
+      "today": "Hoy",
+      "week": "Última semana"
+    },
+    "dateFrom": "Desde",
+    "dateTo": "Hasta",
+    "entityType": "Tipo de entidad",
+    "entityTypes": {
+      "column": "Columna",
+      "mapping": "Mapping",
+      "project": "Proyecto",
+      "table": "Tabla",
+      "transformation": "Transformación"
+    },
+    "results_one": "{{count}} resultado",
+    "results_other": "{{count}} resultados",
+    "search": "Buscar en mensajes",
+    "searchPlaceholder": "Buscar...",
+    "tags": {
+      "label": "Etiquetas"
+    },
+    "title": "Filtros"
+  },
+  "help": {
+    "button": "Ayuda",
+    "close": "Entendido",
+    "howCreated": {
+      "desc": "Las versiones se crean automáticamente o manualmente para capturar el estado de tus mapeos.",
+      "item1": "Guarda un mapeo para crear una versión automáticamente",
+      "item2": "Usa el botón 'Crear versión' para guardar un punto de control manual",
+      "item3": "Cada versión captura todas las tablas, columnas y mapeos",
+      "item4": "Puedes restaurar cualquier versión anterior en cualquier momento",
+      "snapshot": "Cada versión es una instantánea completa de tu mapeo de esquemas",
+      "title": "¿Cómo se crean las versiones?"
+    },
+    "howTags": {
+      "desc": "Las etiquetas te ayudan a organizar e identificar versiones importantes.",
+      "step1": "Haz clic en cualquier versión para abrir sus detalles",
+      "step2": "Haz clic en 'Añadir etiqueta' para crear una etiqueta para esa versión",
+      "step3": "Usa los filtros para encontrar versiones por etiqueta",
+      "step4": "Elimina las etiquetas que ya no necesites",
+      "title": "¿Cómo usar las etiquetas?"
+    },
+    "title": "Guía de control de versiones"
+  },
+  "history": {
+    "cancelCompare": "Cancelar",
+    "compareHint": "Selecciona otra versión para comparar",
+    "count_one": "{{count}} versión",
+    "count_other": "{{count}} versiones",
+    "current": "Actual",
+    "empty": "Sin versiones aún",
+    "loadMore": "Cargar más",
+    "loading": "Cargando historial...",
+    "title": "Historial de versiones"
+  },
+  "stats": {
+    "activity": {
+      "title": "Actividad (últimos 7 días)",
+      "tooltip": "{{day}}: {{count}} versiones"
+    },
+    "contributors": "Colaboradores",
+    "distribution": {
+      "create": "Creado ({{percent}}%)",
+      "delete": "Eliminado ({{percent}}%)",
+      "title": "Distribución de cambios",
+      "tooltip": {
+        "create": "Creados: {{percent}}%",
+        "delete": "Eliminados: {{percent}}%",
+        "update": "Actualizados: {{percent}}%"
+      },
+      "update": "Actualizado ({{percent}}%)"
+    },
+    "lastCommit": "Último commit",
+    "lastVersion": "Última versión",
+    "mostChanged": "Más modificado",
+    "tags": "Etiquetas",
+    "title": "Estadísticas de versiones",
+    "today": "Hoy",
+    "totalVersions": "Total de versiones"
+  },
+  "tags": {
+    "color": {
+      "label": "Color"
+    },
+    "colors": {
+      "blue": "Azul",
+      "gray": "Gris",
+      "green": "Verde",
+      "indigo": "Índigo",
+      "orange": "Naranja",
+      "pink": "Rosa",
+      "purple": "Púrpura",
+      "red": "Rojo",
+      "yellow": "Amarillo"
+    },
+    "count_one": "{{count}} etiqueta",
+    "count_other": "{{count}} etiquetas",
+    "create": "Crear etiqueta",
+    "createError": "Error al crear etiqueta",
+    "createdBy": "Creado por {{name}}",
+    "creating": "Creando...",
+    "deleteConfirm": "¿Eliminar la etiqueta '{{name}}'?",
+    "deleteError": "Error al eliminar etiqueta",
+    "descLabel": "Descripción",
+    "descPlaceholder": "Descripción opcional...",
+    "empty": "Sin etiquetas creadas",
+    "emptyHint": "Crea una etiqueta para marcar versiones importantes",
+    "name": {
+      "label": "Nombre de la etiqueta",
+      "placeholder": "Ej: v1.0, estable, producción"
+    },
+    "nameRequired": "El nombre de la etiqueta es requerido",
+    "title": "Etiquetas",
+    "unknownUser": "Usuario desconocido",
+    "versionRequired": "Se requiere una versión para crear una etiqueta"
+  },
+  "version": {
+    "addTag": "Agregar etiqueta",
+    "author": "Autor",
+    "cancelCompare": "Cancelar comparación",
+    "changeTypes": {
+      "create": "Creado",
+      "delete": "Eliminado",
+      "update": "Actualizado"
+    },
+    "compare": "Comparar",
+    "date": "Fecha",
+    "download": "Descargar",
+    "message": {
+      "label": "Mensaje",
+      "placeholder": "Describe los cambios..."
+    },
+    "parentVersion": "Versión padre",
+    "restore": "Restaurar",
+    "restoreConfirm": "¿Restaurar la versión {{tag}}?",
+    "tag": "Etiqueta",
+    "viewDetails": "Ver detalles completos"
+  }
+}

@@ -1,0 +1,198 @@
+{
+  "apiKeys": {
+    "copy": {
+      "success": "Copiado al portapapeles"
+    },
+    "create": "Crear API Key",
+    "createFormTitle": "Nueva API Key",
+    "description": "Las API Keys permiten autenticar peticiones externas con",
+    "empty": "No tienes API Keys. Crea una para comenzar.",
+    "expiry": {
+      "1y": "1 año",
+      "30d": "30 días",
+      "90d": "90 días",
+      "label": "Expiración",
+      "none": "Sin expiración"
+    },
+    "lastUsed": "Último uso: {{date}}",
+    "name": {
+      "label": "Nombre",
+      "placeholder": "Ej: Mi integración CI/CD"
+    },
+    "neverUsed": "Nunca",
+    "new": {
+      "acknowledge": "Entendido, ya la guardé",
+      "title": "API Key creada",
+      "warning": "Esta es la única vez que verás esta clave. Guárdala en un lugar seguro."
+    },
+    "revoke": "Revocar",
+    "revokeConfirm": "¿Revocar la key \"{{name}}\"? Esta acción no se puede deshacer.",
+    "revokedSuccess": "API Key revocada",
+    "status": {
+      "revoked": "revocada"
+    },
+    "table": {
+      "actions": "Acciones",
+      "created": "Creada",
+      "expires": "Expira",
+      "lastUsed": "Último uso",
+      "name": "Nombre",
+      "prefix": "Prefijo"
+    },
+    "title": "API Keys"
+  },
+  "notifications": {
+    "comments": "Comentarios en mis proyectos",
+    "email": {
+      "description": "Recibe notificaciones por correo electrónico.",
+      "title": "Por email"
+    },
+    "projectInvitations": "Invitaciones a proyectos",
+    "push": {
+      "description": "Notificaciones dentro de la plataforma.",
+      "title": "Solo in-app"
+    },
+    "save": {
+      "success": "Preferencias guardadas"
+    },
+    "securityAlerts": "Alertas de seguridad",
+    "versionUpdates": "Actualizaciones de versiones"
+  },
+  "page": {
+    "subtitle": "Gestiona tu cuenta y preferencias",
+    "title": "Configuración"
+  },
+  "preferences": {
+    "dateFormat": {
+      "label": "Formato de fecha"
+    },
+    "defaultDb": {
+      "label": "Tipo de base de datos por defecto",
+      "none": "Sin preferencia"
+    },
+    "defaultExport": {
+      "label": "Formato de exportación por defecto",
+      "placeholder": "Seleccionar formato..."
+    },
+    "error": {
+      "load": "Error al cargar las preferencias",
+      "retry": "Reintentar"
+    },
+    "language": {
+      "en": "English",
+      "es": "Español",
+      "label": "Idioma",
+      "placeholder": "Seleccionar idioma..."
+    },
+    "save": {
+      "btn": "Guardar preferencias",
+      "success": "Preferencias guardadas"
+    },
+    "section": "Preferencias de la aplicación",
+    "theme": {
+      "dark": "Oscuro",
+      "label": "Tema",
+      "light": "Claro",
+      "system": "Sistema"
+    },
+    "timezone": {
+      "label": "Zona horaria",
+      "placeholder": "Seleccionar zona horaria..."
+    }
+  },
+  "profile": {
+    "avatarLabel": "Foto de perfil",
+    "cancelPhoto": "Cancelar",
+    "changePassword": "Cambiar contraseña",
+    "changePhoto": "Cambiar foto",
+    "confirmPassword": "Confirmar nueva contraseña",
+    "confirmPasswordPlaceholder": "Repite la nueva contraseña",
+    "currentPassword": "Contraseña actual",
+    "email": {
+      "label": "Correo electrónico",
+      "unverified": "No verificado",
+      "verified": "Verificado"
+    },
+    "error": {
+      "format": "Formato no soportado. Usa JPEG, PNG, WebP o GIF.",
+      "size": "La imagen no puede superar 2MB."
+    },
+    "formats": "JPEG, PNG, WebP o GIF. Máximo 2MB.",
+    "name": {
+      "label": "Nombre de usuario",
+      "placeholder": "Tu nombre de usuario"
+    },
+    "newPassword": "Nueva contraseña",
+    "newPasswordPlaceholder": "Mínimo 8 caracteres",
+    "removePhoto": "Eliminar foto",
+    "saveChanges": "Guardar cambios",
+    "savePhoto": "Guardar foto",
+    "section": {
+      "info": "Información personal"
+    },
+    "success": {
+      "passwordUpdated": "Contraseña actualizada",
+      "photoRemoved": "Foto eliminada",
+      "photoUpdated": "Foto actualizada",
+      "updated": "Perfil actualizado"
+    },
+    "validation": {
+      "passwordMin": "La nueva contraseña debe tener al menos 8 caracteres.",
+      "passwordMismatch": "Las contraseñas no coinciden."
+    }
+  },
+  "security": {
+    "2fa": {
+      "deactivate": {
+        "currentPassword": "Contraseña actual",
+        "desc": "Introduce tu contraseña actual y el código de tu app de autenticación para desactivar 2FA.",
+        "title": "Desactivar autenticación en dos factores",
+        "totpCode": "Código TOTP"
+      },
+      "description": "Añade una capa extra de seguridad a tu cuenta con una app de autenticación (TOTP).",
+      "disable": "Desactivar 2FA",
+      "disabled": "Desactivado",
+      "enable": "Activar 2FA",
+      "enabled": "Activado",
+      "setup": {
+        "cancel": "Cancelar",
+        "placeholder": "Código de 6 dígitos",
+        "step1": "1. Escanea el código QR con tu app de autenticación (Google Authenticator, Authy, etc.).",
+        "step2": "2. Ingresa el código de 6 dígitos de tu app para confirmar.",
+        "title": "Configurar autenticación en dos factores",
+        "verify": "Verificar y activar"
+      },
+      "success": {
+        "disabled": "2FA desactivado",
+        "enabled": "2FA activado correctamente"
+      },
+      "title": "Autenticación en dos factores (2FA)"
+    },
+    "accessLog": {
+      "cols": {
+        "date": "Fecha",
+        "event": "Evento",
+        "ip": "IP",
+        "severity": "Severidad"
+      },
+      "empty": "Sin registros de acceso.",
+      "title": "Historial de accesos"
+    },
+    "sessions": {
+      "cantRevoke": "No puedes revocar tu sesión actual",
+      "current": "Sesión actual",
+      "empty": "No hay sesiones activas.",
+      "revoke": "Revocar sesión",
+      "revoked": "Sesión revocada",
+      "title": "Sesiones activas",
+      "unknownIp": "IP desconocida"
+    }
+  },
+  "tabs": {
+    "apiKeys": "API Keys",
+    "notifications": "Notificaciones",
+    "preferences": "Preferencias",
+    "profile": "Perfil",
+    "security": "Seguridad"
+  }
+}

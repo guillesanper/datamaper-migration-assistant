@@ -1,0 +1,265 @@
+{
+  "greeting": {
+    "afternoon": "Good afternoon, {{name}}",
+    "evening": "Good evening, {{name}}",
+    "morning": "Good morning, {{name}}"
+  },
+  "migrations": {
+    "empty": "No recent migrations",
+    "emptyHint": "Executions will appear here",
+    "failed": "Failed",
+    "pending": "Pending",
+    "running": "Running",
+    "success": "Successful"
+  },
+  "modals": {
+    "create": {
+      "budgetLabel": "Budget ($)",
+      "creatingBtn": "Creating...",
+      "db": {
+        "compatibleNote": "Compatible with automatic script generation",
+        "incompatibleNote": "You can create mappings, but automatic script generation is not available for this database type",
+        "mysql": "MySQL",
+        "oracle": "Oracle",
+        "other": "Other",
+        "postgres": "PostgreSQL",
+        "sqlserver": "SQL Server"
+      },
+      "descLabel": "Description",
+      "descPlaceholder": "Briefly describe the project...",
+      "destLabel": "Destination Database",
+      "destPlaceholder": "Select the destination DB",
+      "encryptionError": "Project created, but encryption setup failed: {{error}}",
+      "encryptionHint": "Project data will be encrypted with AES-256-GCM",
+      "encryptionSection": "Encryption Settings",
+      "encryptionToggle": "Enable encryption for this project",
+      "nameLabel": "Project Name",
+      "namePlaceholder": "E.g.: Database Migration",
+      "originLabel": "Origin Database",
+      "originPlaceholder": "Select the origin DB",
+      "passphraseHint": "Requirements: at least 12 characters, uppercase, lowercase and numbers",
+      "passphraseImportant": "Important: Store this passphrase in a safe place. You won't be able to recover the data if you forget it.",
+      "passphraseLabel": "Passphrase",
+      "passphrasePlaceholder": "Minimum 12 characters",
+      "progressLabel": "Progress (%)",
+      "statusLabel": "Status",
+      "submitBtn": "Create Project",
+      "title": "Create New Project",
+      "validation": {
+        "budgetNegative": "Budget cannot be negative",
+        "destRequired": "Destination database is required",
+        "nameMax": "Name cannot exceed 100 characters",
+        "nameMin": "Name must be at least 3 characters",
+        "nameRequired": "Name is required",
+        "originRequired": "Origin database is required",
+        "passphraseCasing": "Passphrase must contain uppercase and lowercase letters",
+        "passphraseMin": "Passphrase must be at least 12 characters",
+        "passphraseNumber": "Passphrase must contain at least one number",
+        "passphraseRequired": "Passphrase is required when enabling encryption",
+        "progressRange": "Progress must be between 0 and 100"
+      }
+    },
+    "delete": {
+      "aboutToDelete": "You are about to delete the project:",
+      "confirmError": "Project name does not match",
+      "confirmInstruction": "To confirm, type the project name:",
+      "confirmPlaceholder": "Type the project name",
+      "consequence1": "All configured mappings",
+      "consequence2": "All associated tables and columns",
+      "consequence3": "The entire project history",
+      "consequencesIntro": "Deleting this project will permanently remove:",
+      "deletingBtn": "Deleting...",
+      "error": "Error deleting the project",
+      "progress": "Progress: {{percent}}%",
+      "submitBtn": "Delete Project",
+      "success": "Project \"{{name}}\" deleted successfully",
+      "title": "Delete Project",
+      "warning": "⚠️ This action is irreversible"
+    },
+    "edit": {
+      "activateEncryption": "Enable Encryption",
+      "confirmPassphrasePlaceholder": "Confirm with your passphrase",
+      "deactivateEncryption": "Disable Encryption",
+      "encryptDanger": "⚠️ DANGER: Disabling encryption will leave your data unprotected. This action is irreversible.",
+      "encryptedHint": "Enter a passphrase to encrypt this project. Make sure to store it in a safe place.",
+      "encryptionActiveDesc": "Data is encrypted with AES-256-GCM",
+      "encryptionActive": "Encryption active",
+      "encryptionActivate": "Enable encryption",
+      "encryptionError": "Project updated, but encryption change failed: {{error}}",
+      "encryptionInactiveDesc": "Encrypt the project data with AES-256-GCM",
+      "newPassphrasePlaceholder": "New passphrase (min. 12 characters)",
+      "savingBtn": "Saving...",
+      "submitBtn": "Save Changes",
+      "title": "Edit Project",
+      "validation": {
+        "passphraseForChange": "Passphrase is required to change encryption status"
+      }
+    },
+    "members": {
+      "addBtn": "Add",
+      "addSection": "Add Member",
+      "closeBtn": "Close",
+      "emailPlaceholder": "Email or username",
+      "emailRequired": "Enter an email or username",
+      "empty": "No members in this project",
+      "emptyHint": "Add collaborators using the form above",
+      "errors": {
+        "add": "Error adding the member",
+        "load": "Error loading members",
+        "remove": "Error removing the member",
+        "updateRole": "Error updating the role"
+      },
+      "membersSection_one": "Project Members ({{count}})",
+      "membersSection_other": "Project Members ({{count}})",
+      "ownerBadge": "OWNER",
+      "projectCreator": "Project creator",
+      "removeConfirm": "Are you sure you want to remove {{email}} from the project?",
+      "title": "Manage Members",
+      "you": "You (Owner)"
+    }
+  },
+  "notifications": {
+    "daysAgo_one": "{{count}}d ago",
+    "daysAgo_other": "{{count}}d ago",
+    "empty": "No notifications",
+    "hoursAgo_one": "{{count}}h ago",
+    "hoursAgo_other": "{{count}}h ago",
+    "markAllRead": "Mark all as read",
+    "markRead": "Mark as read",
+    "minutesAgo_one": "{{count}}m ago",
+    "minutesAgo_other": "{{count}}m ago",
+    "now": "Now",
+    "title": "Notifications"
+  },
+  "projectRow": {
+    "actions": {
+      "delete": "Delete project",
+      "edit": "Edit project",
+      "leave": "Leave Project",
+      "members": "Manage Members",
+      "team": "View Team",
+      "versions": "Version Control"
+    },
+    "badge": {
+      "member": "Member"
+    },
+    "dbDest": "Destination",
+    "dbOrigin": "Origin",
+    "moreOptions": "More options",
+    "status": {
+      "active": "Active",
+      "completed": "Completed",
+      "paused": "Paused"
+    }
+  },
+  "quickActions": {
+    "addDbConnection": "Add DB Connection",
+    "addDbConnectionSub": "Connect a database",
+    "createProject": "Create project",
+    "createProjectSub": "New migration project",
+    "newMigration": "New migration",
+    "newMigrationSub": "Run data migration"
+  },
+  "recent": {
+    "migrations": {
+      "title": "Migrations"
+    },
+    "projects": {
+      "empty": "No recent projects",
+      "neverAccessed": "Never opened",
+      "title": "Projects"
+    },
+    "versions": {
+      "title": "Versions"
+    }
+  },
+  "sections": {
+    "activitySocial": "Activity & Social",
+    "recent": "Recent"
+  },
+  "sidebar": {
+    "aria": {
+      "closeMenu": "Close menu",
+      "collapse": "Collapse sidebar",
+      "expand": "Expand sidebar"
+    },
+    "nav": {
+      "admin": "Admin",
+      "dashboard": "Dashboard",
+      "projects": "Projects",
+      "settings": "Settings",
+      "team": "Team"
+    },
+    "user": {
+      "account": "My Account",
+      "billing": "Billing",
+      "help": "Help & Support",
+      "logout": "Sign Out",
+      "profile": "Profile",
+      "settings": "Settings"
+    }
+  },
+  "stat_card": {
+    "changeNegative": "{{percent}} {{since}}",
+    "changePositive": "{{percent}} {{since}}"
+  },
+  "stats": {
+    "activeProjects": "Active Projects",
+    "completed": "Completed",
+    "totalBudget": "Total Budget",
+    "totalProjects": "Total Projects"
+  },
+  "table": {
+    "empty": "No projects match the filters",
+    "error": "Error loading data",
+    "exportTitle": "Export",
+    "filter": {
+      "active": "Active",
+      "all": "All statuses",
+      "completed": "Completed",
+      "paused": "Paused"
+    },
+    "header": {
+      "budget": "Budget",
+      "databases": "Databases",
+      "progress": "Progress",
+      "project": "Project",
+      "status": "Status",
+      "updatedAt": "Last updated"
+    },
+    "importTitle": "Import",
+    "migrateHint": "Select a project to generate and run its data migration.",
+    "newProject": "New Project",
+    "retry": "Retry",
+    "searchPlaceholder": "Search projects...",
+    "title": "Projects"
+  },
+  "topbar": {
+    "aria": {
+      "notifications": "Notifications",
+      "openMenu": "Open menu",
+      "settings": "Settings",
+      "theme": "Toggle theme",
+      "toggleLanguage": "Toggle language"
+    },
+    "search": {
+      "placeholder": "Search projects..."
+    }
+  },
+  "versions": {
+    "added": "Added",
+    "created": "Created",
+    "deleted": "Deleted",
+    "empty": "No recent versions",
+    "emptyHint": "Snapshots will appear here",
+    "entity": {
+      "column": "Column",
+      "index": "Index",
+      "schema": "Schema",
+      "table": "Table",
+      "view": "View"
+    },
+    "renamed": "Renamed",
+    "updated": "Updated"
+  }
+}

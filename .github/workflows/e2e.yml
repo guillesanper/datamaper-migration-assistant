@@ -1,0 +1,90 @@
+name: E2E Tests
+
+on:
+  schedule:
+    - cron: '0 2 * * *'  # Daily at 2 AM UTC
+  workflow_dispatch:  # Allow manual trigger
+
+env:
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  e2e-tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start services with docker-compose
+        run: |
+          docker-compose -f docker-compose.test.yml up -d
+
+      - name: Wait for services to be healthy
+        run: |
+          echo "⏳ Waiting for services to be ready..."
+          sleep 30
+
+          # Check PostgreSQL
+          docker-compose -f docker-compose.test.yml exec -T postgres pg_isready -U test_user || true
+
+          # Check MySQL
+          docker-compose -f docker-compose.test.yml exec -T mysql mysqladmin ping -h localhost || true
+
+          # Check Redis
+          docker-compose -f docker-compose.test.yml exec -T redis redis-cli ping || true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+          cache-dependency-path: 'backend/requirements.txt'
+
+      - name: Install dependencies
+        run: |
+          cd backend
+          pip install -r requirements.txt
+
+      - name: Run E2E tests
+        working-directory: backend
+        env:
+          # PostgreSQL test database
+          DB_HOST: localhost
+          DB_PORT: 5433
+          DB_NAME: test_database
+          DB_USER: test_user
+          DB_PASSWORD: test_password
+
+          # Redis test instance
+          REDIS_HOST: localhost
+          REDIS_PORT: 6380
+          REDIS_PASSWORD: ""
+          REDIS_DB: 0
+          REDIS_SSL: "false"
+
+          # App configuration
+          SECRET_KEY: test-secret-key-for-e2e-ci
+          ENV: test
+          ENCRYPTION_ENABLED: "false"
+        run: |
+          pytest -m e2e -v --tb=long --maxfail=3
+
+      - name: Capture service logs on failure
+        if: failure()
+        run: |
+          echo "=== Docker Compose Logs ==="
+          docker-compose -f docker-compose.test.yml logs > e2e-logs.txt
+          cat e2e-logs.txt
+
+      - name: Upload logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-logs
+          path: e2e-logs.txt
+          retention-days: 7
+
+      - name: Cleanup services
+        if: always()
+        run: |
+          docker-compose -f docker-compose.test.yml down -v

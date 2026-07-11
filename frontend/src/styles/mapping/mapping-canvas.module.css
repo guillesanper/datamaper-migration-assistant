@@ -1,0 +1,126 @@
+/* src/styles/mapping/mapping-canvas.module.css */
+
+/* ============================================
+   SIDEBAR CANVAS VIEW
+   ============================================ */
+.sidebarCanvasLayout {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: row;
+  overflow: hidden;
+}
+
+.sidebar {
+  width: 300px;
+  height: 100%;
+  border-right: 1px solid hsl(var(--border));
+  background-color: hsl(var(--card));
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+
+.sidebarHeader {
+  padding: 1rem;
+  border-bottom: 1px solid hsl(var(--border));
+  flex-shrink: 0;
+}
+
+.sidebarTitle {
+  font-weight: 600;
+  margin-bottom: 0.75rem;
+}
+
+.sidebarSearch {
+  position: relative;
+}
+
+.sidebarContent {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.sidebarSection {
+  margin-bottom: 1rem;
+}
+
+.sidebarSectionTitle {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: hsl(var(--muted-foreground));
+  margin-bottom: 0.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.sidebarTableItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem;
+  border-radius: var(--mapping-border-radius);
+  transition: var(--mapping-transition);
+}
+
+.sidebarTableItem:hover {
+  background-color: hsl(var(--muted));
+}
+
+.sidebarTableItemLeft {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 1;
+}
+
+.sidebarTableItemName {
+  font-size: 0.875rem;
+}
+
+.sidebarTableItemCount {
+  font-size: 0.75rem;
+  color: hsl(var(--muted-foreground));
+}
+
+.sidebarTableItemButton {
+  opacity: 0;
+  padding: 0.25rem;
+  border-radius: 0.25rem;
+  transition: var(--mapping-transition);
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.sidebarTableItem:hover .sidebarTableItemButton {
+  opacity: 1;
+}
+
+.sidebarTableItemButton:hover {
+  background-color: hsl(var(--background));
+}
+
+.canvasContainer {
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .sidebar {
+    width: 100%;
+  }
+
+  .sidebarCanvasLayout {
+    flex-direction: column;
+  }
+}

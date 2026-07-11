@@ -1,0 +1,133 @@
+{
+  "activity": {
+    "empty": "No recent activity.",
+    "entity": {
+      "column": "column",
+      "mapping": "mapping",
+      "member": "member",
+      "project": "project",
+      "table": "table"
+    },
+    "errors": {
+      "load": "Error loading activity"
+    },
+    "event": {
+      "created": "{{user}} created {{entity}}",
+      "deleted": "{{user}} deleted {{entity}}",
+      "memberAdded": "{{user}} was added to the team",
+      "memberRemoved": "{{user}} was removed from the team",
+      "roleUpdated": "{{user}}'s role was updated",
+      "unknown": "{{user}} performed an action",
+      "updated": "{{user}} updated {{entity}}",
+      "versionCreated": "{{user}} created a new version",
+      "versionRestored": "{{user}} restored a version"
+    },
+    "refresh": "Refresh",
+    "subtitle": {
+      "all": "All project activity",
+      "project": "Project activity"
+    },
+    "title": "Team activity",
+    "viewMore": "View more"
+  },
+  "comments": {
+    "count_one": "{{count}} comment",
+    "count_other": "{{count}} comments",
+    "delete": "Delete",
+    "deleteConfirm": "Delete this comment? This action cannot be undone.",
+    "edited": "edited",
+    "empty": "No comments yet. Be the first to comment.",
+    "errors": {
+      "add": "Error adding comment",
+      "delete": "Error deleting comment",
+      "load": "Error loading comments",
+      "toggleResolve": "Error changing status"
+    },
+    "hideResolved": "Hide resolved",
+    "placeholder": "Write a comment...",
+    "reply": "Reply",
+    "replyPlaceholder": "Write a reply...",
+    "replyingTo": "Replying to a comment",
+    "resolve": "Resolve",
+    "resolved": "Resolved",
+    "showResolved": "Show resolved",
+    "submit": "Comment",
+    "success": {
+      "added": "Comment added",
+      "deleted": "Comment deleted",
+      "reopened": "Comment reopened",
+      "resolved": "Comment resolved"
+    },
+    "title": "Comments",
+    "unresolvedCount": "• {{count}} unresolved"
+  },
+  "members": {
+    "addBtn": "Add",
+    "addingBtn": "Adding...",
+    "count_one": "{{count}} member",
+    "count_other": "{{count}} members",
+    "emailOrUsername": "Email or username",
+    "emailPlaceholder": "user@example.com",
+    "empty": {
+      "subtitle": "Invite your team to collaborate on this project.",
+      "title": "No members yet"
+    },
+    "errors": {
+      "add": "Error adding member",
+      "emailRequired": "Enter an email or username",
+      "load": "Error loading members",
+      "remove": "Error removing member",
+      "updateRole": "Error updating role"
+    },
+    "invite": "Add member",
+    "joined": "Joined on {{date}}",
+    "ownerBadge": "Owner",
+    "projectCreator": "Project creator",
+    "remove": "Remove from team",
+    "removeConfirm": "Remove {{email}} from the team?",
+    "restrictedAccess": "Limited access",
+    "restrictedDesc": "Only the project owner can manage members",
+    "role": {
+      "change": "Change role"
+    },
+    "roleLabel": "Role",
+    "success": {
+      "added": "Member added successfully",
+      "removed": "Member removed",
+      "roleUpdated": "Role updated"
+    },
+    "teamInfo": "Team information",
+    "title": "Team members",
+    "you": "(You)"
+  },
+  "projectInfo": {
+    "createdAt": "Created:",
+    "destination": "Destination",
+    "origin": "Origin",
+    "progress": "Progress",
+    "status": "Status",
+    "updatedAt": "Updated:"
+  },
+  "page": {
+    "errors": {
+      "load": "Error loading projects"
+    },
+    "noProjects": {
+      "subtitle": "Create a project to start collaborating with your team.",
+      "title": "No projects yet"
+    },
+    "title": "Team"
+  },
+  "projectSelector": {
+    "empty": "No projects available",
+    "label": "Project",
+    "placeholder": "Select project..."
+  },
+  "stats": {
+    "contributors": "Contributors",
+    "lastActivity": "Last activity",
+    "openComments": "Open comments",
+    "title": "Statistics",
+    "totalCommits": "Total commits"
+  }
+}

@@ -1,0 +1,140 @@
+/* src/styles/modals.css */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: fadeIn 0.2s ease;
+  padding: 1rem;
+}
+
+.modal-content {
+  background-color: var(--color-card);
+  border-radius: 0.75rem;
+  width: 100%;
+  max-width: 600px;
+  max-height: calc(100vh - 2rem);
+  overflow-y: auto;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 
+              0 10px 10px -5px rgba(0, 0, 0, 0.04);
+  animation: slideUp 0.3s ease;
+}
+
+@media (max-width: 640px) {
+  .modal-overlay {
+    padding: 0.5rem;
+  }
+
+  .modal-content {
+    max-height: calc(100vh - 1rem);
+  }
+}
+
+@keyframes slideUp {
+  from {
+    transform: translateY(20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.5rem;
+  border-bottom: 1px solid var(--color-border);
+}
+
+@media (max-width: 640px) {
+  .modal-header {
+    padding: 1rem;
+  }
+}
+
+.modal-title {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--color-foreground);
+}
+
+@media (max-width: 640px) {
+  .modal-title {
+    font-size: 1.125rem;
+  }
+}
+
+.modal-body {
+  padding: 1.5rem;
+}
+
+@media (max-width: 640px) {
+  .modal-body {
+    padding: 1rem;
+  }
+}
+
+.modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  margin-top: 1.5rem;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 640px) {
+  .modal-footer {
+    flex-direction: column-reverse;
+  }
+
+  .modal-footer > * {
+    width: 100%;
+  }
+}
+
+.modal-content::-webkit-scrollbar {
+  width: 8px;
+}
+
+.modal-content::-webkit-scrollbar-track {
+  background: var(--color-muted);
+  border-radius: 0 0.75rem 0.75rem 0;
+}
+
+.modal-content::-webkit-scrollbar-thumb {
+  background: var(--color-muted-foreground);
+  border-radius: 4px;
+  opacity: 0.5;
+}
+
+.modal-content::-webkit-scrollbar-thumb:hover {
+  background: var(--color-foreground);
+  opacity: 0.7;
+}
+
+.modal-content {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-muted-foreground) var(--color-muted);
+}
+
+.modal-content-danger {
+  border: 2px solid rgba(239, 68, 68, 0.2);
+}
+
+.space-y-4 > * + * {
+  margin-top: 1rem;
+}
+
+.modal-members {
+  max-width: 700px;
+}

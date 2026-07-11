@@ -1,0 +1,664 @@
+{
+  "tables": [
+    {
+      "name": "origin_table_1",
+      "type": "origin",
+      "columns": [
+        {
+          "name": "col1",
+          "type": "INTEGER",
+          "is_primary": true,
+          "is_nullable": true
+        },
+        {
+          "name": "col2",
+          "type": "REAL",
+          "is_primary": false,
+          "is_nullable": true
+        },
+        {
+          "name": "col3",
+          "type": "BOOLEAN",
+          "is_primary": false,
+          "is_nullable": false
+        },
+        {
+          "name": "col4",
+          "type": "DATE",
+          "is_primary": false,
+          "is_nullable": true
+        },
+        {
+          "name": "col5",
+          "type": "TEXT",
+          "is_primary": false,
+          "is_nullable": true
+        },
+        {
+          "name": "col6",
+          "type": "INTEGER",
+          "is_primary": false,
+          "is_nullable": false
+        },
+        {
+          "name": "col7",
+          "type": "REAL",
+          "is_primary": false,
+          "is_nullable": true
+        },
+        {
+          "name": "col8",
+          "type": "BOOLEAN",
+          "is_primary": false,
+          "is_nullable": true
+        },
+        {
+          "name": "col9",
+          "type": "DATE",
+          "is_primary": false,
+          "is_nullable": false
+        },
+        {
+          "name": "col10",
+          "type": "TEXT",
+          "is_primary": false,
+          "is_nullable": true
+        }
+      ]
+    },
+    {
+      "name": "origin_table_2",
+      "type": "origin",
+      "columns": [
+        {
+          "name": "col1",
+          "type": "INTEGER",
+          "is_primary": true,
+          "is_nullable": true
+        },
+        {
+          "name": "col2",
+          "type": "REAL",
+          "is_primary": false,
+          "is_nullable": true
+        },
+        {
+          "name": "col3",
+          "type": "BOOLEAN",
+          "is_primary": false,
+          "is_nullable": false
+        },
+        {
+          "name": "col4",
+          "type": "DATE",
+          "is_primary": false,
+          "is_nullable": true
+        },
+        {
+          "name": "col5",
+          "type": "TEXT",
+          "is_primary": false,
+          "is_nullable": true
+        },
+        {
+          "name": "col6",
+          "type": "INTEGER",
+          "is_primary": false,
+          "is_nullable": false
+        },
+        {
+          "name": "col7",
+          "type": "REAL",
+          "is_primary": false,
+          "is_nullable": true
+        },
+        {
+          "name": "col8",
+          "type": "BOOLEAN",
+          "is_primary": false,
+          "is_nullable": true
+        },
+        {
+          "name": "col9",
+          "type": "DATE",
+          "is_primary": false,
+          "is_nullable": false
+        },
+        {
+          "name": "col10",
+          "type": "TEXT",
+          "is_primary": false,
+          "is_nullable": true
+        }
+      ]
+    },
+    {
+      "name": "origin_table_3",
+      "type": "origin",
+      "columns": [
+        {
+          "name": "col1",
+          "type": "INTEGER",
+          "is_primary": true,
+          "is_nullable": true
+        },
+        {
+          "name": "col2",
+          "type": "REAL",
+          "is_primary": false,
+          "is_nullable": true
+        },
+        {
+          "name": "col3",
+          "type": "BOOLEAN",
+          "is_primary": false,
+          "is_nullable": false
+        },
+        {
+          "name": "col4",
+          "type": "DATE",
+          "is_primary": false,
+          "is_nullable": true
+        },
+        {
+          "name": "col5",
+          "type": "TEXT",
+          "is_primary": false,
+          "is_nullable": true
+        },
+        {
+          "name": "col6",
+          "type": "INTEGER",
+          "is_primary": false,
+          "is_nullable": false
+        },
+        {
+          "name": "col7",
+          "type": "REAL",
+          "is_primary": false,
+          "is_nullable": true
+        },
+        {
+          "name": "col8",
+          "type": "BOOLEAN",
+          "is_primary": false,
+          "is_nullable": true
+        },
+        {
+          "name": "col9",
+          "type": "DATE",
+          "is_primary": false,
+          "is_nullable": false
+        },
+        {
+          "name": "col10",
+          "type": "TEXT",
+          "is_primary": false,
+          "is_nullable": true
+        }
+      ]
+    },
+    {
+      "name": "origin_table_4",
+      "type": "origin",
+      "columns": [
+        {
+          "name": "col1",
+          "type": "INTEGER",
+          "is_primary": true,
+          "is_nullable": true
+        },
+        {
+          "name": "col2",
+          "type": "REAL",
+          "is_primary": false,
+          "is_nullable": true
+        },
+        {
+          "name": "col3",
+          "type": "BOOLEAN",
+          "is_primary": false,
+          "is_nullable": false
+        },
+        {
+          "name": "col4",
+          "type": "DATE",
+          "is_primary": false,
+          "is_nullable": true
+        },
+        {
+          "name": "col5",
+          "type": "TEXT",
+          "is_primary": false,
+          "is_nullable": true
+        },
+        {
+          "name": "col6",
+          "type": "INTEGER",
+          "is_primary": false,
+          "is_nullable": false
+        },
+        {
+          "name": "col7",
+          "type": "REAL",
+          "is_primary": false,
+          "is_nullable": true
+        },
+        {
+          "name": "col8",
+          "type": "BOOLEAN",
+          "is_primary": false,
+          "is_nullable": true
+        },
+        {
+          "name": "col9",
+          "type": "DATE",
+          "is_primary": false,
+          "is_nullable": false
+        },
+        {
+          "name": "col10",
+          "type": "TEXT",
+          "is_primary": false,
+          "is_nullable": true
+        }
+      ]
+    },
+    {
+      "name": "origin_table_5",
+      "type": "origin",
+      "columns": [
+        {
+          "name": "col1",
+          "type": "INTEGER",
+          "is_primary": true,
+          "is_nullable": true
+        },
+        {
+          "name": "col2",
+          "type": "REAL",
+          "is_primary": false,
+          "is_nullable": true
+        },
+        {
+          "name": "col3",
+          "type": "BOOLEAN",
+          "is_primary": false,
+          "is_nullable": false
+        },
+        {
+          "name": "col4",
+          "type": "DATE",
+          "is_primary": false,
+          "is_nullable": true
+        },
+        {
+          "name": "col5",
+          "type": "TEXT",
+          "is_primary": false,
+          "is_nullable": true
+        },
+        {
+          "name": "col6",
+          "type": "INTEGER",
+          "is_primary": false,
+          "is_nullable": false
+        },
+        {
+          "name": "col7",
+          "type": "REAL",
+          "is_primary": false,
+          "is_nullable": true
+        },
+        {
+          "name": "col8",
+          "type": "BOOLEAN",
+          "is_primary": false,
+          "is_nullable": true
+        },
+        {
+          "name": "col9",
+          "type": "DATE",
+          "is_primary": false,
+          "is_nullable": false
+        },
+        {
+          "name": "col10",
+          "type": "TEXT",
+          "is_primary": false,
+          "is_nullable": true
+        }
+      ]
+    },
+    {
+      "name": "destination_table_1",
+      "type": "destination",
+      "columns": [
+        {
+          "name": "col1",
+          "type": "INTEGER",
+          "is_primary": true,
+          "is_nullable": true
+        },
+        {
+          "name": "col2",
+          "type": "REAL",
+          "is_primary": false,
+          "is_nullable": true
+        },
+        {
+          "name": "col3",
+          "type": "BOOLEAN",
+          "is_primary": false,
+          "is_nullable": false
+        },
+        {
+          "name": "col4",
+          "type": "DATE",
+          "is_primary": false,
+          "is_nullable": true
+        },
+        {
+          "name": "col5",
+          "type": "TEXT",
+          "is_primary": false,
+          "is_nullable": true
+        },
+        {
+          "name": "col6",
+          "type": "INTEGER",
+          "is_primary": false,
+          "is_nullable": false
+        },
+        {
+          "name": "col7",
+          "type": "REAL",
+          "is_primary": false,
+          "is_nullable": true
+        },
+        {
+          "name": "col8",
+          "type": "BOOLEAN",
+          "is_primary": false,
+          "is_nullable": true
+        },
+        {
+          "name": "col9",
+          "type": "DATE",
+          "is_primary": false,
+          "is_nullable": false
+        },
+        {
+          "name": "col10",
+          "type": "TEXT",
+          "is_primary": false,
+          "is_nullable": true
+        }
+      ]
+    },
+    {
+      "name": "destination_table_2",
+      "type": "destination",
+      "columns": [
+        {
+          "name": "col1",
+          "type": "INTEGER",
+          "is_primary": true,
+          "is_nullable": true
+        },
+        {
+          "name": "col2",
+          "type": "REAL",
+          "is_primary": false,
+          "is_nullable": true
+        },
+        {
+          "name": "col3",
+          "type": "BOOLEAN",
+          "is_primary": false,
+          "is_nullable": false
+        },
+        {
+          "name": "col4",
+          "type": "DATE",
+          "is_primary": false,
+          "is_nullable": true
+        },
+        {
+          "name": "col5",
+          "type": "TEXT",
+          "is_primary": false,
+          "is_nullable": true
+        },
+        {
+          "name": "col6",
+          "type": "INTEGER",
+          "is_primary": false,
+          "is_nullable": false
+        },
+        {
+          "name": "col7",
+          "type": "REAL",
+          "is_primary": false,
+          "is_nullable": true
+        },
+        {
+          "name": "col8",
+          "type": "BOOLEAN",
+          "is_primary": false,
+          "is_nullable": true
+        },
+        {
+          "name": "col9",
+          "type": "DATE",
+          "is_primary": false,
+          "is_nullable": false
+        },
+        {
+          "name": "col10",
+          "type": "TEXT",
+          "is_primary": false,
+          "is_nullable": true
+        }
+      ]
+    },
+    {
+      "name": "destination_table_3",
+      "type": "destination",
+      "columns": [
+        {
+          "name": "col1",
+          "type": "INTEGER",
+          "is_primary": true,
+          "is_nullable": true
+        },
+        {
+          "name": "col2",
+          "type": "REAL",
+          "is_primary": false,
+          "is_nullable": true
+        },
+        {
+          "name": "col3",
+          "type": "BOOLEAN",
+          "is_primary": false,
+          "is_nullable": false
+        },
+        {
+          "name": "col4",
+          "type": "DATE",
+          "is_primary": false,
+          "is_nullable": true
+        },
+        {
+          "name": "col5",
+          "type": "TEXT",
+          "is_primary": false,
+          "is_nullable": true
+        },
+        {
+          "name": "col6",
+          "type": "INTEGER",
+          "is_primary": false,
+          "is_nullable": false
+        },
+        {
+          "name": "col7",
+          "type": "REAL",
+          "is_primary": false,
+          "is_nullable": true
+        },
+        {
+          "name": "col8",
+          "type": "BOOLEAN",
+          "is_primary": false,
+          "is_nullable": true
+        },
+        {
+          "name": "col9",
+          "type": "DATE",
+          "is_primary": false,
+          "is_nullable": false
+        },
+        {
+          "name": "col10",
+          "type": "TEXT",
+          "is_primary": false,
+          "is_nullable": true
+        }
+      ]
+    },
+    {
+      "name": "destination_table_4",
+      "type": "destination",
+      "columns": [
+        {
+          "name": "col1",
+          "type": "INTEGER",
+          "is_primary": true,
+          "is_nullable": true
+        },
+        {
+          "name": "col2",
+          "type": "REAL",
+          "is_primary": false,
+          "is_nullable": true
+        },
+        {
+          "name": "col3",
+          "type": "BOOLEAN",
+          "is_primary": false,
+          "is_nullable": false
+        },
+        {
+          "name": "col4",
+          "type": "DATE",
+          "is_primary": false,
+          "is_nullable": true
+        },
+        {
+          "name": "col5",
+          "type": "TEXT",
+          "is_primary": false,
+          "is_nullable": true
+        },
+        {
+          "name": "col6",
+          "type": "INTEGER",
+          "is_primary": false,
+          "is_nullable": false
+        },
+        {
+          "name": "col7",
+          "type": "REAL",
+          "is_primary": false,
+          "is_nullable": true
+        },
+        {
+          "name": "col8",
+          "type": "BOOLEAN",
+          "is_primary": false,
+          "is_nullable": true
+        },
+        {
+          "name": "col9",
+          "type": "DATE",
+          "is_primary": false,
+          "is_nullable": false
+        },
+        {
+          "name": "col10",
+          "type": "TEXT",
+          "is_primary": false,
+          "is_nullable": true
+        }
+      ]
+    },
+    {
+      "name": "destination_table_5",
+      "type": "destination",
+      "columns": [
+        {
+          "name": "col1",
+          "type": "INTEGER",
+          "is_primary": true,
+          "is_nullable": true
+        },
+        {
+          "name": "col2",
+          "type": "REAL",
+          "is_primary": false,
+          "is_nullable": true
+        },
+        {
+          "name": "col3",
+          "type": "BOOLEAN",
+          "is_primary": false,
+          "is_nullable": false
+        },
+        {
+          "name": "col4",
+          "type": "DATE",
+          "is_primary": false,
+          "is_nullable": true
+        },
+        {
+          "name": "col5",
+          "type": "TEXT",
+          "is_primary": false,
+          "is_nullable": true
+        },
+        {
+          "name": "col6",
+          "type": "INTEGER",
+          "is_primary": false,
+          "is_nullable": false
+        },
+        {
+          "name": "col7",
+          "type": "REAL",
+          "is_primary": false,
+          "is_nullable": true
+        },
+        {
+          "name": "col8",
+          "type": "BOOLEAN",
+          "is_primary": false,
+          "is_nullable": true
+        },
+        {
+          "name": "col9",
+          "type": "DATE",
+          "is_primary": false,
+          "is_nullable": false
+        },
+        {
+          "name": "col10",
+          "type": "TEXT",
+          "is_primary": false,
+          "is_nullable": true
+        }
+      ]
+    }
+  ]
+}

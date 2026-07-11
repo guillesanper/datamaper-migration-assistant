@@ -1,0 +1,58 @@
+{
+  "tables": [
+    {
+      "name": "clientes",
+      "type": "origin",
+      "columns": [
+        { "name": "id_cliente", "type": "INTEGER", "is_primary": true, "is_nullable": false },
+        { "name": "nombre", "type": "TEXT", "is_primary": false, "is_nullable": false },
+        { "name": "email", "type": "TEXT", "is_primary": false, "is_nullable": true }
+      ]
+    },
+    {
+      "name": "productos",
+      "type": "origin",
+      "columns": [
+        { "name": "id_producto", "type": "INTEGER", "is_primary": true, "is_nullable": false },
+        { "name": "nombre", "type": "TEXT", "is_primary": false, "is_nullable": false },
+        { "name": "precio", "type": "REAL", "is_primary": false, "is_nullable": false }
+      ]
+    },
+    {
+      "name": "ventas",
+      "type": "origin",
+      "columns": [
+        { "name": "id_venta", "type": "INTEGER", "is_primary": true, "is_nullable": false },
+        { "name": "fecha", "type": "DATE", "is_primary": false, "is_nullable": false },
+        { "name": "importe", "type": "REAL", "is_primary": false, "is_nullable": false }
+      ]
+    },
+    {
+      "name": "dim_cliente",
+      "type": "destination",
+      "columns": [
+        { "name": "cliente_id", "type": "INTEGER", "is_primary": true, "is_nullable": false },
+        { "name": "nombre_completo", "type": "TEXT", "is_primary": false, "is_nullable": false },
+        { "name": "correo", "type": "TEXT", "is_primary": false, "is_nullable": true }
+      ]
+    },
+    {
+      "name": "dim_producto",
+      "type": "destination",
+      "columns": [
+        { "name": "producto_id", "type": "INTEGER", "is_primary": true, "is_nullable": false },
+        { "name": "desc_larga", "type": "TEXT", "is_primary": false, "is_nullable": false },
+        { "name": "precio_unitario", "type": "REAL", "is_primary": false, "is_nullable": false }
+      ]
+    },
+    {
+      "name": "fact_ventas",
+      "type": "destination",
+      "columns": [
+        { "name": "venta_id", "type": "INTEGER", "is_primary": true, "is_nullable": false },
+        { "name": "fecha_venta", "type": "DATE", "is_primary": false, "is_nullable": false },
+        { "name": "importe_total", "type": "REAL", "is_primary": false, "is_nullable": false }
+      ]
+    }
+  ]
+}

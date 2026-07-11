@@ -1,0 +1,123 @@
+services:
+  - type: web
+    name: datamap-backend
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: sh start.sh
+    envVars:
+      # === CONFIGURACIÓN GENERAL ===
+      - key: ENV
+        value: production
+      - key: SECRET_KEY
+        value: tu_clave_secreta_super_segura_aqui_12345
+      - key: BASE_URL
+        value: https://your-app-name.onrender.com
+      
+      # === BASE DE DATOS POSTGRESQL ===
+      - key: DB_HOST
+        value: your-production-db-hostname
+      - key: DB_PORT
+        value: 5432
+      - key: DB_NAME
+        value: datamap
+      - key: DB_USER
+        value: your-production-db-user
+      - key: DB_PASSWORD
+        value: your-production-db-password
+      
+      # === STRIPE CONFIGURACIÓN ===
+      - key: STRIPE_PUBLISHABLE_KEY
+        value: pk_test_51RxOgbFjhQs3O1fhkoJPGAKeCHAOs6c6FFfg881GOULNPjKkjVHUYXXiKwPQErXlvneXq4Hj8qy4EeSJroOq9Adh00Ei6s3rNn
+      - key: STRIPE_SECRET_KEY
+        value: sk_test_51RxOgbFjhQs3O1fhqKimkDnywhvQjm8Ehc2ZS4eTnQ61xN1szzADbqYKkZDQuulBhmxUzRpFgDCgSvJgTrM4akwB00XhzqP7V1
+      - key: STRIPE_WEBHOOK_SECRET
+        value: whsec_your_webhook_secret
+      
+      # === CONFIGURACIÓN SMTP ===
+      - key: EMAIL_FROM
+        value: alerts@sesecpro.es
+      - key: SMTP_SERVER
+        value: smtp.protonmail.ch
+      - key: SMTP_PORT
+        value: 587
+      - key: SMTP_USER
+        value: alerts@sesecpro.es
+      - key: SMTP_PASS
+        value: VPU989XP32GUWACD
+
+      # === CONFIGURACIÓN CSRF ===
+      - key: CSRF_SECRET_KEY
+        value: csrf_prod_key_2025_render_alejandro_app_secure_random_string_xyz789
+      - key: CSRF_TOKEN_EXPIRY
+        value: 3600  
+      - key: DISABLE_CSRF_IN_DEV
+        value: false  # Mantener CSRF habilitado en producción
+     
+      # === CONFIGURACIÓN DE SEGURIDAD ===
+      - key: HASH_IP_ADDRESSES
+        value: true
+      - key: IP_HASH_SALT
+        value: tu_ip_hash_salt_super_seguro_aqui_12345
+
+      # === REDIS - ENCRYPTION SESSION CACHE ===
+      # Render.com proporciona REDIS_URL automáticamente cuando agregas Redis interno
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: datamap-redis
+          property: connectionString
+      - key: REDIS_SSL
+        value: true
+
+      # === ENCRYPTION SESSION CONFIGURATION ===
+      - key: ENCRYPTION_ENABLED
+        value: true
+      - key: ENCRYPTION_SESSION_TIMEOUT
+        value: 10800  # 3 horas
+      - key: ARGON2_MEMORY_COST
+        value: 65536  # 64 MiB
+      - key: ARGON2_TIME_COST
+        value: 3
+      - key: ARGON2_PARALLELISM
+        value: 1
+
+      # === GUNICORN CONFIGURATION ===
+      - key: WEB_CONCURRENCY
+        value: 2  # Workers (Render maneja esto automáticamente)
+      - key: GUNICORN_TIMEOUT
+        value: 120
+      - key: GUNICORN_MAX_REQUESTS
+        value: 1000
+
+  # === FRONTEND (React + Vite) ===
+  - type: web
+    name: datamap-frontend
+    env: static
+    buildCommand: cd frontend && npm ci && npm run build
+    staticPublishPath: frontend/dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: VITE_API_URL
+        value: https://datamap-backend.onrender.com  # Ajustar a tu URL real del backend
+
+  # === LANDING PAGE (Astro) ===
+  - type: web
+    name: datamap-landing
+    env: static
+    buildCommand: cd landing && npm ci && npm run build
+    staticPublishPath: landing/dist
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+
+  # Redis interno (Render.com)
+  - type: redis
+    name: datamap-redis
+    plan: starter  # $7/mes - 25MB RAM, 10 conexiones
+    maxmemoryPolicy: allkeys-lru  # Evict least recently used keys when memory limit reached
+    ipAllowList: []  # Vacío = solo conexiones internas (más seguro)

@@ -1,0 +1,236 @@
+html, body {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background-color: #121212;
+  color: #fff;
+}
+
+.container-fluid,
+.row {
+  height: 100%;
+}
+
+.sidebar {
+  background-color: #1e1e1e;
+  height: 100%;
+  padding: 1rem;
+  overflow-y: auto;
+}
+
+.content {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem;
+  background-color: #121212;
+  flex: 0 0 auto;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.diagram-container {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 1rem;
+  background-color: #1e1e1e;
+  border: 1px solid #333;
+  display: flex;
+  justify-content: space-between;
+}
+
+.entity-box {
+  width: 150px;
+  height: 50px;
+  background: #2a2a2a;
+  color: #fff;
+  text-align: center;
+  line-height: 50px;
+  border: 1px solid #444;
+  margin-bottom: 10px;
+}
+
+
+.origin-column {
+  width: 30%;
+}
+
+.connection-column {
+  width: 40%;
+  background-color: #1e1e1e;
+}
+
+.destination-column {
+  width: 30%;
+  text-align: left;
+}
+
+.column-title {
+  font-weight: bold;
+  margin-bottom: 10px;
+}
+
+.sidebar-title {
+  font-size: 1.5rem;
+  line-height: 1;
+}
+
+.sidebar-logo {
+  height: 2.5rem;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+a:hover {
+  color: inherit;
+  text-decoration: underline;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: #fff !important;
+  opacity: 1 !important;
+}
+
+/* Truncamiento general para celdas de texto */
+.truncate-cell,
+.text-truncate {
+  max-width: 150px !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  display: inline-block;
+  vertical-align: middle;
+}
+
+.table td {
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+/*Fila blanca (para subrayar una tabla por ejemplo)*/
+.table-section-title td {
+  font-weight: bold;
+  padding-top: 1rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 2px solid #fff; /* línea blanca debajo */
+  background-color: #2c2c2c;
+}
+
+/*Hueco entre tablas */
+.table-spacing-row td {
+  height: 20px;
+  background-color: transparent;
+  border: none;
+}
+
+/*-----------------------------------------------------------------*/
+.entity-wrapper {
+  margin-bottom: 10px;
+}
+
+.entity-box {
+  cursor: pointer;
+  position: relative;
+  transition: background-color 0.2s ease;
+}
+
+.entity-box:hover {
+  background-color: #3a3a3a;
+}
+
+.attribute-boxes {
+  background-color: #3a3a3a !important;
+  border-left: 1px solid #444;
+  border-right: 1px solid #444;
+  border-bottom: 1px solid #444;
+  width: 150px;
+  padding: 5px 0;
+  margin-top: -10px;
+  font-size: 0.85rem;
+  display: block;
+}
+
+/*botones conectores*/
+.connection-handle {
+  width: 12px;
+  height: 12px;
+  background-color: #4a9ff5;
+  border-radius: 50%;
+  position: absolute;
+  cursor: pointer;
+  z-index: 10;
+  top: 50%;
+  transform: translateY(-50%);
+  transition: all 0.2s ease;
+}
+
+/*Hovers, tanto tamaño como colores*/
+.connection-handle:hover {
+  transform: translateY(-50%) scale(1.3);
+}
+
+/* Hover específico según color base */
+.handle-blue:hover {
+  background-color: #7ab7f7;
+}
+
+.handle-yellow:hover {
+  background-color: #f4f48e;
+}
+
+.handle-red:hover {
+  background-color: #ef7575;
+}
+
+.attribute-line {
+  position: relative;
+  padding-right: 15px; /* Espacio para el handle de origen */
+  padding-left: 15px; /* Espacio para el handle de destino */
+}
+
+/* Ajuste específico para columnas origen/destino */
+.origin-column .attribute-line {
+  padding-right: 20px;
+  padding-left: 5px;
+}
+
+.destination-column .attribute-line {
+  padding-left: 5px;
+  padding-right: 0;
+}
+
+/*Pone boton a la izq y dch dependiendo del tipo*/
+.origin-handle {
+  right: -15px;
+}
+
+.dest-handle {
+  left: -15px;
+}
+
+.handle-yellow { background-color: yellow; }
+.handle-blue { background-color: #4a9ff5; }
+.handle-red { background-color: red; }
+
+/*--------------------------------------------------------*/
+.connection-handle.selected-handle {
+  outline: 2px solid #000;
+  box-shadow: 0 0 4px 2px rgba(0, 0, 0, 0.3);
+}
+
+/*-----------------visual zone-----------------*/
+.sidebar {
+  background-color: #343a40;
+}
+  

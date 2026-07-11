@@ -1,0 +1,255 @@
+{
+  "activityFeed": {
+    "empty": "No recent activity",
+    "filters": {
+      "all": "All",
+      "comments": "Comments",
+      "locks": "Locks",
+      "versions": "Versions"
+    },
+    "loading": "Loading activities...",
+    "loadingMore": "Loading...",
+    "title": "Recent activity",
+    "today": "Today",
+    "types": {
+      "comment_added": "Comment added",
+      "default": "Activity",
+      "lock_acquired": "Locked for editing",
+      "lock_released": "Unlocked",
+      "mapping_created": "Mapping created",
+      "mapping_deleted": "Mapping deleted",
+      "mapping_updated": "Mapping updated",
+      "member_added": "Member added",
+      "member_removed": "Member removed",
+      "member_role_changed": "Role changed",
+      "project_updated": "Project updated",
+      "table_imported": "Table imported",
+      "tag_created": "Tag added",
+      "version_created": "Version created",
+      "version_restored": "Version restored"
+    },
+    "yesterday": "Yesterday"
+  },
+  "collaboration": {
+    "disconnected": "Disconnected",
+    "online_one": "{{count}} user online",
+    "online_other": "{{count}} users online",
+    "startEditing": "Start editing",
+    "stopEditing": "Stop editing",
+    "tabs": {
+      "activity": "Activity",
+      "comments": "Comments",
+      "users": "Users",
+      "versions": "Versions"
+    },
+    "title": "Collaboration",
+    "user": {
+      "editing": "{{user}} is editing",
+      "viewing": "{{user}} is viewing"
+    }
+  },
+  "commentThread": {
+    "delete": "Delete",
+    "edit": "Edit",
+    "edited": "(edited)",
+    "empty": "No comments yet",
+    "emptyHint": "Be the first to comment",
+    "placeholder": "Write a comment...",
+    "react": "React",
+    "reopen": "Reopen",
+    "replies_one": "{{count}} reply",
+    "replies_other": "{{count}} replies",
+    "reply": "Reply",
+    "replyTo": "Reply to {{username}}...",
+    "resolve": "Resolve",
+    "resolved": "Resolved",
+    "send": "Send",
+    "submit": "Comment"
+  },
+  "compare": {
+    "base": "Base",
+    "changes": {
+      "added": "Added",
+      "modified": "Modified",
+      "removed": "Removed"
+    },
+    "changes_one": "{{count}} change",
+    "changes_other": "{{count}} changes",
+    "diff": {
+      "after": "After:",
+      "before": "Before:",
+      "newValue": "New value:",
+      "oldValue": "Previous value:"
+    },
+    "noChanges": "No changes between versions",
+    "section": {
+      "added": "Added fields ({{count}})",
+      "modified": "Modified fields ({{count}})",
+      "removed": "Removed fields ({{count}})"
+    },
+    "summary": {
+      "added_one": "{{count}} added",
+      "added_other": "{{count}} added",
+      "modified_one": "{{count}} modified",
+      "modified_other": "{{count}} modified",
+      "removed_one": "{{count}} removed",
+      "removed_other": "{{count}} removed"
+    },
+    "target": "Compare with",
+    "title": "Compare versions",
+    "versionA": "Previous version",
+    "versionB": "New version"
+  },
+  "filters": {
+    "active_one": "{{count}} active filter",
+    "active_other": "{{count}} active filters",
+    "allTypes": "All types",
+    "author": {
+      "all": "All users",
+      "label": "User"
+    },
+    "changeType": "Change type",
+    "clear": "Clear filters",
+    "date": {
+      "custom": "Custom range",
+      "label": "Date range",
+      "month": "Last month",
+      "today": "Today",
+      "week": "Last week"
+    },
+    "dateFrom": "From",
+    "dateTo": "To",
+    "entityType": "Entity type",
+    "entityTypes": {
+      "column": "Column",
+      "mapping": "Mapping",
+      "project": "Project",
+      "table": "Table",
+      "transformation": "Transformation"
+    },
+    "results_one": "{{count}} result",
+    "results_other": "{{count}} results",
+    "search": "Search messages",
+    "searchPlaceholder": "Search...",
+    "tags": {
+      "label": "Tags"
+    },
+    "title": "Filters"
+  },
+  "help": {
+    "button": "Help",
+    "close": "Got it",
+    "howCreated": {
+      "desc": "Versions are created automatically or manually to capture the state of your mappings.",
+      "item1": "Save a mapping to create a version automatically",
+      "item2": "Use the 'Create version' button to save a manual checkpoint",
+      "item3": "Each version captures all tables, columns, and mappings",
+      "item4": "You can restore any previous version at any time",
+      "snapshot": "Each version is a complete snapshot of your schema mapping",
+      "title": "How are versions created?"
+    },
+    "howTags": {
+      "desc": "Tags help you organize and identify important versions.",
+      "step1": "Click on any version to open its details",
+      "step2": "Click 'Add tag' to create a label for that version",
+      "step3": "Use filters to find versions by tag",
+      "step4": "Delete tags that are no longer needed",
+      "title": "How to use tags?"
+    },
+    "title": "Version control guide"
+  },
+  "history": {
+    "cancelCompare": "Cancel",
+    "compareHint": "Select another version to compare",
+    "count_one": "{{count}} version",
+    "count_other": "{{count}} versions",
+    "current": "Current",
+    "empty": "No versions yet",
+    "loadMore": "Load more",
+    "loading": "Loading history...",
+    "title": "Version history"
+  },
+  "stats": {
+    "activity": {
+      "title": "Activity (last 7 days)",
+      "tooltip": "{{day}}: {{count}} versions"
+    },
+    "contributors": "Contributors",
+    "distribution": {
+      "create": "Created ({{percent}}%)",
+      "delete": "Deleted ({{percent}}%)",
+      "title": "Change distribution",
+      "tooltip": {
+        "create": "Created: {{percent}}%",
+        "delete": "Deleted: {{percent}}%",
+        "update": "Updated: {{percent}}%"
+      },
+      "update": "Updated ({{percent}}%)"
+    },
+    "lastCommit": "Last commit",
+    "lastVersion": "Last version",
+    "mostChanged": "Most changed",
+    "tags": "Tags",
+    "title": "Version statistics",
+    "today": "Today",
+    "totalVersions": "Total versions"
+  },
+  "tags": {
+    "color": {
+      "label": "Color"
+    },
+    "colors": {
+      "blue": "Blue",
+      "gray": "Gray",
+      "green": "Green",
+      "indigo": "Indigo",
+      "orange": "Orange",
+      "pink": "Pink",
+      "purple": "Purple",
+      "red": "Red",
+      "yellow": "Yellow"
+    },
+    "count_one": "{{count}} tag",
+    "count_other": "{{count}} tags",
+    "create": "Create tag",
+    "createError": "Error creating tag",
+    "createdBy": "Created by {{name}}",
+    "creating": "Creating...",
+    "deleteConfirm": "Delete tag '{{name}}'?",
+    "deleteError": "Error deleting tag",
+    "descLabel": "Description",
+    "descPlaceholder": "Optional description...",
+    "empty": "No tags created",
+    "emptyHint": "Create a tag to mark important versions",
+    "name": {
+      "label": "Tag name",
+      "placeholder": "e.g. v1.0, stable, production"
+    },
+    "nameRequired": "Tag name is required",
+    "title": "Tags",
+    "unknownUser": "Unknown user",
+    "versionRequired": "A version is required to create a tag"
+  },
+  "version": {
+    "addTag": "Add tag",
+    "author": "Author",
+    "cancelCompare": "Cancel comparison",
+    "changeTypes": {
+      "create": "Created",
+      "delete": "Deleted",
+      "update": "Updated"
+    },
+    "compare": "Compare",
+    "date": "Date",
+    "download": "Download",
+    "message": {
+      "label": "Message",
+      "placeholder": "Describe the changes..."
+    },
+    "parentVersion": "Parent version",
+    "restore": "Restore",
+    "restoreConfirm": "Restore version {{tag}}?",
+    "tag": "Tag",
+    "viewDetails": "View full details"
+  }
+}

@@ -1,0 +1,378 @@
+name: PR Checks
+
+on:
+  pull_request:
+    branches: ['*']
+  
+permissions:
+  contents: read
+  pull-requests: read
+
+
+# Cancel outdated PR checks when new commits are pushed
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: '3.11'
+  NODE_VERSION: '20'
+
+jobs:
+  # Detect changes to optimize job execution
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+      landing: ${{ steps.filter.outputs.landing }}
+      docker: ${{ steps.filter.outputs.docker }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            backend:
+              - 'backend/**'
+              - 'docker-compose*.yml'
+              - '.github/workflows/pr-checks.yml'
+            frontend:
+              - 'frontend/**'
+              - '.github/workflows/pr-checks.yml'
+            landing:
+              - 'landing/**'
+              - '.github/workflows/pr-checks.yml'
+            docker:
+              - 'backend/Dockerfile'
+              - 'docker-compose*.yml'
+
+  # ========== BACKEND CHECKS ==========
+  backend-lint:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+          cache-dependency-path: 'backend/requirements.txt'
+
+      - name: Install linting dependencies
+        run: |
+          pip install flake8 black isort mypy
+
+      - name: Run flake8
+        working-directory: backend
+        run: flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+
+      - name: Check black formatting
+        working-directory: backend
+        run: black --check .
+
+      - name: Check import sorting
+        working-directory: backend
+        run: isort --check-only .
+
+  backend-type-check:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+          cache-dependency-path: 'backend/requirements.txt'
+
+      - name: Install dependencies
+        run: |
+          cd backend
+          pip install mypy types-psycopg2 types-redis types-requests
+          pip install -r requirements.txt
+
+      - name: Run mypy
+        working-directory: backend
+        run: mypy app --ignore-missing-imports
+
+  backend-test:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: datamap_test
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_password
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+          cache-dependency-path: 'backend/requirements.txt'
+
+      - name: Install dependencies
+        run: |
+          cd backend
+          pip install -r requirements.txt
+
+      - name: Run unit tests
+        working-directory: backend
+        env:
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_NAME: datamap_test
+          DB_USER: test_user
+          DB_PASSWORD: test_password
+          TEST_DB_HOST: localhost
+          TEST_DB_PORT: 5432
+          TEST_DB_USER: test_user
+          TEST_DB_PASSWORD: test_password
+          REDIS_HOST: localhost
+          REDIS_PORT: 6379
+          SECRET_KEY: test-secret-key-for-ci
+          ENV: development
+          ENCRYPTION_ENABLED: "false"
+        run: |
+          pytest test/unit/ -v --tb=short --maxfail=5 --cov=app --cov-report=xml -n auto --dist=loadfile
+
+      - name: Start test databases (PostgreSQL:5433, MySQL:3307, Redis:6380)
+        run: docker compose -f docker-compose.test.yml up -d
+
+      - name: Wait for test databases to be healthy
+        run: |
+          echo "Waiting for PostgreSQL test instance (port 5433)..."
+          timeout 60 bash -c 'until docker exec datamap-postgres-test pg_isready -U test_user -d test_database 2>/dev/null; do sleep 2; done'
+          echo "Waiting for MySQL test instance (port 3307)..."
+          timeout 60 bash -c 'until docker exec datamap-mysql-test mysqladmin ping -h localhost -u test_user -ptest_password 2>/dev/null; do sleep 2; done'
+          echo "Waiting for Redis test instance (port 6380)..."
+          timeout 60 bash -c 'until docker exec datamap-redis-test redis-cli ping 2>/dev/null; do sleep 2; done'
+          echo "All test databases are ready!"
+
+      - name: Run integration tests
+        working-directory: backend
+        env:
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_NAME: datamap_test
+          DB_USER: test_user
+          DB_PASSWORD: test_password
+          TEST_DB_HOST: localhost
+          TEST_DB_PORT: 5432
+          TEST_DB_USER: test_user
+          TEST_DB_PASSWORD: test_password
+          REDIS_HOST: localhost
+          REDIS_PORT: 6379
+          SECRET_KEY: test-secret-key-for-ci
+          ENV: development
+          ENCRYPTION_ENABLED: "false"
+        run: |
+          pytest test/integration/ -v --tb=short --maxfail=5 -n auto --dist=loadfile
+
+      - name: Stop test databases
+        if: always()
+        run: docker compose -f docker-compose.test.yml down
+
+      - name: Upload coverage reports
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./backend/coverage.xml
+          flags: backend
+          fail_ci_if_error: false
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+  backend-security:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install safety
+        run: pip install safety
+
+      - name: Run safety check
+        working-directory: backend
+        run: safety check --file=requirements.txt --continue-on-error
+
+  # ========== FRONTEND CHECKS ==========
+  frontend-lint:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: 'frontend/package-lock.json'
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run ESLint
+        working-directory: frontend
+        run: npm run lint
+
+  frontend-type-check:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: 'frontend/package-lock.json'
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run TypeScript compiler
+        working-directory: frontend
+        run: npx tsc -b --noEmit
+
+  frontend-build:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: 'frontend/package-lock.json'
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build application
+        working-directory: frontend
+        run: npm run build
+
+      - name: Check bundle size
+        working-directory: frontend
+        run: |
+          # Check dist folder size (should be < 2MB for initial load)
+          if [ -d "dist" ]; then
+            SIZE=$(du -sb dist | cut -f1)
+            MAX_SIZE=2097152  # 2MB in bytes
+            if [ $SIZE -gt $MAX_SIZE ]; then
+              echo "::warning::Bundle size ($SIZE bytes) exceeds $MAX_SIZE bytes"
+            else
+              echo "Bundle size OK: $SIZE bytes"
+            fi
+          fi
+
+  frontend-security:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: 'frontend/package-lock.json'
+
+      - name: Run npm audit
+        working-directory: frontend
+        run: npm audit --audit-level=high --production
+        continue-on-error: true
+
+  # ========== LANDING PAGE CHECKS ==========
+  landing-build:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.landing == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: 'landing/package-lock.json'
+
+      - name: Install dependencies
+        working-directory: landing
+        run: npm ci
+
+      - name: Build Astro site
+        working-directory: landing
+        run: npm run build
+
+  # ========== DOCKER BUILD CHECK ==========
+  docker-build:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.docker == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build backend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          push: false
+          tags: datamap-backend:pr-${{ github.event.pull_request.number }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

@@ -1,0 +1,222 @@
+name: Main Branch CI/CD
+
+on:
+  push:
+    branches: [main]
+
+env:
+  PYTHON_VERSION: '3.11'
+  NODE_VERSION: '20'
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # ========== FULL TEST SUITE ==========
+  backend-full-tests:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: datamap_test
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_password
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+          cache-dependency-path: 'backend/requirements.txt'
+
+      - name: Install dependencies
+        run: |
+          cd backend
+          pip install -r requirements.txt
+
+      - name: Run all tests with coverage
+        working-directory: backend
+        env:
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_NAME: datamap_test
+          DB_USER: test_user
+          DB_PASSWORD: test_password
+          REDIS_HOST: localhost
+          REDIS_PORT: 6379
+          SECRET_KEY: test-secret-key-for-ci
+          ENV: test
+          ENCRYPTION_ENABLED: "false"
+        run: |
+          pytest -v --tb=short --cov=app --cov-report=xml --cov-report=html --cov-report=term
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./backend/coverage.xml
+          flags: backend-full
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+      - name: Upload coverage HTML report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: backend/htmlcov/
+
+  # ========== DOCKER BUILD & PUBLISH ==========
+  docker-build-push:
+    runs-on: ubuntu-latest
+    needs: backend-full-tests
+    permissions:
+      contents: read
+      packages: write
+      security-events: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+  # ========== VALIDATE BUILDS (Frontend & Landing) ==========
+  validate-builds:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Validate frontend build
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: 'frontend/package-lock.json'
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Upload frontend build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist/
+          retention-days: 7
+
+      # Validate landing build
+      - name: Cache landing dependencies
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: 'landing/package-lock.json'
+
+      - name: Build landing
+        working-directory: landing
+        run: |
+          npm ci
+          npm run build
+
+      - name: Upload landing build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: landing-dist
+          path: landing/dist/
+          retention-days: 7
+
+  # ========== HEALTH CHECKS (after Render auto-deploy) ==========
+  health-checks:
+    runs-on: ubuntu-latest
+    needs: [docker-build-push, validate-builds]
+    steps:
+      - name: Wait for Render deployment
+        run: |
+          echo "⏳ Esperando a que Render auto-despliegue desde main..."
+          echo "📊 Monitorear en: https://dashboard.render.com"
+          sleep 180  # 3 minutos
+
+      - name: Health check backend (si está desplegado)
+        run: |
+          echo "🔍 Verificando health del backend..."
+          # Reemplazar con tu URL real de Render
+          # curl -f https://your-backend.onrender.com/health || echo "⚠️  Backend aún no desplegado o URL no configurada"
+
+      - name: Deployment summary
+        run: |
+          echo "✅ Pipeline completado"
+          echo ""
+          echo "📦 Artefactos generados:"
+          echo "   - Docker image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
+          echo "   - Frontend build artifact"
+          echo "   - Landing build artifact"
+          echo ""
+          echo "🚀 Render auto-despliega desde la rama main"
+          echo "   Revisa el dashboard de Render para el estado del deployment"

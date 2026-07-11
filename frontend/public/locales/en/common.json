@@ -1,0 +1,155 @@
+{
+  "app": {
+    "loading": "Loading...",
+    "name": "Relan"
+  },
+  "divider": {
+    "or": "or"
+  },
+  "actions": {
+    "back": "Back",
+    "cancel": "Cancel",
+    "close": "Close",
+    "confirm": "Confirm",
+    "copy": "Copy",
+    "create": "Create",
+    "delete": "Delete",
+    "download": "Download",
+    "edit": "Edit",
+    "export": "Export",
+    "filter": "Filter",
+    "import": "Import",
+    "refresh": "Refresh",
+    "save": "Save",
+    "search": "Search"
+  },
+  "errors": {
+    "generic": "Something went wrong. Please try again.",
+    "invalid_email": "Enter a valid email address.",
+    "max_length": "Maximum {{max}} characters.",
+    "min_length": "Minimum {{min}} characters.",
+    "network": "Network error. Check your connection.",
+    "required": "This field is required.",
+    "unauthorized": "You don't have permission to perform this action.",
+    "auth": {
+      "get_user_failed": "Failed to retrieve user. Please try again.",
+      "invalid_user": "Invalid user.",
+      "not_authenticated": "Not authenticated. Please sign in.",
+      "session_expired": "Your session has expired. Please sign in again.",
+      "session_invalid": "Invalid session. Please sign in again.",
+      "session_revoked": "Your session has been revoked."
+    },
+    "admin": {
+      "access_required": "Admin access required."
+    },
+    "billing": {
+      "invalid_email": "The user does not have a valid payment email.",
+      "missing_signature": "Webhook security signature is missing.",
+      "not_owner": "Only the owner can change the plan.",
+      "webhook_error": "Error processing webhook."
+    },
+    "db": {
+      "column_not_found": "Column not found.",
+      "table_not_found": "Table not found."
+    },
+    "mapping": {
+      "filename_required": "Filename is required.",
+      "not_found": "Mapping not found.",
+      "unsupported_format": "Unsupported format."
+    },
+    "notification": {
+      "not_found": "Notification not found."
+    },
+    "project": {
+      "forbidden": "You don't have permission to perform this action.",
+      "invalid_role": "Invalid role.",
+      "member_email_required": "Email or username is required.",
+      "no_access": "No access to this project.",
+      "not_found": "Project not found.",
+      "stats_error": "Failed to retrieve project statistics."
+    },
+    "rate_limit": {
+      "blocked": "Too many attempts. Blocked for {{seconds}} more seconds.",
+      "exceeded": "Too many attempts. Please try again later."
+    },
+    "schema": {
+      "column_duplicate": "A column named '{{name}}' already exists in this table.",
+      "column_limit": "You have reached the limit of {{max}} columns per table for the {{plan}} plan.",
+      "column_name_invalid": "Name must start with a letter or _ and contain only letters, numbers, and _. Max 63 characters.",
+      "column_name_required": "Column name is required.",
+      "data_type_format_invalid": "Invalid data type format: {{type}}.",
+      "data_type_invalid": "Invalid data type.",
+      "data_type_required": "Data type is required.",
+      "length_invalid": "Invalid length for {{type}}: must be between {{min}} and {{max}}.",
+      "no_permission": "You don't have permission to modify this project's schema.",
+      "operation_failed": "Operation failed. Please try again.",
+      "precision_invalid": "Invalid precision for {{type}}: must be between {{min}} and {{max}}.",
+      "scale_invalid": "Invalid scale for {{type}}: must be between 0 and {{precision}}.",
+      "table_duplicate": "A table of type '{{type}}' named '{{name}}' already exists in this project.",
+      "table_limit": "You've reached the limit of {{max}} tables for the {{plan}} plan.",
+      "table_name_invalid": "Name must start with a letter or _ and contain only letters, numbers, and _. Max 63 characters.",
+      "table_name_required": "Table name is required.",
+      "table_type_invalid": "Invalid table type. Must be 'origin' or 'destination'.",
+      "table_type_required": "Table type is required."
+    },
+    "server": {
+      "internal_error": "Internal server error. Please try again."
+    },
+    "security": {
+      "csrf_token_invalid": "Invalid security token. Please reload the page."
+    },
+    "version": {
+      "not_found": "Version not found.",
+      "operation_failed": "Version operation failed. Please try again.",
+      "tag_not_found": "Tag not found."
+    },
+    "user": {
+      "2fa_invalid_code": "Invalid 2FA code.",
+      "2fa_invalid_state": "Invalid 2FA state.",
+      "2fa_not_active": "2FA is not active.",
+      "2fa_not_setup": "2FA is not set up. Enable it first in settings.",
+      "api_key_invalid": "Invalid API key ID.",
+      "api_key_not_found": "API key not found.",
+      "image_format": "Image type not allowed. Use JPEG, PNG, WebP or GIF.",
+      "image_process": "Could not process the image.",
+      "image_size": "Image cannot exceed 2MB.",
+      "not_found": "User not found.",
+      "password_mismatch": "New passwords do not match.",
+      "session_not_found": "Session not found or already revoked.",
+      "update_failed": "Could not update profile.",
+      "wrong_password": "Current password is incorrect."
+    }
+  },
+  "language": {
+    "en": "English",
+    "es": "Spanish",
+    "toggle_label": "Switch language"
+  },
+  "roles": {
+    "admin": "Administrator",
+    "editor": "Editor",
+    "member": "Member",
+    "owner": "Owner",
+    "viewer": "Viewer"
+  },
+  "status": {
+    "active": "Active",
+    "completed": "Completed",
+    "draft": "Draft",
+    "failed": "Failed",
+    "inactive": "Inactive",
+    "paused": "Paused",
+    "pending": "Pending",
+    "running": "Running"
+  },
+  "time": {
+    "days_one": "{{count}} day ago",
+    "days_other": "{{count}} days ago",
+    "hours_one": "{{count}} hour ago",
+    "hours_other": "{{count}} hours ago",
+    "minutes_one": "{{count}} minute ago",
+    "minutes_other": "{{count}} minutes ago",
+    "now": "Just now",
+    "since_last_month": "since last month"
+  }
+}

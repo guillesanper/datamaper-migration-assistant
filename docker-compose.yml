@@ -1,0 +1,143 @@
+version: '3.8'
+
+services:
+  # Redis - Session Storage
+  redis:
+    image: redis:7-alpine
+    container_name: datamap-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: >
+      sh -c "
+      if [ -n \"$$REDIS_PASSWORD\" ]; then
+        redis-server --appendonly yes --requirepass \"$$REDIS_PASSWORD\"
+      else
+        redis-server --appendonly yes
+      fi
+      "
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+    healthcheck:
+      test: >
+        sh -c "
+        if [ -n \"$$REDIS_PASSWORD\" ]; then
+          redis-cli -a \"$$REDIS_PASSWORD\" ping
+        else
+          redis-cli ping
+        fi
+        "
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    networks:
+      - datamap-network
+
+  # PostgreSQL - Main Database
+  postgres:
+    image: postgres:17-alpine
+    container_name: datamap-postgres
+    environment:
+      POSTGRES_DB: ${DB_NAME:-datamap_dev}
+      POSTGRES_USER: ${DB_USER:-datamaper_user_local}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-DataMap1234}
+      POSTGRES_HOST_AUTH_METHOD: scram-sha-256
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/init-db:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-datamaper_user_local} -d ${DB_NAME:-datamap_dev}"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    networks:
+      - datamap-network
+
+  # Backend API
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: datamap-backend
+    ports:
+      - "8000:8000"
+    environment:
+      # Database
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-datamap_dev}
+      DB_USER: ${DB_USER:-datamaper_user_local}
+      DB_PASSWORD: ${DB_PASSWORD:-DataMap1234}
+
+      # Redis
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_DB: 0
+      REDIS_SSL: "false"
+
+      # App Configuration
+      SECRET_KEY: ${SECRET_KEY:-eWG%pN%xWGxY35_TwgWg_x23_2}
+      ENV: development
+
+      # Encryption
+      ENCRYPTION_ENABLED: "true"
+      ENCRYPTION_SESSION_TIMEOUT: 10800
+      ARGON2_MEMORY_COST: 65536
+      ARGON2_TIME_COST: 3
+      ARGON2_PARALLELISM: 1
+
+      # Stripe
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
+      STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY}
+
+      # Email
+      EMAIL_FROM: ${EMAIL_FROM}
+      SMTP_SERVER: ${SMTP_SERVER:-smtp.gmail.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASS: ${SMTP_PASS}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    networks:
+      - datamap-network
+    command: >
+      sh -c "
+        alembic upgrade head &&
+        uvicorn main:app --reload --host 0.0.0.0 --port 8000
+      "
+
+  # Frontend (opcional - para desarrollo)
+  # frontend:
+  #   image: node:20-alpine
+  #   container_name: datamap-frontend
+  #   working_dir: /app
+  #   ports:
+  #     - "5173:5173"
+  #   volumes:
+  #     - ./frontend:/app
+  #     - /app/node_modules
+  #   command: sh -c "npm install && npm run dev -- --host"
+  #   environment:
+  #     VITE_API_URL: http://localhost:8000
+  #   networks:
+  #     - datamap-network
+
+volumes:
+  redis_data:
+    driver: local
+  postgres_data:
+    driver: local
+
+networks:
+  datamap-network:
+    driver: bridge

@@ -1,0 +1,61 @@
+repos:
+  # Python formatting and linting
+  - repo: https://github.com/psf/black
+    rev: 24.3.0
+    hooks:
+      - id: black
+        files: ^backend/
+        args: ['--config', 'backend/pyproject.toml']
+
+  - repo: https://github.com/PyCQA/flake8
+    rev: 7.0.0
+    hooks:
+      - id: flake8
+        files: ^backend/
+        args: ['--config=backend/setup.cfg']
+
+  - repo: https://github.com/PyCQA/isort
+    rev: 5.13.2
+    hooks:
+      - id: isort
+        files: ^backend/
+        args: ['--settings-path', 'backend/pyproject.toml']
+
+  # Frontend linting
+  - repo: local
+    hooks:
+      - id: eslint-frontend
+        name: ESLint (Frontend)
+        entry: bash -c 'cd frontend && npm run lint'
+        language: system
+        files: ^frontend/.*\.(ts|tsx|js|jsx)$
+        pass_filenames: false
+
+      - id: tsc-frontend
+        name: TypeScript Check (Frontend)
+        entry: bash -c 'cd frontend && npx tsc -b --noEmit'
+        language: system
+        files: ^frontend/.*\.tsx?$
+        pass_filenames: false
+
+  # General checks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+        exclude: '^backend/render\.yaml$'  # Render.yaml puede tener formato especial
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: ['--maxkb=1000']
+      - id: detect-private-key
+
+  # Secrets scanning
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.4.0
+    hooks:
+      - id: detect-secrets
+        args: ['--baseline', '.secrets.baseline']
+        exclude: package-lock.json

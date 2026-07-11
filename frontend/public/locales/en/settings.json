@@ -1,0 +1,198 @@
+{
+  "apiKeys": {
+    "copy": {
+      "success": "Copied to clipboard"
+    },
+    "create": "Create API Key",
+    "createFormTitle": "New API Key",
+    "description": "API Keys allow authenticating external requests with",
+    "empty": "You have no API Keys. Create one to get started.",
+    "expiry": {
+      "1y": "1 year",
+      "30d": "30 days",
+      "90d": "90 days",
+      "label": "Expiration",
+      "none": "No expiration"
+    },
+    "lastUsed": "Last used: {{date}}",
+    "name": {
+      "label": "Name",
+      "placeholder": "E.g.: My CI/CD integration"
+    },
+    "neverUsed": "Never",
+    "new": {
+      "acknowledge": "Got it, I saved it",
+      "title": "API Key created",
+      "warning": "This is the only time you will see this key. Store it in a safe place."
+    },
+    "revoke": "Revoke",
+    "revokeConfirm": "Revoke the key \"{{name}}\"? This action cannot be undone.",
+    "revokedSuccess": "API Key revoked",
+    "status": {
+      "revoked": "revoked"
+    },
+    "table": {
+      "actions": "Actions",
+      "created": "Created",
+      "expires": "Expires",
+      "lastUsed": "Last used",
+      "name": "Name",
+      "prefix": "Prefix"
+    },
+    "title": "API Keys"
+  },
+  "notifications": {
+    "comments": "Comments on my projects",
+    "email": {
+      "description": "Receive notifications by email.",
+      "title": "By email"
+    },
+    "projectInvitations": "Project invitations",
+    "push": {
+      "description": "Notifications within the platform.",
+      "title": "In-app only"
+    },
+    "save": {
+      "success": "Preferences saved"
+    },
+    "securityAlerts": "Security alerts",
+    "versionUpdates": "Version updates"
+  },
+  "page": {
+    "subtitle": "Manage your account and preferences",
+    "title": "Settings"
+  },
+  "preferences": {
+    "dateFormat": {
+      "label": "Date format"
+    },
+    "defaultDb": {
+      "label": "Default database type",
+      "none": "No preference"
+    },
+    "defaultExport": {
+      "label": "Default export format",
+      "placeholder": "Select format..."
+    },
+    "error": {
+      "load": "Error loading preferences",
+      "retry": "Retry"
+    },
+    "language": {
+      "en": "English",
+      "es": "Spanish",
+      "label": "Language",
+      "placeholder": "Select language..."
+    },
+    "save": {
+      "btn": "Save preferences",
+      "success": "Preferences saved"
+    },
+    "section": "Application preferences",
+    "theme": {
+      "dark": "Dark",
+      "label": "Theme",
+      "light": "Light",
+      "system": "System"
+    },
+    "timezone": {
+      "label": "Timezone",
+      "placeholder": "Select timezone..."
+    }
+  },
+  "profile": {
+    "avatarLabel": "Profile photo",
+    "cancelPhoto": "Cancel",
+    "changePassword": "Change password",
+    "changePhoto": "Change photo",
+    "confirmPassword": "Confirm new password",
+    "confirmPasswordPlaceholder": "Repeat new password",
+    "currentPassword": "Current password",
+    "email": {
+      "label": "Email address",
+      "unverified": "Unverified",
+      "verified": "Verified"
+    },
+    "error": {
+      "format": "Unsupported format. Use JPEG, PNG, WebP, or GIF.",
+      "size": "Image cannot exceed 2MB."
+    },
+    "formats": "JPEG, PNG, WebP or GIF. Maximum 2MB.",
+    "name": {
+      "label": "Username",
+      "placeholder": "Your username"
+    },
+    "newPassword": "New password",
+    "newPasswordPlaceholder": "At least 8 characters",
+    "removePhoto": "Remove photo",
+    "saveChanges": "Save changes",
+    "savePhoto": "Save photo",
+    "section": {
+      "info": "Personal information"
+    },
+    "success": {
+      "passwordUpdated": "Password updated",
+      "photoRemoved": "Photo removed",
+      "photoUpdated": "Photo updated",
+      "updated": "Profile updated"
+    },
+    "validation": {
+      "passwordMin": "New password must be at least 8 characters.",
+      "passwordMismatch": "Passwords do not match."
+    }
+  },
+  "security": {
+    "2fa": {
+      "deactivate": {
+        "currentPassword": "Current password",
+        "desc": "Enter your current password and your authenticator app code to disable 2FA.",
+        "title": "Disable two-factor authentication",
+        "totpCode": "TOTP Code"
+      },
+      "description": "Add an extra layer of security to your account with an authenticator app (TOTP).",
+      "disable": "Disable 2FA",
+      "disabled": "Disabled",
+      "enable": "Enable 2FA",
+      "enabled": "Enabled",
+      "setup": {
+        "cancel": "Cancel",
+        "placeholder": "6-digit code",
+        "step1": "1. Scan the QR code with your authenticator app (Google Authenticator, Authy, etc.).",
+        "step2": "2. Enter the 6-digit code from your app to confirm.",
+        "title": "Set up two-factor authentication",
+        "verify": "Verify and enable"
+      },
+      "success": {
+        "disabled": "2FA disabled",
+        "enabled": "2FA enabled successfully"
+      },
+      "title": "Two-factor authentication (2FA)"
+    },
+    "accessLog": {
+      "cols": {
+        "date": "Date",
+        "event": "Event",
+        "ip": "IP",
+        "severity": "Severity"
+      },
+      "empty": "No access records.",
+      "title": "Access history"
+    },
+    "sessions": {
+      "cantRevoke": "You cannot revoke your current session",
+      "current": "Current session",
+      "empty": "No active sessions.",
+      "revoke": "Revoke session",
+      "revoked": "Session revoked",
+      "title": "Active sessions",
+      "unknownIp": "Unknown IP"
+    }
+  },
+  "tabs": {
+    "apiKeys": "API Keys",
+    "notifications": "Notifications",
+    "preferences": "Preferences",
+    "profile": "Profile",
+    "security": "Security"
+  }
+}

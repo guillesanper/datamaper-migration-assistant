@@ -1,0 +1,133 @@
+{
+  "activity": {
+    "empty": "No hay actividad reciente.",
+    "entity": {
+      "column": "columna",
+      "mapping": "mapeo",
+      "member": "miembro",
+      "project": "proyecto",
+      "table": "tabla"
+    },
+    "errors": {
+      "load": "Error al cargar la actividad"
+    },
+    "event": {
+      "created": "{{user}} creó {{entity}}",
+      "deleted": "{{user}} eliminó {{entity}}",
+      "memberAdded": "{{user}} fue añadido al equipo",
+      "memberRemoved": "{{user}} fue eliminado del equipo",
+      "roleUpdated": "El rol de {{user}} fue actualizado",
+      "unknown": "{{user}} realizó una acción",
+      "updated": "{{user}} actualizó {{entity}}",
+      "versionCreated": "{{user}} creó una nueva versión",
+      "versionRestored": "{{user}} restauró una versión"
+    },
+    "refresh": "Actualizar",
+    "subtitle": {
+      "all": "Toda la actividad del proyecto",
+      "project": "Actividad del proyecto"
+    },
+    "title": "Actividad del equipo",
+    "viewMore": "Ver más"
+  },
+  "comments": {
+    "count_one": "{{count}} comentario",
+    "count_other": "{{count}} comentarios",
+    "delete": "Eliminar",
+    "deleteConfirm": "¿Eliminar este comentario? Esta acción no se puede deshacer.",
+    "edited": "editado",
+    "empty": "Sin comentarios. Sé el primero en comentar.",
+    "errors": {
+      "add": "Error al añadir comentario",
+      "delete": "Error al eliminar comentario",
+      "load": "Error al cargar comentarios",
+      "toggleResolve": "Error al cambiar estado"
+    },
+    "hideResolved": "Ocultar resueltos",
+    "placeholder": "Escribe un comentario...",
+    "reply": "Responder",
+    "replyPlaceholder": "Escribe una respuesta...",
+    "replyingTo": "Respondiendo a un comentario",
+    "resolve": "Resolver",
+    "resolved": "Resuelto",
+    "showResolved": "Mostrar resueltos",
+    "submit": "Comentar",
+    "success": {
+      "added": "Comentario añadido",
+      "deleted": "Comentario eliminado",
+      "reopened": "Comentario reabierto",
+      "resolved": "Comentario resuelto"
+    },
+    "title": "Comentarios",
+    "unresolvedCount": "• {{count}} sin resolver"
+  },
+  "members": {
+    "addBtn": "Añadir",
+    "addingBtn": "Añadiendo...",
+    "count_one": "{{count}} miembro",
+    "count_other": "{{count}} miembros",
+    "emailOrUsername": "Email o username",
+    "emailPlaceholder": "usuario@ejemplo.com",
+    "empty": {
+      "subtitle": "Invita a tu equipo para colaborar en este proyecto.",
+      "title": "Sin miembros"
+    },
+    "errors": {
+      "add": "Error al añadir miembro",
+      "emailRequired": "Ingresa un email o username",
+      "load": "Error al cargar los miembros",
+      "remove": "Error al eliminar miembro",
+      "updateRole": "Error al actualizar rol"
+    },
+    "invite": "Añadir miembro",
+    "joined": "Se unió el {{date}}",
+    "ownerBadge": "Propietario",
+    "projectCreator": "Creador del proyecto",
+    "remove": "Eliminar del equipo",
+    "removeConfirm": "¿Eliminar a {{email}} del equipo?",
+    "restrictedAccess": "Acceso limitado",
+    "restrictedDesc": "Solo el propietario puede gestionar los miembros del proyecto",
+    "role": {
+      "change": "Cambiar rol"
+    },
+    "roleLabel": "Rol",
+    "success": {
+      "added": "Miembro añadido exitosamente",
+      "removed": "Miembro eliminado",
+      "roleUpdated": "Rol actualizado"
+    },
+    "teamInfo": "Información del equipo",
+    "title": "Miembros del equipo",
+    "you": "(Tú)"
+  },
+  "projectInfo": {
+    "createdAt": "Creado:",
+    "destination": "Destino",
+    "origin": "Origen",
+    "progress": "Progreso",
+    "status": "Estado",
+    "updatedAt": "Actualizado:"
+  },
+  "page": {
+    "errors": {
+      "load": "Error al cargar los proyectos"
+    },
+    "noProjects": {
+      "subtitle": "Crea un proyecto para empezar a colaborar con tu equipo.",
+      "title": "Sin proyectos"
+    },
+    "title": "Equipo"
+  },
+  "projectSelector": {
+    "empty": "Sin proyectos disponibles",
+    "label": "Proyecto",
+    "placeholder": "Seleccionar proyecto..."
+  },
+  "stats": {
+    "contributors": "Colaboradores",
+    "lastActivity": "Última actividad",
+    "openComments": "Comentarios abiertos",
+    "title": "Estadísticas",
+    "totalCommits": "Total de commits"
+  }
+}

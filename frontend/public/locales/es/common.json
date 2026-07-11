@@ -1,0 +1,155 @@
+{
+  "app": {
+    "loading": "Cargando...",
+    "name": "Relan"
+  },
+  "divider": {
+    "or": "o"
+  },
+  "actions": {
+    "back": "Volver",
+    "cancel": "Cancelar",
+    "close": "Cerrar",
+    "copy": "Copiar",
+    "create": "Crear",
+    "delete": "Eliminar",
+    "download": "Descargar",
+    "edit": "Editar",
+    "export": "Exportar",
+    "filter": "Filtrar",
+    "import": "Importar",
+    "refresh": "Actualizar",
+    "save": "Guardar",
+    "search": "Buscar",
+    "confirm": "Confirmar"
+  },
+  "errors": {
+    "generic": "Algo salió mal. Por favor, inténtalo de nuevo.",
+    "invalid_email": "Introduce un correo electrónico válido.",
+    "max_length": "Máximo {{max}} caracteres.",
+    "min_length": "Mínimo {{min}} caracteres.",
+    "network": "Error de red. Comprueba tu conexión.",
+    "required": "Este campo es obligatorio.",
+    "unauthorized": "No tienes permiso para realizar esta acción.",
+    "auth": {
+      "get_user_failed": "Error al obtener usuario. Inténtalo de nuevo.",
+      "invalid_user": "Usuario no válido.",
+      "not_authenticated": "No autenticado. Por favor, inicia sesión.",
+      "session_expired": "Tu sesión ha expirado. Por favor, inicia sesión de nuevo.",
+      "session_invalid": "Sesión inválida. Por favor, inicia sesión de nuevo.",
+      "session_revoked": "Tu sesión ha sido revocada."
+    },
+    "admin": {
+      "access_required": "Se requieren permisos de administrador."
+    },
+    "billing": {
+      "invalid_email": "El usuario no tiene un email válido para pagos.",
+      "missing_signature": "Falta la firma de seguridad del webhook.",
+      "not_owner": "Solo el propietario puede cambiar el plan.",
+      "webhook_error": "Error al procesar el webhook."
+    },
+    "db": {
+      "column_not_found": "Columna no encontrada.",
+      "table_not_found": "Tabla no encontrada."
+    },
+    "mapping": {
+      "filename_required": "Nombre de archivo requerido.",
+      "not_found": "Mapeo no encontrado.",
+      "unsupported_format": "Formato no soportado."
+    },
+    "notification": {
+      "not_found": "Notificación no encontrada."
+    },
+    "project": {
+      "forbidden": "No tienes permiso para realizar esta acción.",
+      "invalid_role": "Rol no válido.",
+      "member_email_required": "El email o username es obligatorio.",
+      "no_access": "Sin acceso a este proyecto.",
+      "not_found": "Proyecto no encontrado.",
+      "stats_error": "Error al obtener las estadísticas del proyecto."
+    },
+    "rate_limit": {
+      "blocked": "Demasiados intentos. Bloqueado por {{seconds}} segundos más.",
+      "exceeded": "Demasiados intentos. Inténtalo de nuevo más tarde."
+    },
+    "schema": {
+      "column_duplicate": "Ya existe una columna con el nombre '{{name}}' en esta tabla.",
+      "column_limit": "Has alcanzado el límite de {{max}} columnas por tabla para el plan {{plan}}.",
+      "column_name_invalid": "El nombre debe comenzar con letra o _ y contener solo letras, números y _. Máximo 63 caracteres.",
+      "column_name_required": "El nombre de la columna es obligatorio.",
+      "data_type_format_invalid": "Formato de tipo de dato inválido: {{type}}.",
+      "data_type_invalid": "Tipo de dato no válido.",
+      "data_type_required": "El tipo de dato es obligatorio.",
+      "length_invalid": "Longitud inválida para {{type}}: debe estar entre {{min}} y {{max}}.",
+      "no_permission": "No tienes permisos para modificar el esquema de este proyecto.",
+      "operation_failed": "La operación falló. Por favor, inténtalo de nuevo.",
+      "precision_invalid": "Precisión inválida para {{type}}: debe estar entre {{min}} y {{max}}.",
+      "scale_invalid": "Escala inválida para {{type}}: debe estar entre 0 y {{precision}}.",
+      "table_duplicate": "Ya existe una tabla de tipo '{{type}}' con el nombre '{{name}}' en este proyecto.",
+      "table_limit": "Has alcanzado el límite de {{max}} tablas para el plan {{plan}}.",
+      "table_name_invalid": "El nombre debe comenzar con letra o _ y contener solo letras, números y _. Máximo 63 caracteres.",
+      "table_name_required": "El nombre de la tabla es obligatorio.",
+      "table_type_invalid": "Tipo de tabla inválido. Debe ser 'origin' o 'destination'.",
+      "table_type_required": "El tipo de tabla es obligatorio."
+    },
+    "server": {
+      "internal_error": "Error interno del servidor. Por favor, inténtalo de nuevo."
+    },
+    "security": {
+      "csrf_token_invalid": "Token de seguridad inválido. Por favor, recarga la página."
+    },
+    "version": {
+      "not_found": "Versión no encontrada.",
+      "operation_failed": "La operación de versión falló. Por favor, inténtalo de nuevo.",
+      "tag_not_found": "Tag no encontrado."
+    },
+    "user": {
+      "2fa_invalid_code": "Código 2FA inválido.",
+      "2fa_invalid_state": "Estado 2FA inválido.",
+      "2fa_not_active": "2FA no está activado.",
+      "2fa_not_setup": "2FA no configurado. Actívalo primero en ajustes.",
+      "api_key_invalid": "ID de API key inválido.",
+      "api_key_not_found": "API key no encontrada.",
+      "image_format": "Tipo de imagen no permitido. Use JPEG, PNG, WebP o GIF.",
+      "image_process": "No se pudo procesar la imagen.",
+      "image_size": "La imagen no puede superar 2MB.",
+      "not_found": "Usuario no encontrado.",
+      "password_mismatch": "Las contraseñas nuevas no coinciden.",
+      "session_not_found": "Sesión no encontrada o ya revocada.",
+      "update_failed": "No se pudo actualizar el perfil.",
+      "wrong_password": "Contraseña actual incorrecta."
+    }
+  },
+  "language": {
+    "en": "Inglés",
+    "es": "Español",
+    "toggle_label": "Cambiar idioma"
+  },
+  "roles": {
+    "admin": "Administrador",
+    "editor": "Editor",
+    "member": "Miembro",
+    "owner": "Propietario",
+    "viewer": "Visualizador"
+  },
+  "status": {
+    "active": "Activo",
+    "completed": "Completado",
+    "draft": "Borrador",
+    "failed": "Fallido",
+    "inactive": "Inactivo",
+    "paused": "Pausado",
+    "pending": "Pendiente",
+    "running": "En ejecución"
+  },
+  "time": {
+    "days_one": "Hace {{count}} día",
+    "days_other": "Hace {{count}} días",
+    "hours_one": "Hace {{count}} hora",
+    "hours_other": "Hace {{count}} horas",
+    "minutes_one": "Hace {{count}} minuto",
+    "minutes_other": "Hace {{count}} minutos",
+    "now": "Ahora mismo",
+    "since_last_month": "desde el mes pasado"
+  }
+}

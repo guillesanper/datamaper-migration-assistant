@@ -1,0 +1,17 @@
+table_name,type,column_name,data_type,is_primary,is_nullable
+clients,origin,client_id,INTEGER,1,0
+clients,origin,name,TEXT,0,0
+clients,origin,email,TEXT,0,1
+product,origin,product_id,INTEGER,1,0
+product,origin,product_name,TEXT,0,0
+product,origin,price,REAL,0,0
+sales,origin,sales_id,INTEGER,1,0
+sales,origin,client_id,INTEGER,0,0
+sales,origin,date,DATE,0,0
+clients_dest,destination,client_id,INTEGER,1,0
+clients_dest,destination,name,TEXT,0,1
+products_dest,destination,product_id,INTEGER,1,0
+products_dest,destination,description,TEXT,0,1
+sales_dest,destination,sales_id,INTEGER,1,0
+sales_dest,destination,client_id,INTEGER,0,0
+sales_dest,destination,sale_date,DATETIME,0,0

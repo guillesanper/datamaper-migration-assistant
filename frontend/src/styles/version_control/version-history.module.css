@@ -1,0 +1,466 @@
+/* src/styles/version_control/version-history.module.css */
+
+/* ============================================
+   CONTAINER
+   ============================================ */
+.container {
+  width: 100%;
+  max-width: 100%;
+}
+
+.loading,
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  padding: 3rem 1.5rem;
+  color: hsl(var(--muted-foreground));
+  text-align: center;
+}
+
+/* ============================================
+   TIMELINE
+   ============================================ */
+.timeline {
+  position: relative;
+  padding: 1rem 0;
+}
+
+.timelineItem {
+  position: relative;
+  display: flex;
+  gap: 1rem;
+  padding: 0 0 1.5rem 0;
+  transition: all 0.2s ease;
+}
+
+.timelineItem:last-child {
+  padding-bottom: 0;
+}
+
+/* Timeline connector line */
+.timelineConnector {
+  position: absolute;
+  left: 1rem;
+  top: -1.5rem;
+  width: 3px;
+  height: 1.5rem;
+  background: linear-gradient(to bottom, hsl(var(--border) / 0.8), hsl(var(--muted) / 0.6));
+  border-radius: 2px;
+}
+
+/* Timeline dot */
+.timelineDot {
+  position: relative;
+  width: 2.125rem;
+  height: 2.125rem;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border: 2.5px solid;
+  background: linear-gradient(135deg, hsl(var(--background)), hsl(var(--card)));
+  z-index: 1;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 2px 4px hsl(var(--foreground) / 0.1);
+}
+
+.timelineItem:hover .timelineDot {
+  transform: scale(1.15) rotate(5deg);
+  box-shadow:
+    0 0 0 6px hsl(var(--primary) / 0.12),
+    0 4px 8px hsl(var(--foreground) / 0.15);
+}
+
+/* Change type colors */
+.changeCreate {
+  border-color: rgb(34 197 94);
+  color: rgb(34 197 94);
+}
+
+.changeUpdate {
+  border-color: rgb(59 130 246);
+  color: rgb(59 130 246);
+}
+
+.changeDelete {
+  border-color: rgb(239 68 68);
+  color: rgb(239 68 68);
+}
+
+/* ============================================
+   TIMELINE CONTENT
+   ============================================ */
+.timelineContent {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+  background: linear-gradient(135deg, hsl(var(--card)), hsl(var(--card) / 0.95));
+  border: 1.5px solid hsl(var(--border) / 0.6);
+  border-radius: 10px;
+  padding: 1.125rem;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 2px 8px hsl(var(--foreground) / 0.04);
+}
+
+.timelineItem:hover .timelineContent {
+  border-color: hsl(var(--primary) / 0.5);
+  box-shadow:
+    0 8px 16px hsl(var(--foreground) / 0.12),
+    0 0 0 1px hsl(var(--primary) / 0.1);
+  transform: translateX(4px);
+}
+
+/* Current version highlight */
+.currentVersion .timelineContent {
+  border-color: hsl(var(--primary));
+  border-width: 2px;
+  background: linear-gradient(135deg, hsl(var(--primary) / 0.08), hsl(var(--primary) / 0.04));
+  box-shadow:
+    0 4px 12px hsl(var(--primary) / 0.2),
+    0 0 0 1px hsl(var(--primary) / 0.2);
+}
+
+.selectedForCompare .timelineContent {
+  border-color: rgb(59 130 246);
+  border-width: 2px;
+  background: linear-gradient(135deg, rgb(59 130 246 / 0.08), rgb(59 130 246 / 0.04));
+  box-shadow:
+    0 4px 12px rgb(59 130 246 / 0.2),
+    0 0 0 1px rgb(59 130 246 / 0.2);
+}
+
+/* ============================================
+   VERSION HEADER
+   ============================================ */
+.versionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.versionInfo {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.versionNumber {
+  font-weight: 700;
+  font-size: 1rem;
+  color: hsl(var(--foreground));
+}
+
+.changeTypeBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.375rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  border: 1px solid;
+}
+
+.changeTypeBadge.changeCreate {
+  background-color: rgb(34 197 94 / 0.15);
+  border-color: rgb(34 197 94 / 0.3);
+  color: rgb(21 128 61);
+}
+
+.dark .changeTypeBadge.changeCreate {
+  background-color: rgb(34 197 94 / 0.2);
+  color: rgb(134 239 172);
+}
+
+.changeTypeBadge.changeUpdate {
+  background-color: rgb(59 130 246 / 0.15);
+  border-color: rgb(59 130 246 / 0.3);
+  color: rgb(30 64 175);
+}
+
+.dark .changeTypeBadge.changeUpdate {
+  background-color: rgb(59 130 246 / 0.2);
+  color: rgb(147 197 253);
+}
+
+.changeTypeBadge.changeDelete {
+  background-color: rgb(239 68 68 / 0.15);
+  border-color: rgb(239 68 68 / 0.3);
+  color: rgb(185 28 28);
+}
+
+.dark .changeTypeBadge.changeDelete {
+  background-color: rgb(239 68 68 / 0.2);
+  color: rgb(252 165 165);
+}
+
+.currentBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.375rem 0.625rem;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  background: linear-gradient(135deg, hsl(var(--primary) / 0.2), hsl(var(--primary) / 0.15));
+  color: hsl(var(--primary));
+  border: 1.5px solid hsl(var(--primary) / 0.4);
+  box-shadow: 0 2px 4px hsl(var(--primary) / 0.2);
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+.versionActions {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+/* ============================================
+   VERSION META
+   ============================================ */
+.versionMeta {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.metaItem {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-size: 0.8125rem;
+  color: hsl(var(--muted-foreground));
+}
+
+/* ============================================
+   VERSION MESSAGE
+   ============================================ */
+.versionMessage {
+  font-size: 0.875rem;
+  color: hsl(var(--foreground) / 0.95);
+  line-height: 1.6;
+  padding: 0.75rem 0.875rem;
+  background: linear-gradient(to right, hsl(var(--muted) / 0.4), hsl(var(--muted) / 0.2));
+  border-left: 3px solid hsl(var(--primary));
+  border-radius: 6px;
+  font-weight: 450;
+  box-shadow: inset 0 1px 3px hsl(var(--foreground) / 0.05);
+  transition: all 0.2s ease;
+}
+
+.versionMessage:hover {
+  background: linear-gradient(to right, hsl(var(--muted) / 0.5), hsl(var(--muted) / 0.3));
+  border-left-width: 4px;
+}
+
+/* ============================================
+   TAGS
+   ============================================ */
+.tagList {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  flex-wrap: wrap;
+}
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.375rem 0.625rem;
+  background: linear-gradient(135deg, hsl(var(--secondary)), hsl(var(--secondary) / 0.9));
+  color: hsl(var(--secondary-foreground));
+  border: 1px solid hsl(var(--border) / 0.5);
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  box-shadow: 0 1px 3px hsl(var(--foreground) / 0.1);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.tag:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 3px 6px hsl(var(--foreground) / 0.15);
+}
+
+.addTagButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 50%;
+  background-color: transparent;
+  border: 1.5px dashed hsl(var(--border));
+  color: hsl(var(--muted-foreground));
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.addTagButton:hover {
+  background-color: hsl(var(--primary) / 0.1);
+  border-color: hsl(var(--primary));
+  border-style: solid;
+  color: hsl(var(--primary));
+  transform: scale(1.1) rotate(90deg);
+}
+
+/* ============================================
+   EXPANDED DETAILS
+   ============================================ */
+.expandedDetails {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 1.25rem;
+  padding-top: 1rem;
+  border-top: 2px solid hsl(var(--border) / 0.4);
+  margin-top: 0.75rem;
+  background: linear-gradient(to bottom, hsl(var(--muted) / 0.1), transparent);
+  border-radius: 0 0 8px 8px;
+  animation: expandDown 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes expandDown {
+  from {
+    opacity: 0;
+    max-height: 0;
+    padding: 0 1.25rem;
+  }
+  to {
+    opacity: 1;
+    max-height: 500px;
+    padding: 1.25rem;
+    padding-top: 1rem;
+  }
+}
+
+.detailRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  font-size: 0.875rem;
+  padding: 0.5rem;
+  background: hsl(var(--background) / 0.5);
+  border-radius: 6px;
+  border-left: 3px solid hsl(var(--primary) / 0.4);
+  transition: all 0.2s ease;
+}
+
+.detailRow:hover {
+  background: hsl(var(--muted) / 0.3);
+  border-left-color: hsl(var(--primary));
+  transform: translateX(4px);
+}
+
+.detailLabel {
+  font-weight: 700;
+  color: hsl(var(--foreground));
+  min-width: 7rem;
+  font-size: 0.8125rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  opacity: 0.8;
+}
+
+.detailValue {
+  color: hsl(var(--muted-foreground));
+  font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
+  background: hsl(var(--muted) / 0.5);
+  padding: 0.375rem 0.625rem;
+  border-radius: 6px;
+  border: 1px solid hsl(var(--border) / 0.4);
+  font-size: 0.8125rem;
+  line-height: 1.4;
+  flex: 1;
+  box-shadow: inset 0 1px 2px hsl(var(--foreground) / 0.05);
+}
+
+.detailActions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-top: 0.5rem;
+  padding-top: 0.75rem;
+  border-top: 1px dashed hsl(var(--border) / 0.5);
+}
+
+/* ============================================
+   COMPARE HINT
+   ============================================ */
+.compareHint {
+  position: sticky;
+  bottom: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  background-color: rgb(59 130 246 / 0.15);
+  border: 1px solid rgb(59 130 246 / 0.3);
+  border-radius: 0.5rem;
+  color: rgb(30 64 175);
+  font-size: 0.875rem;
+  font-weight: 500;
+  box-shadow: 0 4px 12px hsl(var(--foreground) / 0.15);
+}
+
+.dark .compareHint {
+  background-color: rgb(59 130 246 / 0.2);
+  color: rgb(147 197 253);
+}
+
+/* ============================================
+   RESPONSIVE
+   ============================================ */
+@media (max-width: 640px) {
+  .timelineItem {
+    gap: 0.75rem;
+  }
+
+  .timelineDot {
+    width: 1.5rem;
+    height: 1.5rem;
+  }
+
+  .timelineDot svg {
+    width: 12px;
+    height: 12px;
+  }
+
+  .timelineConnector {
+    left: 0.75rem;
+  }
+
+  .timelineContent {
+    padding: 0.75rem;
+  }
+
+  .versionHeader {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .versionActions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  .detailLabel {
+    min-width: 5rem;
+  }
+}

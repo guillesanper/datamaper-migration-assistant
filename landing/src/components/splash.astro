@@ -1,0 +1,221 @@
+---
+import { Icon } from "astro-icon/components";
+import HeroImage from "~/components/hero-image.astro";
+import Starfield from "~/components/starfield.astro";
+---
+
+<section class="relative min-h-screen flex items-center justify-center pt-32 pb-16" style="background: linear-gradient(135deg, var(--color-background) 0%, var(--color-background-offset) 100%);">
+  <Starfield />
+
+  <!-- Animated gradient blobs -->
+  <div class="absolute top-1/4 left-1/4 w-96 h-96 bg-primary/20 rounded-full blur-3xl animate-blob"></div>
+  <div class="absolute top-1/3 right-1/4 w-96 h-96 bg-secondary/20 rounded-full blur-3xl animate-blob animation-delay-200"></div>
+
+  <div id="splash-bg-fallback" class="absolute inset-0 hidden opacity-20">
+    <HeroImage />
+  </div>
+
+  <div class="relative w-full max-w-6xl mx-auto px-8">
+    <!-- Logo y título arriba -->
+    <div class="flex flex-col items-center gap-8 mb-20 animate-fade-in-down">
+      <div class="flex items-center gap-4">
+        <div class="relative">
+          <Icon
+            name="mdi:database-arrow-right"
+            class="size-20 md:size-24 drop-shadow-2xl"
+            style="color: var(--color-primary);"
+          />
+          <div class="absolute inset-0 blur-xl opacity-50">
+            <Icon
+              name="mdi:database-arrow-right"
+              class="size-20 md:size-24"
+              style="color: var(--color-primary);"
+            />
+          </div>
+        </div>
+        <h1
+          class="text-4xl md:text-6xl lg:text-7xl font-bold tracking-tight"
+          style="color: white;"
+        >
+          DataMapper
+        </h1>
+      </div>
+
+      <h2
+        class="text-3xl md:text-5xl lg:text-6xl font-extrabold text-center max-w-4xl leading-tight"
+        style="color: white;"
+      >
+        Mapea tus datos de forma <span class="gradient-text">inteligente</span>
+      </h2>
+
+      <p class="text-center text-lg md:text-xl max-w-2xl leading-relaxed" style="color: rgba(255, 255, 255, 0.8);">
+        La solución profesional y accesible para mapear bases de datos en tus migraciones
+      </p>
+
+      <div class="flex flex-col sm:flex-row gap-4 mt-4">
+        <a
+          href="/register"
+          class="btn btn-primary group relative overflow-hidden px-8 py-4 text-lg"
+        >
+          <span class="relative z-10 flex items-center gap-2">
+            Comenzar Gratis
+            <svg class="w-5 h-5 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"></path>
+            </svg>
+          </span>
+        </a>
+        <a
+          href="/login"
+          class="btn btn-secondary group px-8 py-4 text-lg"
+          style="color: white;"
+        >
+          <span class="flex items-center gap-2">
+            Iniciar Sesión
+            <svg class="w-5 h-5 group-hover:rotate-12 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1"></path>
+            </svg>
+          </span>
+        </a>
+      </div>
+
+      <!-- Trust badges -->
+      <div class="flex items-center gap-6 mt-6 text-sm" style="color: rgba(255, 255, 255, 0.7);">
+        <div class="flex items-center gap-2">
+          <svg class="w-5 h-5" style="color: var(--color-primary);" fill="currentColor" viewBox="0 0 20 20">
+            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+          </svg>
+          <span>Sin tarjeta</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <svg class="w-5 h-5" style="color: var(--color-primary);" fill="currentColor" viewBox="0 0 20 20">
+            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+          </svg>
+          <span>Cancela cuando quieras</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Cards abajo -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto animate-fade-in-up animation-delay-300">
+      <div class="card card-glass hover:scale-105 transition-all duration-300 group">
+        <div class="p-8 relative">
+          <div class="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300 rounded-xl" style="background: linear-gradient(135deg, var(--color-primary-rgb, 16, 185, 129) / 5%, transparent);"></div>
+          
+          <div class="size-16 rounded-2xl p-1 mb-6 relative z-10 group-hover:scale-110 transition-transform duration-300" style="background: linear-gradient(135deg, var(--color-primary), var(--color-secondary));">
+            <div class="size-full rounded-xl flex items-center justify-center" style="background-color: var(--color-background);">
+              <Icon name="mdi:database" class="size-8" style="color: var(--color-primary);" />
+            </div>
+          </div>
+
+          <h3 class="text-xl font-bold mb-3 relative z-10" style="color: white;">
+            Base Origen
+          </h3>
+          <p class="text-base leading-relaxed relative z-10" style="color: rgba(255, 255, 255, 0.8);">
+            Conecta tu base de datos origen
+          </p>
+        </div>
+      </div>
+
+      <div class="card card-glass hover:scale-105 transition-all duration-300 group">
+        <div class="p-8 relative">
+          <div class="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300 rounded-xl" style="background: linear-gradient(135deg, var(--color-secondary-rgb, 239, 68, 68) / 5%, transparent);"></div>
+          
+          <div class="size-16 rounded-2xl p-1 mb-6 relative z-10 group-hover:scale-110 transition-transform duration-300" style="background: linear-gradient(135deg, var(--color-secondary), var(--color-primary));">
+            <div class="size-full rounded-xl flex items-center justify-center" style="background-color: var(--color-background);">
+              <Icon name="mdi:map-marker-path" class="size-8" style="color: var(--color-secondary);" />
+            </div>
+          </div>
+
+          <h3 class="text-xl font-bold mb-3 relative z-10" style="color: white;">
+            Mapeo Automático
+          </h3>
+          <p class="text-base leading-relaxed relative z-10" style="color: rgba(255, 255, 255, 0.8);">
+            Mapeo inteligente de campos
+          </p>
+        </div>
+      </div>
+
+      <div class="card card-glass hover:scale-105 transition-all duration-300 group">
+        <div class="p-8 relative">
+          <div class="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300 rounded-xl" style="background: linear-gradient(135deg, var(--color-primary-rgb, 16, 185, 129) / 5%, transparent);"></div>
+          
+          <div class="size-16 rounded-2xl p-1 mb-6 relative z-10 group-hover:scale-110 transition-transform duration-300" style="background: linear-gradient(135deg, var(--color-primary), var(--color-secondary));">
+            <div class="size-full rounded-xl flex items-center justify-center" style="background-color: var(--color-background);">
+              <Icon name="mdi:database-check" class="size-8" style="color: var(--color-primary);" />
+            </div>
+          </div>
+
+          <h3 class="text-xl font-bold mb-3 relative z-10" style="color: white;">
+            Base Destino
+          </h3>
+          <p class="text-base leading-relaxed relative z-10" style="color: rgba(255, 255, 255, 0.8);">
+            Migra a tu nueva base de datos
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<noscript>
+  <style>
+    #splash-bg-fallback {
+      display: block;
+    }
+  </style>
+</noscript>
+
+<style>
+  @import "tailwindcss" reference;
+
+  @keyframes fadeInDown {
+    0% {
+      opacity: 0;
+      transform: translateY(-30px);
+    }
+    100% {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes fadeInUp {
+    0% {
+      opacity: 0;
+      transform: translateY(30px);
+    }
+    100% {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .animate-fade-in-down {
+    animation: fadeInDown 0.8s ease-out forwards;
+  }
+
+  .animate-fade-in-up {
+    animation: fadeInUp 0.8s ease-out forwards;
+    opacity: 0;
+  }
+
+  .animation-delay-300 {
+    animation-delay: 0.3s;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .animate-fade-in-down,
+    .animate-fade-in-up {
+      opacity: 1;
+      animation: none;
+    }
+
+    :global(#starfield) {
+      @apply hidden;
+    }
+
+    #splash-bg-fallback {
+      @apply block;
+    }
+  }
+</style>

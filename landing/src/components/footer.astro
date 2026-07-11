@@ -1,0 +1,131 @@
+---
+import { Icon } from "astro-icon/components";
+import HeroImage from "~/components/hero-image.astro";
+import type { FooterLink } from "~/types";
+
+const links: Array<FooterLink> = [
+  {
+    url: "#",
+    description: "Inicio",
+    icon: "mdi:home",
+  },
+  {
+    url: "#features",
+    description: "Características",
+    icon: "mdi:star",
+  },
+  {
+    url: "#pricing",
+    description: "Precios",
+    icon: "mdi:currency-eur",
+  },
+  {
+    url: "mailto:datamapassistant@gmail.com",
+    description: "Contacto",
+    icon: "mdi:email",
+  },
+];
+---
+
+<footer class="relative border-t" style="background: linear-gradient(135deg, var(--color-background) 0%, var(--color-background-offset) 100%); border-color: var(--color-border);">
+  <div class="absolute inset-0 overflow-hidden opacity-20">
+    <HeroImage />
+  </div>
+
+  <!-- Animated background blobs -->
+  <div class="absolute top-0 left-1/4 w-64 h-64 bg-blue-500/10 rounded-full blur-3xl animate-blob"></div>
+  <div class="absolute bottom-0 right-1/4 w-64 h-64 bg-purple-500/10 rounded-full blur-3xl animate-blob animation-delay-200"></div>
+
+  <div class="relative container mx-auto px-8 py-16">
+    <div class="max-w-6xl mx-auto">
+      <!-- Top Section -->
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-12 mb-12">
+        <!-- Brand -->
+        <div class="flex flex-col gap-4">
+          <div class="flex items-center gap-3 mb-2">
+            <Icon name="mdi:database-arrow-right" class="size-12 text-blue-400" />
+            <span class="text-2xl font-bold gradient-text font-display">DataMapper</span>
+          </div>
+          <p class="leading-relaxed text-base" style="color: var(--color-text);">
+            La solución asequible para mapear bases de datos en tus migraciones. Simple, rápido y efectivo.
+          </p>
+        </div>
+
+        <!-- Quick Links -->
+        <div>
+          <h3 class="font-bold text-lg mb-4 font-display" style="color: var(--color-text);">Enlaces Rápidos</h3>
+          <ul class="space-y-3">
+            {links.map((link) => (
+              <li>
+                <a
+                  href={link.url}
+                  class="flex items-center gap-2 hover:text-blue-400 transition-colors group text-base"
+                  style="color: var(--color-text);"
+                >
+                  <Icon name={link.icon} class="size-5 group-hover:scale-110 transition-transform" />
+                  {link.description}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        <!-- Contact Info -->
+        <div>
+          <h3 class="font-bold text-lg mb-4 font-display" style="color: var(--color-text);">Contacto</h3>
+          <div class="space-y-3">
+            <a
+              href="mailto:datamapassistant@gmail.com"
+              class="flex items-center gap-2 hover:text-blue-400 transition-colors group text-base"
+              style="color: var(--color-text);"
+            >
+              <Icon name="mdi:email" class="size-5 group-hover:scale-110 transition-transform" />
+              datamapassistant@gmail.com
+            </a>
+            <p class="text-base flex items-center gap-2" style="color: var(--color-text);">
+              <Icon name="mdi:clock" class="size-5" />
+              Respuesta en 24h
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Social Links Section -->
+      <div class="border-t border-white/10 pt-8 mb-8">
+        <div class="flex flex-col md:flex-row justify-between items-center gap-6">
+          <ul class="flex gap-4">
+            {links.map((link, index) => (
+              <li class="animate-scale-in" style={`animation-delay: ${index * 0.1}s`}>
+                <a
+                  href={link.url}
+                  class="card card-glass group flex size-14 items-center justify-center rounded-full hover:scale-110 transition-all duration-300"
+                >
+                  <span class="sr-only">{link.description}</span>
+                  <Icon
+                    class="size-6 text-white/70 group-hover:text-blue-400 transition-colors"
+                    name={link.icon}
+                  />
+                </a>
+              </li>
+            ))}
+          </ul>
+
+          <div class="text-center md:text-right">
+            <p class="text-base" style="color: var(--color-text);">
+              &copy; {new Date().getFullYear()} DataMapper. Todos los derechos reservados.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Bottom CTA -->
+      <div class="text-center">
+        <div class="card card-glass inline-block px-6 py-3">
+          <p class="text-base" style="color: var(--color-text);">
+            Hecho con <span class="text-red-400 animate-pulse">❤</span> para simplificar tus migraciones de datos
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+</footer>
