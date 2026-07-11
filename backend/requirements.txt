@@ -18,7 +18,7 @@ websockets==15.0.1
 # Database
 psycopg2-binary==2.9.10
 sqlalchemy==2.0.35
-alembic==1.13.1
+alembic==1.18.5
 pymysql==1.1.0
 redis==5.0.1
 pyodbc==5.1.0
