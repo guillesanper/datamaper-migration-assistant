@@ -231,7 +231,7 @@ def create_test_database():
 
             # Configure the database URL
             db_url = f"postgresql://{config['user']}:{config['password']}@{config['host']}:{config['port']}/datamap_test"
-            alembic_cfg.set_main_option("sqlalchemy.url", db_url)
+            alembic_cfg.set_main_option("sqlalchemy.url", db_url.replace("%", "%%"))
 
             # Suppress Alembic output during setup
             alembic_cfg.set_main_option("sqlalchemy.echo", "false")

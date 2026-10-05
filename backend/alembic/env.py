@@ -2,6 +2,7 @@ import os
 import sys
 from logging.config import fileConfig
 from pathlib import Path
+from urllib.parse import quote_plus
 
 from sqlalchemy import engine_from_config, pool
 
@@ -21,11 +22,14 @@ load_dotenv(encoding="utf-8")
 config = context.config
 
 # Configurar la URL de SQLAlchemy dinámicamente desde variables de entorno
-database_url = (
-    f"postgresql://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}@"
-    f"{os.getenv('DB_HOST')}:{os.getenv('DB_PORT')}/{os.getenv('DB_NAME')}"
-)
-config.set_main_option("sqlalchemy.url", database_url)
+if not config.get_main_option("sqlalchemy.url"):
+    database_url = (
+        f"postgresql://{quote_plus(os.getenv('DB_USER', ''))}:"
+        f"{quote_plus(os.getenv('DB_PASSWORD', ''))}@"
+        f"{os.getenv('DB_HOST')}:{os.getenv('DB_PORT')}/{os.getenv('DB_NAME')}"
+    )
+    # "%" se escapa porque configparser lo interpreta como interpolación
+    config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.

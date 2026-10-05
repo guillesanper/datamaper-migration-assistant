@@ -191,32 +191,23 @@ def create_worker_database(worker_id: str, config: dict) -> bool:
         cursor.close()
         worker_conn.close()
 
-        # Aplicar schema usando SQLAlchemy ORM models
+        # Aplicar schema con las migraciones de Alembic (misma ruta que producción)
         try:
             from urllib.parse import quote_plus
 
-            from sqlalchemy import create_engine
-
-            from app.database.base import Base
-
-            # Importar todos los modelos para que se registren en Base.metadata
-            from app.models import orm  # Esto importa todos los modelos ORM
-
-            # Crear engine para esta base de datos con URL-encoding
             db_user = quote_plus(config["user"])
             db_password = quote_plus(config["password"])
             db_url = f"postgresql://{db_user}:{db_password}@{config['host']}:{config.get('port', '5432')}/{db_name}"
-            engine = create_engine(
-                db_url, echo=False, client_encoding="utf8", connect_args={"client_encoding": "utf8"}
+
+            alembic_cfg = Config(str(Path(__file__).parent.parent / "alembic.ini"))
+            alembic_cfg.set_main_option(
+                "script_location", str(Path(__file__).parent.parent / "alembic")
             )
+            # "%" se escapa porque configparser lo interpreta como interpolación
+            alembic_cfg.set_main_option("sqlalchemy.url", db_url.replace("%", "%%"))
+            command.upgrade(alembic_cfg, "head")
 
-            # Crear todas las tablas desde los modelos ORM (con tipos UUID)
-            Base.metadata.create_all(bind=engine)
-
-            # Cerrar engine
-            engine.dispose()
-
-            print(f"✓ Base de datos {db_name} creada exitosamente con modelos ORM (UUID)")
+            print(f"✓ Base de datos {db_name} creada exitosamente con migraciones Alembic")
             return True
 
         except Exception as e:
