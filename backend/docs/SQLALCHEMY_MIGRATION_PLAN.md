@@ -1,6 +1,26 @@
 # Plan: Migración a SQLAlchemy + Alembic
 
-## Análisis del Problema Actual
+## Estado actual (actualizado tras el baseline de Alembic)
+
+**El esquema sale de `alembic upgrade head`.** Una BD vacía llega al esquema completo con la cadena de `backend/alembic/versions/`, sin dump SQL ni scripts de arranque:
+
+| Revisión | Contenido |
+|---|---|
+| `0001_baseline` | Las 30 tablas de `Base.metadata`, extensiones, tipos enum y `server_default`, generado desde los modelos ORM |
+| `0002_db_functions` | `log_version_activity` y `log_comment_activity` con sus triggers, y `calculate_and_save_user_metrics(uuid)` |
+
+- **Producción/desarrollo**: el servicio `backend` de `docker-compose.yml` ejecuta `alembic upgrade head` antes de `uvicorn`. `docker compose up` sobre una BD vacía funciona; sobre una BD ya migrada no hace nada.
+- **Testing**: `backend/test/conftest.py` y `backend/scripts/setup_test_db.py` crean la BD de cada worker con `alembic upgrade head`. Ya no hay un esquema estático que mantener a mano, por lo que desaparece la desincronización descrita más abajo.
+- **Verificación**: `backend/test/integration/test_alembic_migrations.py` (T1–T6) comprueba que `upgrade head` sobre BD vacía coincide con los modelos (`alembic check` limpio), que `downgrade base` no deja objetos huérfanos, que los `INSERT` crudos de `app/` no omiten columnas `NOT NULL` sin `server_default`, que las funciones existen y que los triggers de actividad hacen su efecto. `alembic check` debe devolver «No new upgrade operations detected.».
+- **SQL legado**: `schema.sql`, `backup_schema.sql`, `migration_001_*.sql` y `utilities/migrations/*.sql` están archivados en [legacy_sql/](legacy_sql/README.md) y **no se ejecutan**. `backend/init-db/` se eliminó.
+- **Cómo crear una migración nueva**: modificar los modelos en `app/models/orm/`, `alembic revision --autogenerate -m "…" --rev-id 000N`, revisarla, escribir el `downgrade()`, `alembic upgrade head` y `alembic check`. Detalle en [how_to_export_db_pgadmin.md](how_to_export_db_pgadmin.md).
+- **Trazabilidad**: auditoría de dependencias de BD fuera del ORM en [ALEMBIC_BASELINE_AUDIT.md](ALEMBIC_BASELINE_AUDIT.md); línea base de tests antes/después en [baseline/README.md](baseline/README.md).
+
+**Pendiente (fuera del alcance del baseline):** las Fases 3 y 4 de este plan (migrar los CRUD psycopg2 restantes a SQLAlchemy y retirar psycopg2) siguen abiertas. Quedan además wrappers psycopg2 sin llamadas (`locks_crud.{acquire_lock,get_lock_status,get_active_locks,cleanup_expired_locks}`, `versions_crud.get_next_version_number`, `services/data_retention_service.py` y `project_crud.{get_user_metrics_comparison,force_recalculate_user_metrics}`); se decidió dejarlos y retirarlos en la limpieza de la Fase 4 de este plan.
+
+> Todo lo que sigue es el plan original, conservado como histórico. Describe el estado **anterior** al baseline (esquema desde `schema.sql`/`init-db`, migraciones SQL manuales) y no refleja el flujo actual.
+
+## Análisis del Problema Actual (histórico)
 
 ### Flujo Actual Identificado
 
