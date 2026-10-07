@@ -1,4 +1,4 @@
-total=1561 passed=1510 failed=19 error=31 skipped=1
+total=1581 passed=1532 failed=17 error=31 skipped=1
 
 ## failed
 test.integration.test_csrf_protection_middleware.TestCSRFMiddleware::test_csrf_middleware_missing_token  | AssertionError: assert 'inválido o expirado' in {'code': 'security.csrf_token_invalid'}
@@ -15,8 +15,6 @@ test.integration.test_db_connection_flow.TestSessionLifecycle::test_delete_sessi
 test.integration.test_db_connection_flow.TestSessionLifecycle::test_list_user_sessions  | app.services.db_connection_service.DBConnectionServiceError: Connection test failed: Cannot connect to PostgreSQL: connection to server at "localhost" (::1), port 5433 failed: Connection refused
 test.integration.test_db_connection_flow.TestSessionLifecycle::test_refresh_session  | app.services.db_connection_service.DBConnectionServiceError: Connection test failed: Cannot connect to PostgreSQL: connection to server at "localhost" (::1), port 5433 failed: Connection refused
 test.integration.test_db_connection_flow.TestSessionLifecycle::test_ttl_validation  | app.services.db_connection_service.DBConnectionServiceError: Connection test failed: Cannot connect to PostgreSQL: connection to server at "localhost" (::1), port 5433 failed: Connection refused
-test.integration.test_tags_crud_integration.TestTagsCrudIntegration::test_create_and_get_tag  | AssertionError: assert 'nuevo_1d939316' == 'testuser'
-test.integration.test_tags_crud_integration.TestTagsCrudIntegration::test_get_tags_by_project  | AssertionError: assert 'nuevo_1d939316' == 'testuser'
 test.unit.test_project_service.TestDeleteProject::test_delete_project_cannot_delete_with_members  | Failed: DID NOT RAISE <class 'fastapi.exceptions.HTTPException'>
 test.unit.test_schema_service.TestValidateTableName::test_validate_table_name_empty  | AssertionError: assert 'obligatorio' in {'code': 'schema.table_name_required'}
 test.unit.test_schema_service.TestValidateTableType::test_validate_table_type_invalid  | AssertionError: assert 'inválido' in {'code': 'schema.table_type_invalid'}

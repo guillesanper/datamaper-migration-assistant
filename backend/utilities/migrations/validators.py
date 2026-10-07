@@ -10,8 +10,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-import psycopg2
-from psycopg2.extras import RealDictCursor
+from sqlalchemy import text
 
 # ============================================================================
 # MATRIZ DE COMPATIBILIDAD DE TIPOS DE DATOS
@@ -314,83 +313,76 @@ class MigrationValidator:
             - examples: lista de ejemplos problemáticos
             - is_safe_data: bool indicando si los datos son seguros
         """
-        cursor = self.db.cursor(cursor_factory=RealDictCursor)
-
-        try:
-            # Get column info
-            cursor.execute(
-                """
+        # Get column info
+        column = (
+            self.db.execute(
+                text("""
                 SELECT c.name, c.data_type, t.name as table_name
                 FROM columns c
                 JOIN tables t ON c.table_id = t.id
-                WHERE c.id = %s
-            """,
-                (column_id,),
+                WHERE c.id = :column_id
+            """),
+                {"column_id": column_id},
             )
-
-            column = cursor.fetchone()
-            if not column:
-                return {
-                    "affected_rows": 0,
-                    "total_rows": 0,
-                    "examples": [],
-                    "is_safe_data": True,
-                    "message": "Columna no encontrada",
-                }
-
-            old_type = column["data_type"]
-            column_name = column["name"]
-
-            # Parse new type
-            new_parsed = self.parse_data_type(new_type)
-
-            # Specific validations based on new type
-            affected_rows = 0
-            examples: list[Any] = []
-            total_rows = 0
-
-            # For VARCHAR/CHAR length reductions
-            if (
-                new_parsed["base_type"] in ["VARCHAR", "CHAR"]
-                and "length" in new_parsed["parameters"]
-            ):
-                new_length = new_parsed["parameters"]["length"]
-
-                # This would require actual table data which we don't have in the schema
-                # In a real implementation, we would query the actual data table
-                # For now, return a placeholder
-
-                return {
-                    "affected_rows": 0,
-                    "total_rows": 0,
-                    "examples": [],
-                    "is_safe_data": True,
-                    "message": f"Se reducirá el límite a {new_length} caracteres. Verificar datos reales antes de aplicar.",
-                }
-
-            # For numeric type changes
-            if (
-                new_parsed["base_type"] in ["NUMERIC", "DECIMAL"]
-                and "precision" in new_parsed["parameters"]
-            ):
-                return {
-                    "affected_rows": 0,
-                    "total_rows": 0,
-                    "examples": [],
-                    "is_safe_data": True,
-                    "message": f'Se cambiará a precisión ({new_parsed["parameters"]["precision"]},{new_parsed["parameters"]["scale"]}). Verificar datos reales.',
-                }
-
+            .mappings()
+            .fetchone()
+        )
+        if not column:
             return {
-                "affected_rows": affected_rows,
-                "total_rows": total_rows,
-                "examples": examples,
+                "affected_rows": 0,
+                "total_rows": 0,
+                "examples": [],
                 "is_safe_data": True,
-                "message": "Análisis completado",
+                "message": "Columna no encontrada",
             }
 
-        finally:
-            cursor.close()
+        old_type = column["data_type"]
+        column_name = column["name"]
+
+        # Parse new type
+        new_parsed = self.parse_data_type(new_type)
+
+        # Specific validations based on new type
+        affected_rows = 0
+        examples: list[Any] = []
+        total_rows = 0
+
+        # For VARCHAR/CHAR length reductions
+        if new_parsed["base_type"] in ["VARCHAR", "CHAR"] and "length" in new_parsed["parameters"]:
+            new_length = new_parsed["parameters"]["length"]
+
+            # This would require actual table data which we don't have in the schema
+            # In a real implementation, we would query the actual data table
+            # For now, return a placeholder
+
+            return {
+                "affected_rows": 0,
+                "total_rows": 0,
+                "examples": [],
+                "is_safe_data": True,
+                "message": f"Se reducirá el límite a {new_length} caracteres. Verificar datos reales antes de aplicar.",
+            }
+
+        # For numeric type changes
+        if (
+            new_parsed["base_type"] in ["NUMERIC", "DECIMAL"]
+            and "precision" in new_parsed["parameters"]
+        ):
+            return {
+                "affected_rows": 0,
+                "total_rows": 0,
+                "examples": [],
+                "is_safe_data": True,
+                "message": f'Se cambiará a precisión ({new_parsed["parameters"]["precision"]},{new_parsed["parameters"]["scale"]}). Verificar datos reales.',
+            }
+
+        return {
+            "affected_rows": affected_rows,
+            "total_rows": total_rows,
+            "examples": examples,
+            "is_safe_data": True,
+            "message": "Análisis completado",
+        }
 
     def validate_type_change(
         self, table_id: str, column_id: str, old_type: str, new_type: str
@@ -479,48 +471,41 @@ class BackupManager:
             "files": [],
         }
 
-        cursor = self.db.cursor(cursor_factory=RealDictCursor)
+        for table_name in tables:
+            # Get table data
+            rows = self.db.execute(text(f"SELECT * FROM {table_name}")).mappings().all()
 
-        try:
-            for table_name in tables:
-                # Get table data
-                cursor.execute(f"SELECT * FROM {table_name}")
-                rows = cursor.fetchall()
+            # Convert to list of dicts
+            data = [dict(row) for row in rows]
 
-                # Convert to list of dicts
-                data = [dict(row) for row in rows]
+            # Save to file
+            filename = f"{backup_id}_{table_name}.json"
+            filepath = self.backup_dir / filename
 
-                # Save to file
-                filename = f"{backup_id}_{table_name}.json"
-                filepath = self.backup_dir / filename
-
-                with open(filepath, "w", encoding="utf-8") as f:
-                    json.dump(
-                        {
-                            "table": table_name,
-                            "timestamp": backup_info["timestamp"],
-                            "row_count": len(data),
-                            "data": data,
-                        },
-                        f,
-                        indent=2,
-                        default=str,
-                    )
-
-                backup_info["tables"].append(
-                    {"table": table_name, "row_count": len(data), "file": filename}
+            with open(filepath, "w", encoding="utf-8") as f:
+                json.dump(
+                    {
+                        "table": table_name,
+                        "timestamp": backup_info["timestamp"],
+                        "row_count": len(data),
+                        "data": data,
+                    },
+                    f,
+                    indent=2,
+                    default=str,
                 )
-                backup_info["files"].append(str(filepath))
 
-            # Save backup metadata
-            metadata_file = self.backup_dir / f"{backup_id}_metadata.json"
-            with open(metadata_file, "w", encoding="utf-8") as f:
-                json.dump(backup_info, f, indent=2)
+            backup_info["tables"].append(
+                {"table": table_name, "row_count": len(data), "file": filename}
+            )
+            backup_info["files"].append(str(filepath))
 
-            return backup_info
+        # Save backup metadata
+        metadata_file = self.backup_dir / f"{backup_id}_metadata.json"
+        with open(metadata_file, "w", encoding="utf-8") as f:
+            json.dump(backup_info, f, indent=2)
 
-        finally:
-            cursor.close()
+        return backup_info
 
     def list_backups(self) -> List[Dict[str, Any]]:
         """Listar todos los backups disponibles"""
@@ -558,7 +543,6 @@ class BackupManager:
         with open(metadata_file, "r", encoding="utf-8") as f:
             backup_info = json.load(f)
 
-        cursor = self.db.cursor()
         restored_tables = []
 
         try:
@@ -591,8 +575,6 @@ class BackupManager:
         except Exception as e:
             self.db.rollback()
             return {"success": False, "message": f"Error al restaurar backup: {str(e)}"}
-        finally:
-            cursor.close()
 
     def cleanup_old_backups(self) -> Dict[str, Any]:
         """Eliminar backups más antiguos que retention_days"""

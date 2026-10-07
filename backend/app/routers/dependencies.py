@@ -21,8 +21,8 @@ class CurrentUserORM:
     """
     Dependencia para obtener el usuario actual autenticado (SQLAlchemy ORM version)
 
-    Esta es la versión ORM de CurrentUser que usa SQLAlchemy Session en vez de
-    psycopg2.connection. Útil para routers que ya migraron a usar CRUDs _orm.
+    Usa una SQLAlchemy Session para obtener al usuario autenticado y es la
+    dependencia que usan los routers basados en CRUDs _orm.
 
     Mantiene exactamente la misma interfaz de retorno que CurrentUser (dict),
     pero usa queries ORM internamente.

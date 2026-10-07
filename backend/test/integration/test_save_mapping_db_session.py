@@ -1,12 +1,12 @@
 """
 Regression test: save_mapping endpoint must use SQLAlchemy ORM session for ORM calls.
 
-Bug: save_mapping used get_db (psycopg2 connection) for all DB operations, but
+Bug: save_mapping used a raw psycopg2 connection for all DB operations, but
      ORM functions like get_tables_by_project_orm require a SQLAlchemy Session.
      This caused: AttributeError: 'psycopg2.extensions.connection' has no attribute 'query'
 
-Fix: save_mapping now injects db_orm=Depends(get_db_session) and passes it to all
-     *_orm CRUD functions, while keeping db (psycopg2) for raw cursor operations.
+Fix: save_mapping injects db_orm=Depends(get_db_session) and uses that single
+     SQLAlchemy Session for both the ORM CRUD functions and its own SQL queries.
 """
 
 import uuid

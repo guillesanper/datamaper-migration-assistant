@@ -7,10 +7,9 @@ import time
 
 from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
-from psycopg2.extras import RealDictCursor
 from pydantic import BaseModel
+from sqlalchemy import text as sql_text
 
-from app.database.database import get_db
 from app.database.session import get_db_session
 
 logger = logging.getLogger(__name__)
@@ -18,13 +17,13 @@ from collections import defaultdict as _dd
 from datetime import datetime, timezone
 from io import StringIO
 from typing import Any, Dict, List, Optional, Set
+from uuid import UUID
 
 from fastapi import Request, status
 from jsonschema import Draft202012Validator
 from jsonschema import exceptions as schema_exceptions
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
-from psycopg2.extras import execute_values
 from starlette.concurrency import run_in_threadpool
 
 from app.models.db_connection import DBConnectionConfig
@@ -131,6 +130,23 @@ def utcnow_iso():
     return datetime.now(timezone.utc).isoformat()
 
 
+def _plain(value):
+    """Los UUID de las consultas SQL directas se devuelven como str (no como uuid.UUID)."""
+    return str(value) if isinstance(value, UUID) else value
+
+
+def _fetch_all(db, sql: str, params: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    """Ejecuta SQL con parámetros con nombre (:p) en la Session y devuelve filas como dict."""
+    rows = db.execute(sql_text(sql), params or {}).mappings().all()
+    return [{k: _plain(v) for k, v in row.items()} for row in rows]
+
+
+def _fetch_one(db, sql: str, params: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+    """Como _fetch_all pero devuelve la primera fila (o None)."""
+    row = db.execute(sql_text(sql), params or {}).mappings().first()
+    return {k: _plain(v) for k, v in row.items()} if row else None
+
+
 class Step:
     def __init__(self, name):
         self.name, self.t = name, time.perf_counter()
@@ -146,7 +162,7 @@ def export_mappings(
     request: Request,
     project_id: str,
     format: str = "json",
-    db=Depends(get_db),
+    db=Depends(get_db_session),
     current_user=Depends(get_current_user),
 ):
     import sys
@@ -169,12 +185,10 @@ def export_mappings(
 
     try:
         _ = make_translator(request)
-        cursor = db.cursor(cursor_factory=RealDictCursor)
 
         # Validar permisos: owner, editor o viewer
         log.info(f"[EXPORT] Checking permissions...")
-        cursor.execute("SELECT owner_id FROM projects WHERE id = %s", (project_id,))
-        proj = cursor.fetchone()
+        proj = _fetch_one(db, "SELECT owner_id FROM projects WHERE id = :pid", {"pid": project_id})
 
         if not proj:
             log.error(f"[EXPORT] Project not found")
@@ -182,15 +196,15 @@ def export_mappings(
 
         log.info(f"[EXPORT] Project found, owner_id={proj['owner_id']}")
 
-        if proj["owner_id"] != current_user["id"]:
-            cursor.execute(
+        if proj["owner_id"] != str(current_user["id"]):
+            membership = _fetch_one(
+                db,
                 """
                 SELECT role FROM project_members
-                WHERE project_id = %s AND user_id = %s
+                WHERE project_id = :pid AND user_id = :uid
             """,
-                (project_id, current_user["id"]),
+                {"pid": project_id, "uid": current_user["id"]},
             )
-            membership = cursor.fetchone()
             if not membership:
                 raise HTTPException(status_code=403, detail=_("mappings.no_permission"))
 
@@ -199,14 +213,16 @@ def export_mappings(
 
         # Obtener todos los mappings
         log.info(f"[EXPORT] Getting mappings...")
-        cursor.execute(
+        # La tabla mappings no tiene columna notes: se devuelve NULL para conservar el formato
+        mappings = _fetch_all(
+            db,
             """
-            SELECT origin_table, origin_column, destination_table, destination_column, notes
-            FROM mappings WHERE project_id = %s
+            SELECT origin_table, origin_column, destination_table, destination_column,
+                   NULL AS notes
+            FROM mappings WHERE project_id = :pid
         """,
-            (project_id,),
+            {"pid": project_id},
         )
-        mappings = cursor.fetchall()
         log.info(f"[EXPORT] Found {len(mappings)} mappings")
 
         if format != "excel" and not mappings:
@@ -223,14 +239,14 @@ def export_mappings(
                 mapped_columns_by_table.setdefault(dest_table, set()).add(dest_column)
 
             # Obtener todas las tablas destino del proyecto
-            cursor.execute(
+            destination_tables = _fetch_all(
+                db,
                 """
                 SELECT id, name FROM tables
-                WHERE project_id = %s AND type = 'destination'
+                WHERE project_id = :pid AND type = 'destination'
             """,
-                (project_id,),
+                {"pid": project_id},
             )
-            destination_tables = cursor.fetchall()
 
             for table_row in destination_tables:
                 table_id = table_row["id"] if isinstance(table_row, dict) else table_row[0]
@@ -241,15 +257,15 @@ def export_mappings(
                     continue  # Saltamos comprobación si no hay mapeos para esa tabla
 
                 # Obtener columnas de esa tabla destino
-                cursor.execute(
+                columns = _fetch_all(
+                    db,
                     """
                     SELECT name, is_nullable, is_primary, COALESCE(is_autogenerated, false) AS is_autogenerated
                     FROM columns
-                    WHERE table_id = %s AND table_type = 'destination'
+                    WHERE table_id = :tid AND table_type = 'destination'
                 """,
-                    (table_id,),
+                    {"tid": table_id},
                 )
-                columns = cursor.fetchall()
 
                 for col in columns:
                     name = col["name"] if isinstance(col, dict) else col[0]
@@ -280,30 +296,30 @@ def export_mappings(
         log.info(f"[EXPORT] Starting format export: {format}")
         if format == "json":
             # Obtener información del proyecto
-            cursor.execute(
+            proj_info = _fetch_one(
+                db,
                 """
                 SELECT name, origin_db, destination_db, created_at
-                FROM projects WHERE id = %s
+                FROM projects WHERE id = :pid
             """,
-                (project_id,),
+                {"pid": project_id},
             )
-            proj_info = cursor.fetchone()
 
             if not proj_info:
                 raise HTTPException(status_code=404, detail=make_error(ErrorCode.PROJECT_NOT_FOUND))
 
             # Obtener metadatos de columnas
-            cursor.execute(
+            columns_info = _fetch_all(
+                db,
                 """
                 SELECT t.name as table_name, t.type as table_type,
                     c.name as column_name, c.data_type, c.is_nullable, c.is_primary
                 FROM tables t
                 JOIN columns c ON t.id = c.table_id
-                WHERE t.project_id = %s
+                WHERE t.project_id = :pid
             """,
-                (project_id,),
+                {"pid": project_id},
             )
-            columns_info = cursor.fetchall()
 
             # Crear diccionario de metadatos
             metadata = {}
@@ -379,17 +395,17 @@ def export_mappings(
 
         elif format == "csv":
             # Obtener metadatos para formato empresarial
-            cursor.execute(
+            columns_info = _fetch_all(
+                db,
                 """
                 SELECT t.name as table_name, t.type as table_type,
                     c.name as column_name, c.data_type, c.is_nullable, c.is_primary
                 FROM tables t
                 JOIN columns c ON t.id = c.table_id
-                WHERE t.project_id = %s
+                WHERE t.project_id = :pid
             """,
-                (project_id,),
+                {"pid": project_id},
             )
-            columns_info = cursor.fetchall()
 
             metadata = {}
             for col in columns_info:
@@ -459,7 +475,8 @@ def export_mappings(
         elif format == "excel":
 
             # 1) Traer todas las columnas de tablas ORIGIN
-            cursor.execute(
+            origin_data = _fetch_all(
+                db,
                 """
                 SELECT t.name as table_name,
                     c.name as column_name,
@@ -468,12 +485,11 @@ def export_mappings(
                     c.is_nullable
                 FROM tables t
                 LEFT JOIN columns c ON t.id = c.table_id
-                WHERE t.project_id = %s AND t.type = 'origin'
+                WHERE t.project_id = :pid AND t.type = 'origin'
                 ORDER BY t.name, c.id
             """,
-                (project_id,),
+                {"pid": project_id},
             )
-            origin_data = cursor.fetchall()
 
             # 2) Construir un multimap: origin_table.origin_column -> lista de (dest_table, dest_column)
             mappings_map: dict[str, list[tuple[str, str]]] = {}
@@ -611,39 +627,40 @@ def export_mappings(
 
 @router.get("/projects/{project_id}/tables")
 async def get_project_tables(
-    project_id: str, request: Request, db=Depends(get_db), current_user=Depends(get_current_user)
+    project_id: str,
+    request: Request,
+    db=Depends(get_db_session),
+    current_user=Depends(get_current_user),
 ):
     """
     Obtiene todas las tablas y columnas de un proyecto
     """
     from app.crud import master_key_crud
 
-    cursor = db.cursor(cursor_factory=RealDictCursor)
-
     try:
         # Verificar acceso al proyecto
-        cursor.execute(
+        project = _fetch_one(
+            db,
             """
-            SELECT owner_id FROM projects WHERE id = %s
+            SELECT owner_id FROM projects WHERE id = :pid
         """,
-            (project_id,),
+            {"pid": project_id},
         )
-        project = cursor.fetchone()
 
         if not project:
             raise HTTPException(status_code=404, detail=make_error(ErrorCode.PROJECT_NOT_FOUND))
 
         # Verificar si es owner o miembro
-        cursor.execute(
+        member = _fetch_one(
+            db,
             """
             SELECT role FROM project_members
-            WHERE project_id = %s AND user_id = %s
+            WHERE project_id = :pid AND user_id = :uid
         """,
-            (project_id, current_user["id"]),
+            {"pid": project_id, "uid": current_user["id"]},
         )
-        member = cursor.fetchone()
 
-        is_owner = project["owner_id"] == current_user["id"]
+        is_owner = project["owner_id"] == str(current_user["id"])
         if not is_owner and not member:
             raise HTTPException(status_code=403, detail=make_error(ErrorCode.PROJECT_NO_ACCESS))
 
@@ -684,41 +701,41 @@ async def get_project_tables(
             logger.info(f"[GET /tables] encryption_key length: {len(encryption_key)}")
 
         # Check if project has encryption enabled
-        cursor.execute(
+        encryption_config = _fetch_one(
+            db,
             """
             SELECT encryption_enabled FROM project_encryption
-            WHERE project_id = %s
+            WHERE project_id = :pid
         """,
-            (project_id,),
+            {"pid": project_id},
         )
-        encryption_config = cursor.fetchone()
         is_encrypted = encryption_config and encryption_config.get("encryption_enabled", False)
         logger.info(f"[GET /tables] is_encrypted: {is_encrypted}")
 
         # Obtener tablas con campos de encriptación si están disponibles
         if is_encrypted:
-            cursor.execute(
+            tables_raw = _fetch_all(
+                db,
                 """
                 SELECT id, project_id, name, type, created_at, updated_at,
                        name_encrypted, name_nonce
                 FROM tables
-                WHERE project_id = %s
+                WHERE project_id = :pid
                 ORDER BY type, name
             """,
-                (project_id,),
+                {"pid": project_id},
             )
         else:
-            cursor.execute(
+            tables_raw = _fetch_all(
+                db,
                 """
                 SELECT id, project_id, name, type, created_at, updated_at
                 FROM tables
-                WHERE project_id = %s
+                WHERE project_id = :pid
                 ORDER BY type, name
             """,
-                (project_id,),
+                {"pid": project_id},
             )
-
-        tables_raw = cursor.fetchall()
 
         # Obtener columnas para cada tabla
         table_ids = [t["id"] for t in tables_raw]
@@ -726,7 +743,8 @@ async def get_project_tables(
 
         if table_ids:
             if is_encrypted:
-                cursor.execute(
+                columns_raw = _fetch_all(
+                    db,
                     """
                     SELECT id, table_id, name, data_type, table_type,
                            is_nullable, is_primary, is_autogenerated,
@@ -734,25 +752,26 @@ async def get_project_tables(
                            name_encrypted, name_nonce,
                            data_type_encrypted, data_type_nonce
                     FROM columns
-                    WHERE table_id = ANY(%s::uuid[])
+                    WHERE table_id = ANY(CAST(:ids AS uuid[]))
                     ORDER BY name
                 """,
-                    (table_ids,),
+                    {"ids": table_ids},
                 )
             else:
-                cursor.execute(
+                columns_raw = _fetch_all(
+                    db,
                     """
                     SELECT id, table_id, name, data_type, table_type,
                            is_nullable, is_primary, is_autogenerated,
                            created_at, updated_at
                     FROM columns
-                    WHERE table_id = ANY(%s::uuid[])
+                    WHERE table_id = ANY(CAST(:ids AS uuid[]))
                     ORDER BY name
                 """,
-                    (table_ids,),
+                    {"ids": table_ids},
                 )
 
-            for col in cursor.fetchall():
+            for col in columns_raw:
                 col_dict = dict(col)
                 logger.debug(
                     f"[GET /tables] Column raw: name={col_dict.get('name')}, has_encrypted={col_dict.get('name_encrypted') is not None}"
@@ -839,8 +858,6 @@ async def get_project_tables(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        cursor.close()
 
 
 @router.get("/projects/{project_id}")
@@ -947,7 +964,6 @@ async def save_mapping(
     project_id: str,
     mapping: MappingCreate,
     request: Request,
-    db=Depends(get_db),
     db_orm=Depends(get_db_session),
     current_user=Depends(get_current_user),
     # NUEVOS parámetros para modo híbrido (query params opcionales)
@@ -958,7 +974,6 @@ async def save_mapping(
     origin_table_id: Optional[str] = None,
     destination_table_id: Optional[str] = None,
 ):
-    cursor = db.cursor(cursor_factory=RealDictCursor)
     current_time = datetime.now(timezone.utc).replace(tzinfo=None)
 
     try:
@@ -978,68 +993,75 @@ async def save_mapping(
             return resp
 
         # Verificar que el proyecto existe
-        cursor.execute(
+        project = _fetch_one(
+            db_orm,
             """
-            SELECT owner_id FROM projects WHERE id = %s
+            SELECT owner_id FROM projects WHERE id = :pid
         """,
-            (project_id,),
+            {"pid": project_id},
         )
-        project = cursor.fetchone()
 
         if not project:
             raise HTTPException(status_code=404, detail=_("mappings.project_not_found"))
 
         # Verificar si es owner o editor
-        cursor.execute(
+        member = _fetch_one(
+            db_orm,
             """
             SELECT role FROM project_members
-            WHERE project_id = %s AND user_id = %s
+            WHERE project_id = :pid AND user_id = :uid
         """,
-            (project_id, current_user["id"]),
+            {"pid": project_id, "uid": current_user["id"]},
         )
-        member = cursor.fetchone()
-        es_owner = project["owner_id"] == current_user["id"]
+        es_owner = project["owner_id"] == str(current_user["id"])
         es_editor = member and member["role"] == "editor"
 
         if not es_owner and not es_editor:
             raise HTTPException(status_code=403, detail=_("mappings.no_permission"))
 
         # === Límites por plan (primero tablas, luego atributos) ===
-        cursor.execute(
-            """
+        has_pro = bool(
+            _fetch_one(
+                db_orm,
+                """
             SELECT 1
             FROM subscriptions
-            WHERE project_id = %s
+            WHERE project_id = :pid
               AND LOWER(status) IN ('active','trialing')
               AND plan_id = 'pro'
             LIMIT 1
         """,
-            (project_id,),
+                {"pid": project_id},
+            )
         )
-        has_pro = bool(cursor.fetchone())
         MAX_TABLES = 140 if has_pro else 20
         MAX_COLS = 200 if has_pro else 60
 
         # 1) Tablas totales
-        cursor.execute("SELECT COUNT(*) AS c FROM tables WHERE project_id = %s", (project_id,))
-        total_tables = int(cursor.fetchone()["c"])
+        total_tables = int(
+            _fetch_one(
+                db_orm,
+                "SELECT COUNT(*) AS c FROM tables WHERE project_id = :pid",
+                {"pid": project_id},
+            )["c"]
+        )
         if total_tables > MAX_TABLES:
             return redirect_with_flash(_("schemas.max_pro") if has_pro else _("schemas.max_free"))
 
         # 2) Atributos: ninguna tabla del proyecto debe superar MAX_COLS
-        cursor.execute(
+        if _fetch_one(
+            db_orm,
             """
             SELECT 1
             FROM tables t
             LEFT JOIN columns c ON c.table_id = t.id
-            WHERE t.project_id = %s
+            WHERE t.project_id = :pid
             GROUP BY t.id
-            HAVING COUNT(c.id) > %s
+            HAVING COUNT(c.id) > :max_cols
             LIMIT 1
         """,
-            (project_id, MAX_COLS),
-        )
-        if cursor.fetchone():
+            {"pid": project_id, "max_cols": MAX_COLS},
+        ):
             return redirect_with_flash(
                 _("mappings.max_col_pro") if has_pro else _("mappings.max_col_free")
             )
@@ -1166,28 +1188,28 @@ async def save_mapping(
 
         # 3. Validar table_ids si están en modo import (opcional pero recomendado)
         if origin_source_type == "import" and origin_table_id:
-            cursor.execute(
+            if not _fetch_one(
+                db_orm,
                 """
                 SELECT id FROM tables
-                WHERE id = %s AND project_id = %s
+                WHERE id = :tid AND project_id = :pid
             """,
-                (origin_table_id, project_id),
-            )
-            if not cursor.fetchone():
+                {"tid": origin_table_id, "pid": project_id},
+            ):
                 raise HTTPException(
                     status_code=404,
                     detail=f"origin_table_id '{origin_table_id}' not found in project tables",
                 )
 
         if destination_source_type == "import" and destination_table_id:
-            cursor.execute(
+            if not _fetch_one(
+                db_orm,
                 """
                 SELECT id FROM tables
-                WHERE id = %s AND project_id = %s
+                WHERE id = :tid AND project_id = :pid
             """,
-                (destination_table_id, project_id),
-            )
-            if not cursor.fetchone():
+                {"tid": destination_table_id, "pid": project_id},
+            ):
                 raise HTTPException(
                     status_code=404,
                     detail=f"destination_table_id '{destination_table_id}' not found in project tables",
@@ -1391,7 +1413,6 @@ async def save_mapping(
     except HTTPException:
         raise
     except Exception as e:
-        db.rollback()
         try:
             db_orm.rollback()
         except Exception:
@@ -1403,68 +1424,65 @@ async def save_mapping(
         print(f"[MAPPING ERROR] Exception message: {str(e)}")
         print(f"[MAPPING ERROR] Traceback:\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=_("mappings.save_error_generic"))
-    finally:
-        cursor.close()
 
 
 # Validar mappings del proyecto
 @router.post("/projects/{project_id}/validate")
 async def validate_mappings(
-    project_id: str, db=Depends(get_db), current_user=Depends(get_current_user)
+    project_id: str, db=Depends(get_db_session), current_user=Depends(get_current_user)
 ):
     """Valida que todos los mappings del proyecto sean correctos"""
-    cursor = db.cursor(cursor_factory=RealDictCursor)
-
     try:
         # Verificar acceso
-        cursor.execute("SELECT owner_id FROM projects WHERE id = %s", (project_id,))
-        project = cursor.fetchone()
+        project = _fetch_one(
+            db, "SELECT owner_id FROM projects WHERE id = :pid", {"pid": project_id}
+        )
 
         if not project:
             raise HTTPException(status_code=404, detail=make_error(ErrorCode.PROJECT_NOT_FOUND))
 
-        cursor.execute(
+        member = _fetch_one(
+            db,
             """
             SELECT role FROM project_members
-            WHERE project_id = %s AND user_id = %s
+            WHERE project_id = :pid AND user_id = :uid
         """,
-            (project_id, current_user["id"]),
+            {"pid": project_id, "uid": current_user["id"]},
         )
-        member = cursor.fetchone()
 
-        is_owner = project["owner_id"] == current_user["id"]
+        is_owner = project["owner_id"] == str(current_user["id"])
         if not is_owner and not member:
             raise HTTPException(status_code=403, detail=make_error(ErrorCode.PROJECT_NO_ACCESS))
 
         errors = []
 
         # Obtener tablas destino con columnas obligatorias
-        cursor.execute(
+        required_columns = _fetch_all(
+            db,
             """
             SELECT t.name as table_name, c.name as column_name, c.is_nullable, c.is_primary,
                    COALESCE(c.is_autogenerated, false) as is_autogenerated
             FROM tables t
             JOIN columns c ON t.id = c.table_id
-            WHERE t.project_id = %s AND t.type = 'destination'
+            WHERE t.project_id = :pid AND t.type = 'destination'
             AND (c.is_primary = true OR c.is_nullable = false)
         """,
-            (project_id,),
+            {"pid": project_id},
         )
 
-        required_columns = cursor.fetchall()
-
         # Obtener mappings existentes
-        cursor.execute(
+        existing_mappings = _fetch_all(
+            db,
             """
             SELECT destination_table, destination_column
             FROM mappings
-            WHERE project_id = %s
+            WHERE project_id = :pid
         """,
-            (project_id,),
+            {"pid": project_id},
         )
 
         mapped_columns = set()
-        for m in cursor.fetchall():
+        for m in existing_mappings:
             mapped_columns.add(f"{m['destination_table']}.{m['destination_column']}")
 
         # Validar columnas obligatorias
@@ -1489,8 +1507,6 @@ async def validate_mappings(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        cursor.close()
 
 
 # Eliminar mapping
@@ -1502,13 +1518,11 @@ async def delete_mapping(
     origin_column: str = Body(...),
     destination_table: str = Body(...),
     destination_column: str = Body(...),
-    db=Depends(get_db),
     db_orm=Depends(get_db_session),
     current_user=Depends(get_current_user),
 ):
     from app.crud import mappings_crud
 
-    cursor = db.cursor(cursor_factory=RealDictCursor)
     try:
         _ = make_translator(request)
 
@@ -1518,61 +1532,69 @@ async def delete_mapping(
             return resp
 
         # Permisos
-        cursor.execute("SELECT owner_id FROM projects WHERE id = %s", (project_id,))
-        project = cursor.fetchone()
+        project = _fetch_one(
+            db_orm, "SELECT owner_id FROM projects WHERE id = :pid", {"pid": project_id}
+        )
         if not project:
             raise HTTPException(status_code=404, detail=_("mappings.project_not_found"))
 
-        if project["owner_id"] != current_user["id"]:
-            cursor.execute(
+        if project["owner_id"] != str(current_user["id"]):
+            membership = _fetch_one(
+                db_orm,
                 """
                 SELECT role
                 FROM project_members
-                WHERE project_id = %s AND user_id = %s
+                WHERE project_id = :pid AND user_id = :uid
             """,
-                (project_id, current_user["id"]),
+                {"pid": project_id, "uid": current_user["id"]},
             )
-            membership = cursor.fetchone()
             if not membership or membership["role"] != "editor":
                 # (opcional) volver al proyecto en lugar de /projects
                 return redirect_with_flash(_("mappings.no_permission"))
 
         # --- Límites de plan (mismas que save_mapping) ---
-        cursor.execute(
-            """
+        has_pro = bool(
+            _fetch_one(
+                db_orm,
+                """
             SELECT 1
             FROM subscriptions
-            WHERE project_id = %s
+            WHERE project_id = :pid
               AND LOWER(status) IN ('active','trialing')
               AND plan_id = 'pro'
             LIMIT 1
         """,
-            (project_id,),
+                {"pid": project_id},
+            )
         )
-        has_pro = bool(cursor.fetchone())
         MAX_TABLES = 140 if has_pro else 20
         MAX_COLS = 200 if has_pro else 60
 
         # 1) Tablas totales
-        cursor.execute("SELECT COUNT(*) AS c FROM tables WHERE project_id = %s", (project_id,))
-        total_tables = int(cursor.fetchone()["c"])
+        total_tables = int(
+            _fetch_one(
+                db_orm,
+                "SELECT COUNT(*) AS c FROM tables WHERE project_id = :pid",
+                {"pid": project_id},
+            )["c"]
+        )
         if total_tables > MAX_TABLES:
             return redirect_with_flash(_("schemas.max_pro") if has_pro else _("schemas.max_free"))
 
         # 2) Atributos por tabla
-        cursor.execute(
+        if _fetch_one(
+            db_orm,
             """
             SELECT 1
             FROM tables t
             LEFT JOIN columns c ON c.table_id = t.id
-            WHERE t.project_id = %s
+            WHERE t.project_id = :pid
             GROUP BY t.id
-            HAVING COUNT(c.id) > %s
+            HAVING COUNT(c.id) > :max_cols
             LIMIT 1
         """,
-            (project_id, MAX_COLS),
-        )
-        if cursor.fetchone():
+            {"pid": project_id, "max_cols": MAX_COLS},
+        ):
             return redirect_with_flash(
                 _("mappings.max_col_pro") if has_pro else _("mappings.max_col_free")
             )
@@ -1698,14 +1720,11 @@ async def delete_mapping(
     except HTTPException:
         raise
     except Exception as e:
-        db.rollback()
         try:
             db_orm.rollback()
         except Exception:
             pass
         raise HTTPException(status_code=500, detail=_("mappings.save_error_generic"))
-    finally:
-        cursor.close()
 
 
 # Importar estructura de tablas (JSON + CSV + XLSX) con límites Free/Pro
@@ -1716,24 +1735,22 @@ async def import_structure(
     file: UploadFile = File(...),
     format: str = Form("json"),
     duplicate_strategy: str = Form("skip"),
-    db=Depends(get_db),
-    db_orm=Depends(get_db_session),
+    db=Depends(get_db_session),
     current_user=Depends(get_current_user),
 ):
     _ = make_translator(request)
 
-    def ensure_editor_permissions(cursor):
-        cursor.execute("SELECT owner_id FROM projects WHERE id = %s", (project_id,))
-        proj = cursor.fetchone()
+    def ensure_editor_permissions(db):
+        proj = _fetch_one(db, "SELECT owner_id FROM projects WHERE id = :pid", {"pid": project_id})
         if not proj:
             raise HTTPException(status_code=404, detail=_("mappings.project_not_found"))
-        if proj["owner_id"] == current_user["id"]:
+        if proj["owner_id"] == str(current_user["id"]):
             return
-        cursor.execute(
-            "SELECT role FROM project_members WHERE project_id=%s AND user_id=%s",
-            (project_id, current_user["id"]),
+        row = _fetch_one(
+            db,
+            "SELECT role FROM project_members WHERE project_id = :pid AND user_id = :uid",
+            {"pid": project_id, "uid": current_user["id"]},
         )
-        row = cursor.fetchone()
         if not row or row["role"] != "editor":
             raise HTTPException(
                 status_code=403,
@@ -1750,7 +1767,6 @@ async def import_structure(
     ALLOWED_TYPES = {"TEXT", "INTEGER", "REAL", "BOOLEAN", "DATE", "DATETIME"}
     TRUES = {"1", "true", "yes", "y", "t", "si", "sí"}
 
-    cursor = db.cursor(cursor_factory=RealDictCursor)
     current_time = datetime.now(timezone.utc).replace(tzinfo=None)
 
     # Import CRUD para encriptación
@@ -1758,7 +1774,7 @@ async def import_structure(
 
     try:
         # Permisos
-        ensure_editor_permissions(cursor)
+        ensure_editor_permissions(db)
 
         #  Obtener encryption key del middleware
         encryption_key = getattr(request.state, "encryption_key", None)
@@ -1840,7 +1856,7 @@ async def import_structure(
         # ✅ VALIDACIÓN PRE-VUELO: Verificar encriptación ANTES de procesar archivo
         from app.crud import master_key_crud
 
-        config = master_key_crud.get_project_encryption_orm(db_orm, project_id)
+        config = master_key_crud.get_project_encryption_orm(db, project_id)
 
         if config and config["encryption_enabled"]:
             debug_logger.info(f"[IMPORT_DEBUG] Proyecto {project_id} tiene encriptación habilitada")
@@ -1943,18 +1959,20 @@ async def import_structure(
                 )
 
         # --------- Plan (Free / Pro) ----------
-        cursor.execute(
-            """
+        has_pro = bool(
+            _fetch_one(
+                db,
+                """
             SELECT 1
             FROM subscriptions
-            WHERE project_id = %s
+            WHERE project_id = :pid
               AND LOWER(status) IN ('active','trialing')
               AND plan_id = 'pro'
             LIMIT 1
         """,
-            (project_id,),
+                {"pid": project_id},
+            )
         )
-        has_pro = bool(cursor.fetchone())
         max_tables = 140 if has_pro else 20
         MAX_COLS = 200 if has_pro else 60
 
@@ -2141,10 +2159,10 @@ async def import_structure(
         # -----------------------------
         # ✅ Tablas existentes - usar CRUD con desencriptación
         existing_origin = schemas_crud.get_tables_by_project_orm(
-            db_orm, project_id, "origin", encryption_key
+            db, project_id, "origin", encryption_key
         )
         existing_dest = schemas_crud.get_tables_by_project_orm(
-            db_orm, project_id, "destination", encryption_key
+            db, project_id, "destination", encryption_key
         )
         all_existing_tables = existing_origin + existing_dest
         existing_tables = {
@@ -2173,8 +2191,9 @@ async def import_structure(
             # Eliminar tablas existentes (CASCADE eliminará columnas)
             for tid, tname, ttype in tables_to_replace:
                 # Obtener conteo de columnas antes de eliminar
-                cursor.execute("SELECT COUNT(*) AS count FROM columns WHERE table_id = %s", (tid,))
-                col_count_row = cursor.fetchone()
+                col_count_row = _fetch_one(
+                    db, "SELECT COUNT(*) AS count FROM columns WHERE table_id = :tid", {"tid": tid}
+                )
                 col_count = int(col_count_row["count"]) if col_count_row else 0
 
                 # Eliminar tabla (schemas_crud maneja la eliminación de columnas y mappings en cascada)
@@ -2193,8 +2212,11 @@ async def import_structure(
         new_needed = sum(1 for k in desired_keys if k not in existing_tables)
 
         # Cuenta actual
-        cursor.execute("SELECT COUNT(*) AS c FROM tables WHERE project_id=%s", (project_id,))
-        current_count = int(cursor.fetchone()["c"])
+        current_count = int(
+            _fetch_one(
+                db, "SELECT COUNT(*) AS c FROM tables WHERE project_id = :pid", {"pid": project_id}
+            )["c"]
+        )
 
         if current_count + new_needed > max_tables:
             # Límite de número de tablas
@@ -2206,9 +2228,7 @@ async def import_structure(
             for table in all_existing_tables:
                 if table.get("name") and table.get("id"):
                     # Cargar columnas desencriptadas para cada tabla
-                    columns = schemas_crud.get_columns_by_table_orm(
-                        db_orm, table["id"], encryption_key
-                    )
+                    columns = schemas_crud.get_columns_by_table_orm(db, table["id"], encryption_key)
                     col_names = {col["name"] for col in columns if col.get("name")}
                     exist_cols_map[(table["name"], table["type"])] = col_names
 
@@ -2320,11 +2340,11 @@ async def import_structure(
 
         existing_cols_by_tid = _dd(set)
         if affected_table_ids:
-            cursor.execute(
-                "SELECT c.table_id, c.name FROM columns c WHERE c.table_id = ANY(%s::uuid[])",
-                (list(affected_table_ids),),
-            )
-            for r in cursor.fetchall():
+            for r in _fetch_all(
+                db,
+                "SELECT c.table_id, c.name FROM columns c WHERE c.table_id = ANY(CAST(:ids AS uuid[]))",
+                {"ids": list(affected_table_ids)},
+            ):
                 existing_cols_by_tid[r["table_id"]].add(r["name"])
 
         # Preparar columnas a insertar
@@ -2531,15 +2551,6 @@ async def import_structure(
             )
         else:
             raise HTTPException(status_code=500, detail=_("schemas.error_generic"))
-    finally:
-        try:
-            cursor.close()
-        except Exception:
-            pass
-        try:
-            db.close()
-        except Exception:
-            pass
 
 
 # =============================================================================
@@ -2577,7 +2588,6 @@ def _create_adapter_from_config(config: DBConnectionConfig):
 @router.post("/projects/{project_id}/generate-migration-script")
 async def generate_migration_script(
     project_id: str,
-    db=Depends(get_db),
     db_orm=Depends(get_db_session),
     current_user=Depends(get_current_user),
 ):
@@ -2593,7 +2603,7 @@ async def generate_migration_script(
 
     Args:
         project_id: UUID del proyecto
-        db: Conexión a PostgreSQL
+        db_orm: Sesión de SQLAlchemy
         current_user: Usuario actual autenticado
 
     Returns:
@@ -2612,7 +2622,6 @@ async def generate_migration_script(
 
     try:
         # Obtener encryption_key de la sesión del usuario
-        cursor = db.cursor()
         encryption_key = master_key_crud.get_encryption_key_from_session_orm(
             db_orm, current_user["id"]
         )
@@ -2643,9 +2652,10 @@ async def generate_migration_script(
                     dest_session_ids.add(session_id)
 
         # 3. Obtener proyecto name (para el header del script)
-        cursor.execute("SELECT name FROM projects WHERE id = %s", (project_id,))
-        project_row = cursor.fetchone()
-        project_name = project_row[0] if project_row else None
+        project_row = _fetch_one(
+            db_orm, "SELECT name FROM projects WHERE id = :pid", {"pid": project_id}
+        )
+        project_name = project_row["name"] if project_row else None
 
         # 4. Crear DBConnectionService
         redis_client = get_redis_client()
@@ -2780,8 +2790,3 @@ async def generate_migration_script(
                 dest_adapter.disconnect()
         except Exception as e:
             logger.warning(f"Error disconnecting destination adapter: {str(e)}")
-
-        try:
-            cursor.close()
-        except Exception:
-            pass

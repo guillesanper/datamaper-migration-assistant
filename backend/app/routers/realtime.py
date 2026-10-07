@@ -3,7 +3,6 @@ import hashlib
 from typing import Dict, Set
 
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
-from psycopg2.extras import RealDictCursor
 from starlette.websockets import WebSocketState
 
 from app.crud import session_crud

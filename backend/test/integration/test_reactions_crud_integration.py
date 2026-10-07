@@ -68,8 +68,8 @@ def local_test_user(clean_db_session, worker_id):
 def local_test_project(clean_db_session, local_test_user):
     """
     Proyecto de prueba local que usa clean_db_session.
-    Necesario porque el fixture global test_project usa db (psycopg2),
-    y clean_db_session hace TRUNCATE que borra los datos.
+    Necesario porque clean_db_session hace TRUNCATE y borra los datos
+    del fixture global test_project.
     """
     from app.crud.project_crud import ProjectCRUD
 

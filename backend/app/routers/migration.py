@@ -23,7 +23,6 @@ from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from psycopg2.extras import RealDictCursor
 from pydantic import BaseModel, Field
 
 from app.crud import activity_crud, mappings_crud, migration_script_crud, notification_crud

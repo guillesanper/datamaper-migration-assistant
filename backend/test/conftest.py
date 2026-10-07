@@ -574,7 +574,6 @@ def client(test_db_connection, setup_worker_databases):
     from fastapi import Response
 
     from app.database import session as session_module
-    from app.database.database import get_db
     from app.database.session import get_db_session
 
     # Rollback cualquier transacción fallida antes de empezar
@@ -598,15 +597,6 @@ def client(test_db_connection, setup_worker_databases):
     def mock_get_db():
         return ConnectionWrapper(test_db_connection)
 
-    # Override del dependency para FastAPI
-    def override_get_db():
-        try:
-            yield test_db_connection
-        finally:
-            pass
-
-    app.dependency_overrides[get_db] = override_get_db
-
     # Override de get_db_session para SQLAlchemy Session
     def override_get_db_session():
         session = session_module.SessionLocal()
@@ -627,7 +617,6 @@ def client(test_db_connection, setup_worker_databases):
 
     # Parchear get_db y Redis globalmente usando unittest.mock
     with (
-        patch("app.database.database.get_db", mock_get_db),
         patch("app.utils.security_logger.get_db", mock_get_db),
         patch("app.middleware.rate_limiting.get_db", mock_get_db),
         patch("app.middleware.csrf_protection.get_db", mock_get_db),

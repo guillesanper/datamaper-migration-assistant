@@ -267,8 +267,9 @@ def test_t3_extractor_reads_every_raw_insert():
     """Cordura de T3: si el extractor dejara de ver INSERTs, T3 pasaría sin comprobar nada."""
     inserts, unparsed = _raw_inserts()
     assert unparsed == [], f"INSERT INTO que el extractor no sabe interpretar: {unparsed}"
-    # La auditoría de la Fase 1 localizó 19 en app/crud y app/services
-    assert len(inserts) >= 19, f"Solo se encontraron {len(inserts)} INSERT crudos"
+    # La auditoría de la Fase 1 localizó 19 en app/crud y app/services; al retirar los CRUD
+    # psycopg2 (sin llamadores) solo queda el de ExecutionService (migration_executions)
+    assert len(inserts) >= 1, f"Solo se encontraron {len(inserts)} INSERT crudos"
 
 
 def test_t3_raw_inserts_do_not_omit_required_columns():
