@@ -8,7 +8,7 @@ Este documento describe la implementación de los endpoints de Migration API par
 
 ## Cambios Realizados
 
-- ✅ Router creado en `backend/app/routers/migration.py` (sin SQLAlchemy, usa psycopg2)
+- ✅ Router creado en `backend/app/routers/migration.py` (usa una Session de SQLAlchemy; `ExecutionService` y `BackupManager` también)
 - ✅ Tests de integración creados en `backend/test/integration/test_migration_api.py`
 - ✅ Schema SQL para tablas en `backend/docs/legacy_sql/migrations/002_migration_tables.sql`
 - ✅ Router registrado en `backend/main.py`

@@ -33,7 +33,7 @@ Respecto a funciones, triggers y vistas, que los modelos no crean, la auditoría
 | `log_version_activity()` + trigger en `entity_versions` | **Portado** a `0002_db_functions.py`, corrigiendo `restore` (el `CASE` no tenía `ELSE` y dejaba `description` en `NULL`) |
 | `log_comment_activity()` + trigger en `comments` | **Portado** a `0002_db_functions.py` |
 | `calculate_and_save_user_metrics(uuid)` | **Escrita desde cero** en `0002_db_functions.py`: no existía en ninguna fuente legada |
-| `cleanup_expired_locks()`, `get_next_version_number(uuid)`, `purge_old_encrypted_data(uuid, int)` | **No portadas**: solo las llaman wrappers psycopg2 inalcanzables |
+| `cleanup_expired_locks()`, `get_next_version_number(uuid)`, `purge_old_encrypted_data(uuid, int)` | **No portadas**: solo las llamaban wrappers psycopg2 inalcanzables, que ya se retiraron de `app/` |
 | Triggers `update_project_encryption_timestamp`, `prevent_mode_change`, `trigger_subscription_plans_updated_at`, `trigger_update_rate_limits_timestamp` y sus funciones | **No portados** (los modelos ya tienen `onupdate`; ninguna salvaguarda tiene consumidores) |
 | Vistas `v_entity_versions_with_user`, `v_comments_with_details`, `v_active_locks`, `v_mappings_with_modes` | **No portadas** (ninguna se usa desde `app/`, tests ni frontend) |
 | Resto de funciones auxiliares (`get_project_encryption_stats`, `get_project_mapping_mode_stats`, `check_mapping_sessions_valid`, `cleanup_orphaned_connector_mappings`, `cleanup_old_rate_limits`, `cleanup_security_data`) | **No portadas** (sin uso) |

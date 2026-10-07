@@ -126,7 +126,9 @@ Fuentes: `docs/legacy_sql/migration_001_collaboration_versioning.sql`, `docs/leg
 | `cleanup_expired_locks()`, `get_next_version_number(uuid)`, `purge_old_encrypted_data(uuid,int)` | **No portar** («elimina lo que no se llame nunca»). Pendiente de confirmar si además se retiran los wrappers muertos de `app/` (cambio de código fuera de este plan) |
 | Triggers `update_project_encryption_timestamp`, `prevent_mode_change` y los 2 solo-dump; 4 vistas; funciones auxiliares sin uso | **No portar** (sin dependencia; decisión por defecto del plan) |
 
-## 6. Código muerto detectado (informativo, no se ha tocado)
+## 6. Código muerto detectado (informativo; ya retirado)
+
+> **Actualización:** el código muerto de esta sección se retiró después de la auditoría (retirada de psycopg2, ver [baseline/README.md](baseline/README.md) y [SQLALCHEMY_MIGRATION_PLAN.md](SQLALCHEMY_MIGRATION_PLAN.md)). Se eliminaron todas las variantes psycopg2 de `app/crud/*` (no solo las listadas aquí), `app/services/data_retention_service.py` y `app/database/database.py` (`get_db`). Siguen existiendo las variantes `_orm` de métricas (`ProjectCRUD.get_user_metrics_comparison_orm`, `force_recalculate_user_metrics_orm`), que son el único camino a `calculate_and_save_user_metrics`, y `ProjectService.get_user_stats`. Lo que sigue es el inventario original, conservado como histórico.
 
 Cuelgan de lo inventariado y no se llaman desde ningún router, servicio ni arranque:
 

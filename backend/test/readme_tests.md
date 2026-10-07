@@ -75,8 +75,7 @@ backend/test/
 │   └── test_versions_crud.py
 ├── integration/                     # Tests de integración
 │   ├── test_database.py
-│   ├── test_reactions_crud_integration.py
-│   └── test_tags_crud_integration.py
+│   └── test_reactions_crud_integration.py
 └── readme_tests.md                  # Este archivo
 ```
 
@@ -1044,14 +1043,12 @@ Los siguientes módulos tienen cobertura completa de tests unitarios:
 
 Los siguientes módulos aún no tienen tests unitarios (48 módulos restantes):
 
-#### CRUD Operations (2 módulos)
+#### CRUD Operations (1 módulo)
 - `app.crud.reactions_crud`
-- `app.crud.tags_crud`
 
 #### Services (8 módulos)
 - `app.services.activity_service`
 - `app.services.comments_service`
-- `app.services.data_retention_service`
 - `app.services.pk_service`
 - `app.services.project_service`
 - `app.services.stripe_service`

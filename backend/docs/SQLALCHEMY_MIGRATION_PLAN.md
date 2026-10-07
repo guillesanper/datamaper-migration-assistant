@@ -16,7 +16,20 @@
 - **Cómo crear una migración nueva**: modificar los modelos en `app/models/orm/`, `alembic revision --autogenerate -m "…" --rev-id 000N`, revisarla, escribir el `downgrade()`, `alembic upgrade head` y `alembic check`. Detalle en [how_to_export_db_pgadmin.md](how_to_export_db_pgadmin.md).
 - **Trazabilidad**: auditoría de dependencias de BD fuera del ORM en [ALEMBIC_BASELINE_AUDIT.md](ALEMBIC_BASELINE_AUDIT.md); línea base de tests antes/después en [baseline/README.md](baseline/README.md).
 
-**Pendiente (fuera del alcance del baseline):** las Fases 3 y 4 de este plan (migrar los CRUD psycopg2 restantes a SQLAlchemy y retirar psycopg2) siguen abiertas. Quedan además wrappers psycopg2 sin llamadas (`locks_crud.{acquire_lock,get_lock_status,get_active_locks,cleanup_expired_locks}`, `versions_crud.get_next_version_number`, `services/data_retention_service.py` y `project_crud.{get_user_metrics_comparison,force_recalculate_user_metrics}`); se decidió dejarlos y retirarlos en la limpieza de la Fase 4 de este plan.
+**Fases 3 y 4 de este plan: hechas.** El acceso a datos de la app usa solo SQLAlchemy:
+
+- Se retiraron las variantes psycopg2 (sin llamadores) de los 12 módulos de `app/crud/*` (`activity`, `comments`, `locks`, `mappings`, `master_key`, `pk`, `project`, `reactions`, `schemas`, `subscription`, `tags`, `versions`), `app/database/database.py` (`get_db`) y `app/services/data_retention_service.py`. Se conservan las variantes `*_orm` (con su sufijo) y los helpers puros de cifrado de `master_key_crud`.
+- Se migraron a sesiones SQLAlchemy (`get_db_session` + `text()`) los endpoints de `app/routers/mappings.py` que usaban cursores psycopg2 (`export`, `tables`, `validate`, `save`, `delete`, `import_structure`, `generate-migration-script`), `StripeService`, `ExecutionService` y `utilities/migrations/validators.py` (`BackupManager`, `MigrationValidator`).
+- Las consultas SQL directas del router usan los helpers `_fetch_one`/`_fetch_all` de `mappings.py`, que devuelven los UUID como `str`.
+- Cubierto por `test_mappings_router_endpoints.py` y `test_execution_service_db.py`; el detalle de la retirada y de los tests está en [baseline/README.md](baseline/README.md).
+
+**Lo que sigue usando psycopg2 (decisión explícita, no pendiente):**
+
+- Es el **driver** de SQLAlchemy y de Alembic (las URL son `postgresql://…`); cambiar a psycopg 3 se descartó.
+- `app/utils/db_adapters/postgres_adapter.py`: conector a las BD de los *usuarios*, parte del producto.
+- Como cliente directo: `test/conftest.py` (fixtures `db`, `clean_db`, `test_db_connection`), `scripts/drop_test_databases.py` y `test/integration/test_alembic_migrations.py`.
+
+**No se hizo:** renombrar `get_db_session()` → `get_db()` (la Fase 4 original lo planteaba) ni quitar el sufijo `_orm` de las funciones CRUD; el alto número de usos lo dejó fuera de alcance.
 
 > Todo lo que sigue es el plan original, conservado como histórico. Describe el estado **anterior** al baseline (esquema desde `schema.sql`/`init-db`, migraciones SQL manuales) y no refleja el flujo actual.
 
@@ -71,8 +84,8 @@ Basado en:
 
 ## Estrategia: Migración Gradual con Coexistencia
 
-Durante la transición, psycopg2 y SQLAlchemy coexistirán usando la misma base de datos:
-- **Código legacy**: Seguirá usando `get_db()` → psycopg2
+Durante la transición (ya terminada), psycopg2 y SQLAlchemy coexistían usando la misma base de datos:
+- **Código legacy**: Seguirá usando `get_db()` → psycopg2 (retirado)
 - **Código nuevo/migrado**: Usará `get_db_session()` → SQLAlchemy
 - **Sin riesgo**: Ambos comparten la misma base de datos PostgreSQL
 
@@ -147,7 +160,7 @@ Durante la transición, psycopg2 y SQLAlchemy coexistirán usando la misma base 
 
 **Beneficio inmediato**: 🎉 BD de testing sincronizada automáticamente con migraciones de Alembic
 
-### 🔄 Fase 3: Migración Incremental de CRUDs (Semanas 2-6)
+### 🔄 Fase 3: Migración Incremental de CRUDs (Semanas 2-6) — ✅ hecha
 
 **Estrategia**: Migrar 2-3 módulos CRUD por semana
 
@@ -179,7 +192,7 @@ Durante la transición, psycopg2 y SQLAlchemy coexistirán usando la misma base 
 4. Ejecutar tests específicos del módulo
 5. Commit
 
-### 🧹 Fase 4: Cleanup (Semana 7+)
+### 🧹 Fase 4: Cleanup (Semana 7+) — ✅ hecha (salvo el renombrado de `get_db_session`, no realizado)
 
 **Tareas**:
 1. Remover código psycopg2
@@ -289,7 +302,7 @@ result = db.execute(text("""
 - Sin dependencias de psycopg2 en CRUDs
 
 ✅ Proyecto completo cuando:
-- Código psycopg2 legacy removido
+- Código psycopg2 legacy removido (de los CRUD, routers y servicios; psycopg2 sigue como driver y en el conector a BD de usuario)
 - Documentación actualizada
 - Equipo entrenado en nuevos patrones
 - **Migraciones futuras toman 1 comando en lugar de 3+ pasos manuales**

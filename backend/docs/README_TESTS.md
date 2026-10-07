@@ -26,8 +26,7 @@ test/
 │   ├── test_cookies.py            # 13 tests - cookies.py
 │   └── test_tags_crud.py          # 18 tests - tags_crud.py
 ├── integration/                    # Tests de integración (BD real)
-│   ├── test_database.py           # 12 tests - database.py
-│   └── test_tags_crud_integration.py  # 13 tests - tags_crud.py
+│   └── test_database.py           # 4 tests - fixtures de BD de conftest.py
 ├── fixtures/                       # Datos de prueba reutilizables
 │   └── test_data.py               # Generadores y constantes
 ├── e2e/                           # Tests end-to-end (vacío)
@@ -63,7 +62,6 @@ python -m pytest test/integration -v
 
 # Test específico
 python -m pytest test/integration/test_database.py -v
-python -m pytest test/integration/test_tags_crud_integration.py -v
 
 # Por marcador
 python -m pytest -m integration -v
@@ -115,8 +113,7 @@ Coverage: 100%
 
 ### Tests de Integración ⚠️
 ```
-13 tests de tags_crud_integration.py (requieren fixtures)
-12 tests de database.py (algunos requieren ajustes)
+4 tests de database.py (fixtures de BD de conftest.py)
 ```
 
 ## Problemas Conocidos y Soluciones
@@ -173,9 +170,9 @@ markers =
    ```
 
 ### Fase 2: Completar Tests Básicos
-1. Ejecutar tests de integración de tags_crud:
+1. Ejecutar los tests de integración de los CRUD ORM (p. ej. `test_reactions_crud_integration.py`):
    ```bash
-   pytest test/integration/test_tags_crud_integration.py -v
+   pytest test/integration/test_reactions_crud_integration.py -v
    ```
 2. Verificar cobertura de integración
 
