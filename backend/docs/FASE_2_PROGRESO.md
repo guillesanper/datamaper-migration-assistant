@@ -1,5 +1,7 @@
 # 📊 FASE 2 - Progreso de Implementación
 
+> Documento histórico: el SQL citado está archivado en `backend/docs/legacy_sql/`; el esquema sale de Alembic.
+
 ## 🎯 Estado General
 
 **Última actualización**: 2025-01-29
@@ -661,7 +663,7 @@ python -c "from app.models.db_metadata import ColumnMetadata, DataType; print('O
 2. **NO se generan conflictos con SQLAlchemy**:
    - Los modelos Pydantic NO definen tablas en PostgreSQL
    - Solo representan datos en memoria Python
-   - Completamente independiente de `init-db/01_schema.sql`
+   - Completamente independiente del SQL de esquema (`init-db/01_schema.sql`, eliminado)
 
 3. **Solo metadata, NO datos**:
    - Todos los adapters solo leen `information_schema`

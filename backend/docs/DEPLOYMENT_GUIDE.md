@@ -125,11 +125,11 @@ ENV=development
 ENCRYPTION_ENABLED=true
 ```
 
-#### 5. Ejecutar Migraciones (si existen)
+#### 5. Aplicar el esquema de la BD
 
 ```bash
-# Aplicar migraciones de BD
-python migrations/run_migrations.py  # Si aplica
+# Crea/actualiza el esquema con Alembic
+alembic upgrade head
 ```
 
 #### 6. Iniciar Servidor

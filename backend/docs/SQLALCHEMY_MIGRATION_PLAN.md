@@ -25,19 +25,19 @@
 ### Flujo Actual Identificado
 
 **Migraciones de Esquema:**
-- Archivos SQL numerados en [backend/utilities/migrations/](../utilities/migrations/)
+- Archivos SQL numerados en [backend/docs/legacy_sql/migrations/](legacy_sql/migrations/)
 - Ejecución manual vía `psql` o scripts Python individuales
 - Tracking en tablas `migration_audit_log` y `migration_scripts`/`migration_executions`
 - Sistema de rollback disponible
 
 **Base de Datos Principal:**
 - PostgreSQL con psycopg2
-- Schema definido en [backend/utilities/schema.sql](../utilities/schema.sql)
+- Schema definido en [backend/docs/legacy_sql/schema.sql](legacy_sql/schema.sql)
 - Migraciones se aplican incrementalmente sobre la BD principal
 
 **Base de Datos de Testing:**
 - Se crea automáticamente por worker (datamap_test_gw0, datamap_test_gw1, etc.)
-- Schema aplicado desde [backend/init-db/01_schema.sql](../init-db/01_schema.sql) (NO desde migraciones)
+- Schema aplicado desde `backend/init-db/01_schema.sql` (eliminado) (NO desde migraciones)
 - Script de setup: [backend/scripts/setup_test_db.py](../scripts/setup_test_db.py)
 
 ### Problemas Identificados
@@ -138,7 +138,7 @@ Durante la transición, psycopg2 y SQLAlchemy coexistirán usando la misma base 
    - Función `create_worker_database()` usar Alembic
 
 3. **Eliminar/archivar schema estático**:
-   - [backend/init-db/01_schema.sql](../init-db/01_schema.sql) → Ya no se necesita
+   - `backend/init-db/01_schema.sql` (eliminado) → Ya no se necesita
 
 4. **Validar**:
    - `python backend/scripts/setup_test_db.py`

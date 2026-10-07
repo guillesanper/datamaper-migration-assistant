@@ -83,19 +83,18 @@ Tag:    128 bits (autenticación integrada)
 
 ### 4. Base de Datos
 
-- ✅ **`backend/migrations/003_encryption_infrastructure.sql`**
+- ✅ **`backend/alembic/versions/0001_baseline.py`** (el SQL original está archivado en [legacy_sql/migrations/003_encryption_infrastructure.sql](legacy_sql/migrations/003_encryption_infrastructure.sql))
   - Tabla `project_encryption` para config por proyecto
   - Columnas cifradas en: `tables`, `columns`, `mappings`, `entity_versions`, `comments`
-  - Funciones SQL: `get_project_encryption_stats()`, `purge_old_encrypted_data()`
   - Índices optimizados
+  - Las funciones SQL `get_project_encryption_stats()` y `purge_old_encrypted_data()` no se portaron a Alembic (ver [legacy_sql/README.md](legacy_sql/README.md))
 
 ### 5. Migración de Datos
 
-- ✅ **`backend/utilities/migrate_to_encryption.py`**
-  - Script para cifrar datos existentes
-  - Modo `--dry-run` para preview
-  - Estadísticas detalladas
-  - Logging de errores
+- ✅ **`EncryptionService.encrypt_existing_project_data`** (`backend/app/services/encryption_service.py`)
+  - Cifra los datos existentes del proyecto al configurar o activar el cifrado
+  - Estadísticas de lo cifrado en la respuesta del endpoint
+  - Sustituye al antiguo script `utilities/migrate_to_encryption.py`, eliminado
 
 ### 6. Lógica de Negocio
 
@@ -192,12 +191,16 @@ pip install argon2-cffi==23.1.0
 pip install -r requirements.txt
 ```
 
-### Ejecutar Migración SQL
+### Aplicar el esquema
+
+Las tablas y columnas de cifrado se crean con el resto del esquema:
 
 ```bash
-# Conectar a PostgreSQL y ejecutar:
-psql -U usuario -d datamap < backend/migrations/003_encryption_infrastructure.sql
+cd backend
+alembic upgrade head
 ```
+
+(Con Docker Compose el servicio `backend` ya lo ejecuta al arrancar. Ver [how_to_export_db_pgadmin.md](how_to_export_db_pgadmin.md).)
 
 ---
 
@@ -260,17 +263,7 @@ Content-Type: application/json
 
 ### 2. Migrar Datos Existentes
 
-```bash
-# Ejecutar script de migración
-cd backend
-python utilities/migrate_to_encryption.py
-
-# Modo dry-run (preview sin cambios)
-python utilities/migrate_to_encryption.py --dry-run
-
-# Migrar proyecto específico
-python utilities/migrate_to_encryption.py --project-id "uuid-here"
-```
+No hace falta ningún script: el endpoint de setup (`POST /api/projects/{project_id}/encryption/setup`) cifra los datos existentes del proyecto al configurar el cifrado, y la respuesta incluye `encrypted_data` con las estadísticas. Los scripts `utilities/migrate_to_encryption.py` y `utilities/encrypt_existing_data.py` se eliminaron.
 
 ### 3. Verificar Passphrase y Crear Sesión (Modal de "Desbloqueo")
 

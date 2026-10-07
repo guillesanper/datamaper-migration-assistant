@@ -2,6 +2,8 @@
 
 Inventario de todo lo que la aplicación necesita de la base de datos y que **no** crean los modelos ORM (`Base.metadata`), para decidir qué debe llevar la cadena Alembic además del baseline. Es la entrada de las Fases 2 y 3 del plan de baseline de Alembic.
 
+> Documento histórico: el SQL citado está archivado en `backend/docs/legacy_sql/`; el esquema sale de Alembic. El script `run_migration_005.py` citado se eliminó.
+
 - Fecha: 2026-10-05. Rama `fix/alembic-baseline`, partiendo de `bdeae48`.
 - Alcance: solo lectura. No se ha tocado código de la app, modelos ni migraciones.
 - Estado del baseline de partida: `alembic.gen.ini` + `alembic/_gen/0001_baseline.py` sobre una BD vacía crea **30 tablas** (+ `alembic_version`), **0 funciones propias y 0 triggers** (comprobado con `pg_proc` / `pg_trigger`).
@@ -32,9 +34,9 @@ Inventario de todo lo que la aplicación necesita de la base de datos y que **no
 
 | Función | Llamada en `app/` | Definición en el legado | ¿Alcanzable desde router/servicio? |
 |---|---|---|---|
-| `cleanup_expired_locks()` | `app/crud/locks_crud.py:245`, dentro de `cleanup_expired_locks` (psycopg2), llamada por `acquire_lock` (:31), `get_lock_status` (:122) y `get_active_locks` (:198), todas crudas | `utilities/migration_001_collaboration_versioning.sql:235-246` (`RETURNS INTEGER`, borra `entity_locks` con `expires_at < NOW()`) | **No.** `locking_service.py` solo usa las variantes `*_orm` (`cleanup_expired_locks_orm`, `acquire_lock_orm`…). Ningún test llama a las crudas. Solo la documenta `docs/COLLABORATION_SYSTEM_README.md:639` como comando manual |
-| `get_next_version_number(uuid)` | `app/crud/versions_crud.py:208`, dentro de `get_next_version_number` (psycopg2) | `utilities/migration_001_collaboration_versioning.sql:251-263` (`COALESCE(MAX(version_number),0)+1` sobre `entity_versions`) | **No.** `version_control_service.create_version` usa `get_next_version_number_orm` (`version_control_service.py:94`). Nadie llama a la cruda |
-| `purge_old_encrypted_data(uuid, int)` | `app/services/data_retention_service.py:59` (`SELECT * FROM purge_old_encrypted_data(%s, %s)`), en `DataRetentionService.purge_old_encrypted_data`; la usan `schedule_automatic_purge` (:407) y `run_daily_purge` (:479-486, APScheduler `cron`) | `utilities/migrations/003_encryption_infrastructure.sql:313-368` (`RETURNS TABLE(versions_deleted, comments_deleted, activity_deleted)`) | **No.** Ningún fichero importa `data_retention_service` (`grep -rn data_retention_service . --include=*.py` no devuelve ninguna importación) y `main.py` no arranca ningún scheduler |
+| `cleanup_expired_locks()` | `app/crud/locks_crud.py:245`, dentro de `cleanup_expired_locks` (psycopg2), llamada por `acquire_lock` (:31), `get_lock_status` (:122) y `get_active_locks` (:198), todas crudas | `docs/legacy_sql/migration_001_collaboration_versioning.sql:235-246` (`RETURNS INTEGER`, borra `entity_locks` con `expires_at < NOW()`) | **No.** `locking_service.py` solo usa las variantes `*_orm` (`cleanup_expired_locks_orm`, `acquire_lock_orm`…). Ningún test llama a las crudas. Solo la documenta `docs/COLLABORATION_SYSTEM_README.md:639` como comando manual |
+| `get_next_version_number(uuid)` | `app/crud/versions_crud.py:208`, dentro de `get_next_version_number` (psycopg2) | `docs/legacy_sql/migration_001_collaboration_versioning.sql:251-263` (`COALESCE(MAX(version_number),0)+1` sobre `entity_versions`) | **No.** `version_control_service.create_version` usa `get_next_version_number_orm` (`version_control_service.py:94`). Nadie llama a la cruda |
+| `purge_old_encrypted_data(uuid, int)` | `app/services/data_retention_service.py:59` (`SELECT * FROM purge_old_encrypted_data(%s, %s)`), en `DataRetentionService.purge_old_encrypted_data`; la usan `schedule_automatic_purge` (:407) y `run_daily_purge` (:479-486, APScheduler `cron`) | `docs/legacy_sql/migrations/003_encryption_infrastructure.sql:313-368` (`RETURNS TABLE(versions_deleted, comments_deleted, activity_deleted)`) | **No.** Ningún fichero importa `data_retention_service` (`grep -rn data_retention_service . --include=*.py` no devuelve ninguna importación) y `main.py` no arranca ningún scheduler |
 | `calculate_and_save_user_metrics(uuid)` | `app/crud/project_crud.py:884` y `:973` (`ProjectCRUD.get_user_metrics_comparison_orm`, `force_recalculate_user_metrics_orm`, vía `text()`); `:1105` y `:1223` (versiones psycopg2 `get_user_metrics_comparison`, `force_recalculate_user_metrics`) | **No definida en ningún sitio**: ni en los `.sql` de texto, ni en el dump `backup_schema.sql`, ni en las 6 revisiones Alembic antiguas, ni en `scripts/` | **No.** Su único camino es `ProjectService.get_user_stats` (`project_service.py:511`), que ningún router llama: `GET /api/projects/stats` (`routers/projects.py:52`) calcula inline con `SELECT … FROM projects`. Solo lo ejercitan tests unitarios con mocks (`test_project_service.py:707,736`) |
 
 Funciones nativas de PostgreSQL usadas en SQL crudo de `app/` (no requieren portado): `pg_advisory_xact_lock(hashtext(...))` (`project_service.py:122`), `array_position` (`pk_crud.py:78`), `pg_get_constraintdef`, `pg_total_relation_size` (`db_adapters/postgres_adapter.py`; consultan BD de usuario, no la de la app). `gen_random_uuid()` solo aparece como `server_default` de un modelo (`subscription.py:103`); `uuid_generate_v4()` solo en `test/test_worker_isolation.py:58,94` (requiere la extensión `uuid-ossp`, que ya instala el baseline).
@@ -75,7 +77,7 @@ Notas:
 
 ## 3. Triggers, vistas y funciones auxiliares del legado
 
-Fuentes: `utilities/migration_001_collaboration_versioning.sql`, `utilities/migrations/003_encryption_infrastructure.sql`, `utilities/migrations/005_mapping_source_types.sql`, `utilities/schema.sql` y el dump `utilities/backup_schema.sql`. Los demás `.sql` de `utilities/migrations/` (001, 002, 004, 006) no definen funciones, triggers ni vistas.
+Fuentes: `docs/legacy_sql/migration_001_collaboration_versioning.sql`, `docs/legacy_sql/migrations/003_encryption_infrastructure.sql`, `docs/legacy_sql/migrations/005_mapping_source_types.sql`, `docs/legacy_sql/schema.sql` y el dump `docs/legacy_sql/backup_schema.sql`. Los demás `.sql` de `docs/legacy_sql/migrations/` (001, 002, 004, 006) no definen funciones, triggers ni vistas.
 
 ### 3.1 Triggers (6)
 
@@ -95,14 +97,14 @@ Fuentes: `utilities/migration_001_collaboration_versioning.sql`, `utilities/migr
 | `v_entity_versions_with_user` | `migration_001…sql:350` | **No.** Sin referencias en `app/`, `test/`, `scripts/` ni frontend |
 | `v_comments_with_details` | `migration_001…sql:362` | **No** (ídem) |
 | `v_active_locks` | `migration_001…sql:377` | **No** (ídem) |
-| `v_mappings_with_modes` | `005_mapping_source_types.sql:349` | **No.** Solo la menciona `utilities/migrations/run_migration_005.py:141`, un verificador del propio SQL legado |
+| `v_mappings_with_modes` | `005_mapping_source_types.sql:349` | **No.** Solo la menciona `utilities/migrations/run_migration_005.py:141` (script eliminado después), un verificador del propio SQL legado |
 
 ### 3.3 Funciones auxiliares definidas en el legado y no invocadas por `app/`
 
 | Función | Fuente | ¿Dependencia? |
 |---|---|---|
 | `get_project_encryption_stats(uuid)` | `003_encryption…sql:242` | No (solo `docs/ENCRYPTION_SETUP.md:89`) |
-| `get_project_mapping_mode_stats(uuid)`, `check_mapping_sessions_valid(uuid)`, `cleanup_orphaned_connector_mappings(uuid[])` | `005_mapping…sql:218,266,315` | No (solo las lista `run_migration_005.py:124-126`) |
+| `get_project_mapping_mode_stats(uuid)`, `check_mapping_sessions_valid(uuid)`, `cleanup_orphaned_connector_mappings(uuid[])` | `005_mapping…sql:218,266,315` | No (solo las lista `run_migration_005.py:124-126` (eliminado)) |
 | `cleanup_old_rate_limits()` | `schema.sql:242` | No |
 | `cleanup_security_data()` | **solo** dump `backup_schema.sql` | No |
 

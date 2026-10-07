@@ -1,5 +1,7 @@
 # Sistema de Colaboración y Control de Versiones - IMPLEMENTACIÓN COMPLETA
 
+> Documento histórico: el SQL citado está archivado en `backend/docs/legacy_sql/`; el esquema sale de Alembic.
+
 ## 🎉 ESTADO: FASE 1-7 COMPLETADA (95% TOTAL) ✅
 
 **ACTUALIZACIÓN**: Backend completado el 2025-01-22
@@ -12,7 +14,7 @@ Este documento describe el sistema completo de colaboración y control de versio
 
 ### 1. Migraciones de Base de Datos ✅ (100%)
 
-**Archivo**: `backend/utilities/migration_001_collaboration_versioning.sql`
+**Archivo**: `backend/docs/legacy_sql/migration_001_collaboration_versioning.sql`
 
 **Tablas creadas**:
 - ✅ `notifications` - Sistema completo de notificaciones
@@ -594,7 +596,7 @@ frontend/src/
     └── shared/
 
 backend/
-└── utilities/
+└── docs/legacy_sql/
     └── migration_001_collaboration_versioning.sql ✅
 ```
 

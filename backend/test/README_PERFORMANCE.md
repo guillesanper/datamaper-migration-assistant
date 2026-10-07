@@ -136,7 +136,4 @@ cd backend && pytest --durations=20
 # Perfil detallado (requiere pytest-profiling)
 pip install pytest-profiling
 cd backend && pytest --profile
-
-# Medir tiempos de importación
-cd backend && python test_timing.py
 ```
