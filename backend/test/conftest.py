@@ -120,19 +120,13 @@ _db_setup_checked = False
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 
-# TEMPORAL (Fase 2 del plan de baseline de Alembic): mientras las 6 revisiones antiguas de
-# alembic/versions convivan con el baseline nuevo hay dos cadenas y "alembic.ini" no llega a head
-# en una BD vacía. El baseline exploratorio vive en alembic/_gen y se usa con "alembic.gen.ini".
-# La Fase 3 activa la cadena nueva: entonces ALEMBIC_INI pasa a "alembic.ini" y se borra la
-# línea de version_locations de build_alembic_config.
-ALEMBIC_INI = "alembic.gen.ini"
+ALEMBIC_INI = "alembic.ini"
 
 
 def build_alembic_config(db_url: str) -> Config:
     """Config de Alembic apuntando a la BD indicada (único punto de construcción para los tests)."""
     cfg = Config(str(BACKEND_DIR / ALEMBIC_INI))
     cfg.set_main_option("script_location", str(BACKEND_DIR / "alembic"))
-    cfg.set_main_option("version_locations", str(BACKEND_DIR / "alembic" / "_gen"))  # TEMPORAL
     # "%" se escapa porque configparser lo interpreta como interpolación
     cfg.set_main_option("sqlalchemy.url", db_url.replace("%", "%%"))
     return cfg

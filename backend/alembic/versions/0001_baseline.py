@@ -5,7 +5,7 @@ Unica migracion inicial. Una BD vacia llega al esquema actual con
 
 Revision ID: 0001
 Revises:
-Create Date: 2026-10-05
+Create Date: 2026-10-06
 
 """
 from typing import Sequence, Union
@@ -255,11 +255,11 @@ def upgrade() -> None:
     sa.Column('content', sa.Text(), nullable=True),
     sa.Column('content_encrypted', sa.Text(), nullable=True),
     sa.Column('content_nonce', sa.Text(), nullable=True),
-    sa.Column('is_encrypted', sa.Boolean(), nullable=False),
+    sa.Column('is_encrypted', sa.Boolean(), server_default=sa.text('false'), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), nullable=True),
-    sa.Column('is_edited', sa.Boolean(), nullable=False),
-    sa.Column('is_resolved', sa.Boolean(), nullable=False),
+    sa.Column('is_edited', sa.Boolean(), server_default=sa.text('false'), nullable=False),
+    sa.Column('is_resolved', sa.Boolean(), server_default=sa.text('false'), nullable=False),
     sa.Column('resolved_by', sa.UUID(), nullable=True),
     sa.Column('resolved_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('mentions', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
@@ -341,7 +341,7 @@ def upgrade() -> None:
     sa.Column('project_id', sa.UUID(), nullable=False),
     sa.Column('script_hash', sa.String(length=64), nullable=True),
     sa.Column('status', sa.String(length=20), nullable=False),
-    sa.Column('rows_migrated', sa.Integer(), nullable=False),
+    sa.Column('rows_migrated', sa.Integer(), server_default=sa.text('0'), nullable=False),
     sa.Column('started_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('completed_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('backup_id', sa.String(length=255), nullable=True),
@@ -405,7 +405,7 @@ def upgrade() -> None:
     op.create_index(op.f('ix_notifications_created_at'), 'notifications', ['created_at'], unique=False)
     op.create_index(op.f('ix_notifications_recipient_id'), 'notifications', ['recipient_id'], unique=False)
     op.create_table('project_activity',
-    sa.Column('id', sa.UUID(), nullable=False),
+    sa.Column('id', sa.UUID(), server_default=sa.text('gen_random_uuid()'), nullable=False),
     sa.Column('project_id', sa.UUID(), nullable=False),
     sa.Column('user_id', sa.UUID(), nullable=True),
     sa.Column('activity_type', sa.String(length=50), nullable=False),
@@ -492,7 +492,7 @@ def upgrade() -> None:
     sa.Column('name', sa.String(length=255), nullable=True),
     sa.Column('name_encrypted', sa.Text(), nullable=True),
     sa.Column('name_nonce', sa.Text(), nullable=True),
-    sa.Column('is_encrypted', sa.Boolean(), nullable=False),
+    sa.Column('is_encrypted', sa.Boolean(), server_default=sa.text('false'), nullable=False),
     sa.Column('type', sa.String(length=50), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
@@ -515,7 +515,7 @@ def upgrade() -> None:
     sa.Column('data_type', sa.String(length=100), nullable=True),
     sa.Column('data_type_encrypted', sa.Text(), nullable=True),
     sa.Column('data_type_nonce', sa.Text(), nullable=True),
-    sa.Column('is_encrypted', sa.Boolean(), nullable=False),
+    sa.Column('is_encrypted', sa.Boolean(), server_default=sa.text('false'), nullable=False),
     sa.Column('table_type', sa.String(length=50), nullable=False),
     sa.Column('is_nullable', sa.Boolean(), nullable=False),
     sa.Column('is_primary', sa.Boolean(), nullable=False),
@@ -547,7 +547,7 @@ def upgrade() -> None:
     op.create_index(op.f('ix_comment_reactions_user_id'), 'comment_reactions', ['user_id'], unique=False)
     op.create_index('uq_comment_reactions_comment_user_emoji', 'comment_reactions', ['comment_id', 'user_id', 'emoji'], unique=True)
     op.create_table('comment_reads',
-    sa.Column('id', sa.UUID(), nullable=False),
+    sa.Column('id', sa.UUID(), server_default=sa.text('gen_random_uuid()'), nullable=False),
     sa.Column('comment_id', sa.UUID(), nullable=False),
     sa.Column('user_id', sa.UUID(), nullable=False),
     sa.Column('read_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
@@ -620,7 +620,7 @@ def upgrade() -> None:
     op.create_index(op.f('ix_mappings_origin_source_type'), 'mappings', ['origin_source_type'], unique=False)
     op.create_index(op.f('ix_mappings_project_id'), 'mappings', ['project_id'], unique=False)
     op.create_table('migration_audit_log',
-    sa.Column('id', sa.UUID(), nullable=False),
+    sa.Column('id', sa.UUID(), server_default=sa.text('gen_random_uuid()'), nullable=False),
     sa.Column('migration_number', sa.String(length=20), nullable=False),
     sa.Column('action', sa.String(length=50), nullable=False),
     sa.Column('table_id', sa.UUID(), nullable=True),
@@ -645,7 +645,7 @@ def upgrade() -> None:
     op.create_index(op.f('ix_migration_audit_log_migration_number'), 'migration_audit_log', ['migration_number'], unique=False)
     op.create_index(op.f('ix_migration_audit_log_timestamp'), 'migration_audit_log', ['timestamp'], unique=False)
     op.create_table('primary_key_constraints',
-    sa.Column('id', sa.UUID(), nullable=False),
+    sa.Column('id', sa.UUID(), server_default=sa.text('gen_random_uuid()'), nullable=False),
     sa.Column('table_id', sa.UUID(), nullable=False),
     sa.Column('column_ids', postgresql.ARRAY(sa.UUID()), nullable=False),
     sa.Column('constraint_name', sa.String(length=255), nullable=True),
