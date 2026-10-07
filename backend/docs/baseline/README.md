@@ -35,3 +35,26 @@ Los 50 fallos/errores ya existían antes de tocar nada y no tienen que ver con e
 | `test_csrf_protection_middleware` | 1 | Igual: espera texto y recibe `{'code': 'security.csrf_token_invalid'}` |
 | `test_tags_crud_integration` | 2 | `creator_username` no coincide con el usuario del fixture |
 | `test_project_service` | 1 | `delete_project` no lanza `HTTPException` con miembros |
+
+## Después del cambio (Fase 4)
+
+Misma suite y mismo arnés sobre el código con la cadena Alembic nueva (`0001_baseline` + `0002_db_functions`),
+con el esquema de test creado por `alembic upgrade head`.
+
+| Fichero | Contenido |
+|---|---|
+| `baseline_after.xml` | JUnit XML completo |
+| `baseline_after_summary.txt` | Totales y lista de fallados/errores/saltados con su causa |
+| `baseline_after_passed.txt` | Los 1510 tests que pasan |
+
+```bash
+backend/scripts/run_tests_in_container.sh <dir>/backend <dir_salida> baseline_after
+diff baseline_before_passed.txt baseline_after_passed.txt   # solo líneas ">" (nuevos)
+```
+
+Resultado: `19 failed, 1510 passed, 1 skipped, 31 errors` (1561 tests). Frente a la línea base:
+
+- **0 tests que pasaban antes y fallan ahora** (`comm -23` de las listas de pasados: vacío).
+- **+15 pasados**, todos de `test_alembic_migrations.py` (no existían antes).
+- Los mismos 50 fallos/errores, uno a uno (`test_tags_crud_integration` incluido: sus 2 tests pasan si el
+  fichero se ejecuta solo, 12/12, pero fallan dentro de la suite completa igual que en la línea base).
