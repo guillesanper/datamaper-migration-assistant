@@ -7,9 +7,10 @@ Tests for email verification utilities:
 - Welcome notification creation
 """
 
+import importlib
 import uuid
 from datetime import datetime, timedelta
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import ANY, MagicMock, call, patch
 
 import pytest
 
@@ -45,6 +46,14 @@ def test_email():
 def test_user_id():
     """Provide a test user ID"""
     return "user_12345"
+
+
+def _configure_smtp_mock(mock_smtp):
+    """Configura el mock de smtplib.SMTP como gestor de contexto y devuelve la conexión simulada"""
+    mock_smtp_instance = MagicMock()
+    mock_smtp.return_value.__enter__ = MagicMock(return_value=mock_smtp_instance)
+    mock_smtp.return_value.__exit__ = MagicMock(return_value=False)
+    return mock_smtp_instance
 
 
 # ============================================================================
@@ -213,6 +222,188 @@ class TestSendVerificationCode:
 
 
 # ============================================================================
+# SMTP SIN AUTENTICACIÓN / SIN STARTTLS (servidor de desarrollo, p. ej. Mailpit)
+#
+# SMTP_USE_STARTTLS y SMTP_TIMEOUT_SECONDS se parchean con create=True porque aún
+# no existen en el módulo; sin ello @patch fallaría con AttributeError en lugar de
+# fallar por la aserción de comportamiento que se quiere comprobar.
+# ============================================================================
+
+
+class TestSendVerificationCodeSmtpModes:
+    """Tests for send_verification_code() with optional credentials and STARTTLS"""
+
+    @patch("app.crud.email_otp_crud.create_otp_orm")
+    @patch("app.utils.email_verification.smtplib.SMTP")
+    @patch("app.utils.email_verification.generate_numeric_code")
+    @patch("app.utils.email_verification.SMTP_USE_STARTTLS", False, create=True)
+    @patch("app.utils.email_verification.SMTP_SERVER", "mailpit")
+    @patch("app.utils.email_verification.SMTP_USER", None)
+    @patch("app.utils.email_verification.SMTP_PASS", None)
+    @patch("app.utils.email_verification.EMAIL_FROM", "no-reply@datamap.local")
+    def test_no_credentials_no_starttls_sends_without_auth(
+        self, mock_generate_code, mock_smtp, mock_create_otp, mock_db, test_email, test_user_id
+    ):
+        """Sin credenciales y sin STARTTLS: no se llama a starttls ni a login, pero sí se envía"""
+        mock_generate_code.return_value = "12345678"
+        mock_create_otp.return_value = {"user_id": test_user_id, "otp_code": "hashed"}
+        mock_smtp_instance = _configure_smtp_mock(mock_smtp)
+
+        email_verification.send_verification_code(mock_db, test_email, test_user_id)
+
+        mock_smtp_instance.starttls.assert_not_called()
+        mock_smtp_instance.login.assert_not_called()
+        mock_smtp_instance.send_message.assert_called_once()
+
+    @patch("app.crud.email_otp_crud.create_otp_orm")
+    @patch("app.utils.email_verification.smtplib.SMTP")
+    @patch("app.utils.email_verification.generate_numeric_code")
+    @patch("app.utils.email_verification.SMTP_USE_STARTTLS", False, create=True)
+    @patch("app.utils.email_verification.SMTP_SERVER", "smtp.example.com")
+    @patch("app.utils.email_verification.SMTP_USER", "user@example.com")
+    @patch("app.utils.email_verification.SMTP_PASS", "password")
+    @patch("app.utils.email_verification.EMAIL_FROM", "noreply@example.com")
+    def test_credentials_without_starttls_logs_in_only(
+        self, mock_generate_code, mock_smtp, mock_create_otp, mock_db, test_email, test_user_id
+    ):
+        """Con credenciales y sin STARTTLS: se llama a login pero no a starttls"""
+        mock_generate_code.return_value = "12345678"
+        mock_create_otp.return_value = {"user_id": test_user_id, "otp_code": "hashed"}
+        mock_smtp_instance = _configure_smtp_mock(mock_smtp)
+
+        email_verification.send_verification_code(mock_db, test_email, test_user_id)
+
+        mock_smtp_instance.starttls.assert_not_called()
+        mock_smtp_instance.login.assert_called_once_with("user@example.com", "password")
+        mock_smtp_instance.send_message.assert_called_once()
+
+    @patch("app.crud.email_otp_crud.create_otp_orm")
+    @patch("app.utils.email_verification.smtplib.SMTP")
+    @patch("app.utils.email_verification.generate_numeric_code")
+    @patch("app.utils.email_verification.SMTP_SERVER", "smtp.example.com")
+    @patch("app.utils.email_verification.SMTP_USER", "user@example.com")
+    @patch("app.utils.email_verification.SMTP_PASS", "password")
+    @patch("app.utils.email_verification.EMAIL_FROM", "noreply@example.com")
+    def test_credentials_default_starttls_keeps_current_behavior(
+        self, mock_generate_code, mock_smtp, mock_create_otp, mock_db, test_email, test_user_id
+    ):
+        """Regresión: con credenciales y STARTTLS por defecto se mantiene la secuencia actual"""
+        mock_generate_code.return_value = "12345678"
+        mock_create_otp.return_value = {"user_id": test_user_id, "otp_code": "hashed"}
+        mock_smtp_instance = _configure_smtp_mock(mock_smtp)
+
+        email_verification.send_verification_code(mock_db, test_email, test_user_id)
+
+        assert mock_smtp_instance.method_calls == [
+            call.ehlo(),
+            call.starttls(),
+            call.ehlo(),
+            call.login("user@example.com", "password"),
+            call.send_message(ANY),
+        ]
+
+    @patch("app.crud.email_otp_crud.create_otp_orm")
+    @patch("app.utils.email_verification.smtplib.SMTP")
+    @patch("app.utils.email_verification.generate_numeric_code")
+    @patch("app.utils.email_verification.SMTP_SERVER", "smtp.example.com")
+    @patch("app.utils.email_verification.SMTP_USER", "user@example.com")
+    @patch("app.utils.email_verification.SMTP_PASS", None)
+    @patch("app.utils.email_verification.EMAIL_FROM", "noreply@example.com")
+    def test_only_user_simulates_sending(
+        self,
+        mock_generate_code,
+        mock_smtp,
+        mock_create_otp,
+        mock_db,
+        test_email,
+        test_user_id,
+        capsys,
+    ):
+        """Con solo usuario (credenciales a medias) se simula el envío y no se abre conexión"""
+        mock_generate_code.return_value = "12345678"
+        mock_create_otp.return_value = {"user_id": test_user_id, "otp_code": "hashed"}
+
+        email_verification.send_verification_code(mock_db, test_email, test_user_id)
+
+        mock_create_otp.assert_called_once()
+        mock_smtp.assert_not_called()
+        captured = capsys.readouterr()
+        assert "simulando envío" in captured.out.lower()
+        assert "12345678" in captured.out
+
+    @patch("app.crud.email_otp_crud.create_otp_orm")
+    @patch("app.utils.email_verification.smtplib.SMTP")
+    @patch("app.utils.email_verification.generate_numeric_code")
+    @patch("app.utils.email_verification.SMTP_SERVER", "smtp.example.com")
+    @patch("app.utils.email_verification.SMTP_USER", None)
+    @patch("app.utils.email_verification.SMTP_PASS", "s3cret-pass")
+    @patch("app.utils.email_verification.EMAIL_FROM", "noreply@example.com")
+    def test_only_password_simulates_sending(
+        self,
+        mock_generate_code,
+        mock_smtp,
+        mock_create_otp,
+        mock_db,
+        test_email,
+        test_user_id,
+        capsys,
+    ):
+        """Con solo contraseña se simula el envío, no se abre conexión y no se imprime la clave"""
+        mock_generate_code.return_value = "12345678"
+        mock_create_otp.return_value = {"user_id": test_user_id, "otp_code": "hashed"}
+
+        email_verification.send_verification_code(mock_db, test_email, test_user_id)
+
+        mock_create_otp.assert_called_once()
+        mock_smtp.assert_not_called()
+        captured = capsys.readouterr()
+        assert "simulando envío" in captured.out.lower()
+        assert "12345678" in captured.out
+        assert "s3cret-pass" not in captured.out
+
+    @patch("app.crud.email_otp_crud.create_otp_orm")
+    @patch("app.utils.email_verification.smtplib.SMTP")
+    @patch("app.utils.email_verification.generate_numeric_code")
+    @patch("app.utils.email_verification.SMTP_SERVER", "smtp.example.com")
+    @patch("app.utils.email_verification.SMTP_USER", "user@example.com")
+    @patch("app.utils.email_verification.SMTP_PASS", "password")
+    @patch("app.utils.email_verification.EMAIL_FROM", "noreply@example.com")
+    def test_smtp_connection_uses_default_timeout(
+        self, mock_generate_code, mock_smtp, mock_create_otp, mock_db, test_email, test_user_id
+    ):
+        """smtplib.SMTP recibe timeout=10 (valor por defecto de SMTP_TIMEOUT_SECONDS)"""
+        mock_generate_code.return_value = "12345678"
+        mock_create_otp.return_value = {"user_id": test_user_id, "otp_code": "hashed"}
+        _configure_smtp_mock(mock_smtp)
+
+        email_verification.send_verification_code(mock_db, test_email, test_user_id)
+
+        mock_smtp.assert_called_once()
+        assert mock_smtp.call_args.kwargs.get("timeout") == 10
+
+    @patch("app.crud.email_otp_crud.create_otp_orm")
+    @patch("app.utils.email_verification.smtplib.SMTP")
+    @patch("app.utils.email_verification.generate_numeric_code")
+    @patch("app.utils.email_verification.SMTP_TIMEOUT_SECONDS", 7, create=True)
+    @patch("app.utils.email_verification.SMTP_SERVER", "smtp.example.com")
+    @patch("app.utils.email_verification.SMTP_USER", "user@example.com")
+    @patch("app.utils.email_verification.SMTP_PASS", "password")
+    @patch("app.utils.email_verification.EMAIL_FROM", "noreply@example.com")
+    def test_smtp_connection_timeout_comes_from_constant(
+        self, mock_generate_code, mock_smtp, mock_create_otp, mock_db, test_email, test_user_id
+    ):
+        """El timeout pasado a smtplib.SMTP se toma de SMTP_TIMEOUT_SECONDS, no está fijado"""
+        mock_generate_code.return_value = "12345678"
+        mock_create_otp.return_value = {"user_id": test_user_id, "otp_code": "hashed"}
+        _configure_smtp_mock(mock_smtp)
+
+        email_verification.send_verification_code(mock_db, test_email, test_user_id)
+
+        mock_smtp.assert_called_once()
+        assert mock_smtp.call_args.kwargs.get("timeout") == 7
+
+
+# ============================================================================
 # CREATE WELCOME NOTIFICATION TESTS
 # ============================================================================
 
@@ -301,6 +492,39 @@ class TestEnvironmentVariables:
         from app.utils.email_verification import SMTP_PORT
 
         assert SMTP_PORT == 465
+
+
+class TestSmtpUseStarttlsEnvironment:
+    """Tests for SMTP_USE_STARTTLS parsing (valor no reconocido o vacío = STARTTLS activo)"""
+
+    @staticmethod
+    def _reload_with_env(env):
+        """Recarga el módulo con el entorno dado y lo deja recargado con el entorno real"""
+        try:
+            with patch.dict("os.environ", env, clear=True):
+                importlib.reload(email_verification)
+                return email_verification.SMTP_USE_STARTTLS
+        finally:
+            importlib.reload(email_verification)
+
+    def test_smtp_use_starttls_default(self):
+        """Sin la variable definida, STARTTLS está activo (comportamiento histórico)"""
+        assert self._reload_with_env({}) is True
+
+    @pytest.mark.parametrize("value", ["true", "TRUE", "1", "yes", "on"])
+    def test_smtp_use_starttls_enabled_values(self, value):
+        """Valores que activan STARTTLS"""
+        assert self._reload_with_env({"SMTP_USE_STARTTLS": value}) is True
+
+    @pytest.mark.parametrize("value", ["false", "False", "0", "no", "off"])
+    def test_smtp_use_starttls_disabled_values(self, value):
+        """Valores que desactivan STARTTLS"""
+        assert self._reload_with_env({"SMTP_USE_STARTTLS": value}) is False
+
+    @pytest.mark.parametrize("value", ["", "   ", "talvez", "2"])
+    def test_smtp_use_starttls_empty_or_invalid_keeps_default(self, value):
+        """Un valor vacío o no reconocido no desactiva STARTTLS (fallo hacia el lado seguro)"""
+        assert self._reload_with_env({"SMTP_USE_STARTTLS": value}) is True
 
 
 # ============================================================================
