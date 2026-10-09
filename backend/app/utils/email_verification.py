@@ -1,11 +1,24 @@
 import os
-import random
 import smtplib
-import uuid
-from datetime import datetime, timedelta
 from email.message import EmailMessage
 
 from sqlalchemy.orm import Session
+
+
+def _env_flag(name: str, default: bool) -> bool:
+    """
+    Lee una variable de entorno booleana sin distinguir mayúsculas ni espacios.
+
+    1/true/yes/on -> True; 0/false/no/off -> False. Si la variable no existe, está vacía
+    o tiene un valor no reconocido se devuelve `default`.
+    """
+    value = os.getenv(name, "").strip().lower()
+    if value in ("1", "true", "yes", "on"):
+        return True
+    if value in ("0", "false", "no", "off"):
+        return False
+    return default
+
 
 # Variables de entorno
 EMAIL_FROM = os.getenv("EMAIL_FROM")
@@ -13,6 +26,10 @@ SMTP_SERVER = os.getenv("SMTP_SERVER")
 SMTP_PORT = int(os.getenv("SMTP_PORT", 587))
 SMTP_USER = os.getenv("SMTP_USER")
 SMTP_PASS = os.getenv("SMTP_PASS")
+# STARTTLS activo salvo que se desactive explícitamente (un valor erróneo no lo desactiva)
+SMTP_USE_STARTTLS = _env_flag("SMTP_USE_STARTTLS", default=True)
+# Tiempo máximo (s) de las operaciones SMTP: evita que una conexión colgada bloquee el registro
+SMTP_TIMEOUT_SECONDS = 10
 
 
 def generate_numeric_code():
@@ -22,7 +39,57 @@ def generate_numeric_code():
     return SecurityUtils.generate_secure_otp()
 
 
+def _smtp_is_configured() -> bool:
+    """
+    Indica si hay configuración SMTP suficiente para intentar el envío.
+
+    Requiere servidor y remitente. Las credenciales son opcionales (servidores de desarrollo
+    como Mailpit), pero nunca a medias: usuario y contraseña deben estar ambos o ninguno.
+    """
+    return bool(SMTP_SERVER and EMAIL_FROM) and bool(SMTP_USER) == bool(SMTP_PASS)
+
+
+def _build_verification_message(to_email: str, code: str) -> EmailMessage:
+    """Construye el correo con el código de verificación (válido 10 minutos)"""
+    message = EmailMessage()
+    message["Subject"] = "Tu código de verificación"
+    message["From"] = EMAIL_FROM
+    message["To"] = to_email
+    message.set_content(
+        f"Tu código de verificación es: {code}\n" f"Este código expirará en 10 minutos."
+    )
+    return message
+
+
+def _send_message(message: EmailMessage) -> None:
+    """
+    Envía el mensaje por SMTP según la configuración del módulo.
+
+    STARTTLS solo si SMTP_USE_STARTTLS y login solo si hay usuario y contraseña.
+    """
+    if not SMTP_SERVER:
+        raise RuntimeError("SMTP_SERVER no configurado")
+
+    with smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=SMTP_TIMEOUT_SECONDS) as server:
+        server.ehlo()  # Identificarse con el servidor
+        if SMTP_USE_STARTTLS:
+            server.starttls()  # Iniciar TLS
+            server.ehlo()  # Identificarse nuevamente después de TLS
+        if SMTP_USER and SMTP_PASS:
+            server.login(SMTP_USER, SMTP_PASS)
+        server.send_message(message)
+
+
 def send_verification_code(db: Session, to_email: str, user_id: str):
+    """
+    Genera y guarda un OTP para el usuario y lo envía por correo.
+
+    Compatibilidad: con usuario y contraseña el comportamiento es el de siempre (STARTTLS +
+    login). Antes, con servidor y remitente pero sin usuario ni contraseña, se simulaba el
+    envío; ahora se intenta enviar sin autenticar (con STARTTLS salvo que SMTP_USE_STARTTLS lo
+    desactive). Contra un SMTP real mal configurado falla igual que antes y el código acaba en
+    el log. Con credenciales a medias o sin servidor/remitente sigue simulándose el envío.
+    """
     from app.crud import email_otp_crud
 
     code = generate_numeric_code()
@@ -32,31 +99,13 @@ def send_verification_code(db: Session, to_email: str, user_id: str):
 
     # Enviar el código por correo
     try:
-        message = EmailMessage()
-        message["Subject"] = "Tu código de verificación"
-        message["From"] = EMAIL_FROM
-        message["To"] = to_email
-        message.set_content(
-            f"Tu código de verificación es: {code}\n" f"Este código expirará en 10 minutos."
-        )
-
         # Verificar que las variables de entorno estén configuradas
-        if not all([SMTP_SERVER, SMTP_USER, SMTP_PASS, EMAIL_FROM]):
+        if not _smtp_is_configured():
             print(" Configuración SMTP incompleta, simulando envío de email")
             print(f" Código de verificación para {to_email}: {code}")
             return  # Simular envío exitoso en desarrollo
 
-        assert SMTP_SERVER is not None
-        assert SMTP_USER is not None
-        assert SMTP_PASS is not None
-
-        # Usar SMTP con STARTTLS para ProtonMail
-        with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
-            server.ehlo()  # Identificarse con el servidor
-            server.starttls()  # Iniciar TLS
-            server.ehlo()  # Identificarse nuevamente después de TLS
-            server.login(SMTP_USER, SMTP_PASS)
-            server.send_message(message)
+        _send_message(_build_verification_message(to_email, code))
 
         print(f" Email de verificación enviado exitosamente a {to_email}")
 
