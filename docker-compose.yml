@@ -56,6 +56,29 @@ services:
     networks:
       - datamap-network
 
+  # Mailpit - SMTP de desarrollo
+  # Solo desarrollo: recoge los correos (p. ej. el codigo de verificacion) y los muestra
+  # en http://localhost:8025. Tag fijado a v1.31.4; sin volumen, los correos son efimeros.
+  mailpit:
+    image: axllent/mailpit:v1.31.4
+    container_name: datamap-mailpit
+    environment:
+      # Aceptar cualquier login sin TLS; Mailpit no arranca si solo se define la primera
+      MP_SMTP_AUTH_ACCEPT_ANY: "1"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "1"
+      MP_MAX_MESSAGES: 500
+    ports:
+      - "127.0.0.1:8025:8025"
+      - "127.0.0.1:1025:1025"
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    networks:
+      - datamap-network
+
   # Backend API
   backend:
     build:
@@ -94,16 +117,19 @@ services:
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
       STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY}
 
-      # Email
-      EMAIL_FROM: ${EMAIL_FROM}
-      SMTP_SERVER: ${SMTP_SERVER:-smtp.gmail.com}
-      SMTP_PORT: ${SMTP_PORT:-587}
-      SMTP_USER: ${SMTP_USER}
-      SMTP_PASS: ${SMTP_PASS}
+      # Email (desarrollo: Mailpit; para un SMTP real ver .env.example)
+      EMAIL_FROM: ${EMAIL_FROM:-no-reply@datamap.local}
+      SMTP_SERVER: ${SMTP_SERVER:-mailpit}
+      SMTP_PORT: ${SMTP_PORT:-1025}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_USE_STARTTLS: ${SMTP_USE_STARTTLS:-false}
     depends_on:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      mailpit:
         condition: service_healthy
     volumes:
       - ./backend:/app
