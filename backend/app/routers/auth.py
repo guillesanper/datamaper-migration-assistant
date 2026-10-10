@@ -1,5 +1,5 @@
 # app/routers/auth.py
-from datetime import datetime
+from datetime import date, datetime
 from typing import Annotated, Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -93,22 +93,25 @@ def create_error_response(message: str, error_code: str, status_code: int = 400)
     )
 
 
+# Campos del usuario que devuelve verify-code: los mismos que login, sin datos internos
+# (totp_secret, last_login_ip, failed_login_attempts...) en una respuesta previa a la sesión
+VERIFIED_USER_FIELDS = ("id", "username", "email", "is_verified", "created_at")
+
+
 def serialize_user(user_dict: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     """
-    Convierte campos datetime a strings para serialización JSON
-    Necesario porque JSON.dumps no puede serializar objetos datetime
+    Convierte los campos datetime/date a strings para serialización JSON
+    Necesario porque JSON.dumps no puede serializar objetos datetime. Se recorren todos los
+    valores (no una lista fija) para que un campo nuevo de la tabla users no rompa la respuesta.
     """
     if not user_dict:
         return None
 
     serialized = dict(user_dict)
 
-    datetime_fields = ["created_at", "updated_at", "last_login_at", "locked_until"]
-
-    for field in datetime_fields:
-        if serialized.get(field):
-            if isinstance(serialized[field], datetime):
-                serialized[field] = serialized[field].isoformat()
+    for field, value in serialized.items():
+        if isinstance(value, (datetime, date)):
+            serialized[field] = value.isoformat()
 
     return serialized
 
@@ -262,8 +265,12 @@ async def verify_code(request: Request, db=Depends(get_db)):
         # Obtener datos del usuario usando CRUD ORM
         user = user_crud.get_user_by_id_orm(db, result["user_id"])
 
-        # Serializar usuario
-        user_data = serialize_user(user)
+        # Serializar usuario (solo los campos públicos)
+        user_data = serialize_user(
+            {field: user[field] for field in VERIFIED_USER_FIELDS if field in user}
+            if user
+            else None
+        )
 
         # Log de seguridad
         await SecurityLogger.log_email_verification_attempt(
