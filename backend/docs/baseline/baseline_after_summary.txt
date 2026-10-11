@@ -1,4 +1,4 @@
-total=1581 passed=1532 failed=17 error=31 skipped=1
+total=1618 passed=1569 failed=17 error=31 skipped=1
 
 ## failed
 test.integration.test_csrf_protection_middleware.TestCSRFMiddleware::test_csrf_middleware_missing_token  | AssertionError: assert 'inválido o expirado' in {'code': 'security.csrf_token_invalid'}

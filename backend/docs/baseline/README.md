@@ -84,3 +84,18 @@ conexión a BD de usuario).
 
 Los ficheros se generan desde el JUnit XML: pasados como `classname::name` ordenado con LF, y el resumen con
 los totales y la lista de fallados/errores/saltados (primera línea del mensaje).
+
+## Después del SMTP de desarrollo (Mailpit) y la corrección de verify-code
+
+`baseline_after.xml`, `baseline_after_passed.txt` y `baseline_after_summary.txt` se regeneraron con la
+misma suite y arnés sobre el código con el envío de verificación configurable (STARTTLS y credenciales
+opcionales, `timeout`; commits `f9fa28b` y `c984305`) y la corrección de `POST /api/auth/verify-code`
+(commit `363f2ad`).
+
+Resultado: `17 failed, 1569 passed, 1 skipped, 31 errors` (1618 tests). Frente a la línea base anterior (1532 pasados):
+
+- **0 tests que pasaban y fallan ahora** (`comm -23` de las listas de pasados: vacío).
+- **+37 pasados**, todos nuevos: `test_email_verification.py` (22: `TestSmtpUseStarttlsEnvironment` 15 y
+  `TestSendVerificationCodeSmtpModes` 7), `test_auth_router_serialize_user.py` (9) y
+  `test_auth_verify_code_api.py` (6, ruta real contra la BD de test).
+- Los mismos 48 fallos/errores ajenos, uno a uno y con el mismo mensaje.
