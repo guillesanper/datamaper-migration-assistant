@@ -257,29 +257,32 @@ class TestInputSanitization:
 class TestClientIPDetection:
     """Tests for client IP detection"""
 
-    def test_get_client_ip_x_forwarded_for(self, mock_request):
-        """Test IP detection from X-Forwarded-For header"""
+    def test_get_client_ip_x_forwarded_for(self, mock_request, monkeypatch):
+        """Sin proxies de confianza, X-Forwarded-For (que controla el cliente) se ignora"""
+        monkeypatch.setattr("app.utils.security.security_settings.TRUSTED_PROXY_HOPS", 0)
         mock_request.headers = {"X-Forwarded-For": "203.0.113.1, 198.51.100.1"}
 
         ip = SecurityUtils.get_client_ip(mock_request)
 
-        assert ip == "203.0.113.1"
+        assert ip == "192.168.1.1"
 
-    def test_get_client_ip_x_real_ip(self, mock_request):
-        """Test IP detection from X-Real-IP header"""
+    def test_get_client_ip_x_real_ip(self, mock_request, monkeypatch):
+        """X-Real-IP ya no se usa: la controla el cliente igual que X-Forwarded-For"""
+        monkeypatch.setattr("app.utils.security.security_settings.TRUSTED_PROXY_HOPS", 0)
         mock_request.headers = {"X-Real-IP": "203.0.113.1"}
 
         ip = SecurityUtils.get_client_ip(mock_request)
 
-        assert ip == "203.0.113.1"
+        assert ip == "192.168.1.1"
 
-    def test_get_client_ip_x_forwarded(self, mock_request):
-        """Test IP detection from X-Forwarded header"""
+    def test_get_client_ip_x_forwarded(self, mock_request, monkeypatch):
+        """X-Forwarded ya no se usa: la controla el cliente igual que X-Forwarded-For"""
+        monkeypatch.setattr("app.utils.security.security_settings.TRUSTED_PROXY_HOPS", 0)
         mock_request.headers = {"X-Forwarded": "203.0.113.1"}
 
         ip = SecurityUtils.get_client_ip(mock_request)
 
-        assert ip == "203.0.113.1"
+        assert ip == "192.168.1.1"
 
     def test_get_client_ip_direct(self, mock_request):
         """Test IP detection from direct connection"""
@@ -326,6 +329,88 @@ class TestClientIPDetection:
         hash2 = SecurityUtils.hash_ip_address("192.168.1.1")
 
         assert hash1 == hash2
+
+
+class TestTrustedProxyHops:
+    """
+    IP del cliente con proxies de confianza (TRUSTED_PROXY_HOPS).
+
+    Con N saltos, la IP es la entrada N-ésima desde la derecha de X-Forwarded-For: las
+    anteriores las puede haber escrito el cliente. Con 0 saltos solo cuenta la IP del socket.
+    """
+
+    @pytest.fixture
+    def set_hops(self, monkeypatch):
+        def _set(hops):
+            monkeypatch.setattr("app.utils.security.security_settings.TRUSTED_PROXY_HOPS", hops)
+
+        return _set
+
+    def test_one_hop_takes_last_entry(self, mock_request, set_hops):
+        """El proxy añade la IP que vio; lo que el cliente escribió a la izquierda no cuenta"""
+        set_hops(1)
+        mock_request.headers = {"X-Forwarded-For": "6.6.6.6, 203.0.113.9"}
+
+        assert SecurityUtils.get_client_ip(mock_request) == "203.0.113.9"
+
+    def test_two_hops_takes_second_from_right(self, mock_request, set_hops):
+        set_hops(2)
+        mock_request.headers = {"X-Forwarded-For": "6.6.6.6, 203.0.113.9, 10.0.0.2"}
+
+        assert SecurityUtils.get_client_ip(mock_request) == "203.0.113.9"
+
+    def test_one_hop_single_entry(self, mock_request, set_hops):
+        set_hops(1)
+        mock_request.headers = {"X-Forwarded-For": "203.0.113.9"}
+
+        assert SecurityUtils.get_client_ip(mock_request) == "203.0.113.9"
+
+    def test_entries_are_stripped(self, mock_request, set_hops):
+        set_hops(1)
+        mock_request.headers = {"X-Forwarded-For": "6.6.6.6 ,   203.0.113.9  "}
+
+        assert SecurityUtils.get_client_ip(mock_request) == "203.0.113.9"
+
+    def test_fewer_entries_than_hops_falls_back_to_socket(self, mock_request, set_hops):
+        """Cabecera más corta que la cadena esperada: no se fía y usa la IP del socket"""
+        set_hops(2)
+        mock_request.headers = {"X-Forwarded-For": "203.0.113.9"}
+
+        assert SecurityUtils.get_client_ip(mock_request) == "192.168.1.1"
+
+    def test_trusted_hops_without_header_uses_socket(self, mock_request, set_hops):
+        set_hops(1)
+        mock_request.headers = {}
+
+        assert SecurityUtils.get_client_ip(mock_request) == "192.168.1.1"
+
+    def test_x_real_ip_and_x_forwarded_are_ignored_with_hops(self, mock_request, set_hops):
+        set_hops(1)
+        mock_request.headers = {"X-Real-IP": "6.6.6.6", "X-Forwarded": "7.7.7.7"}
+
+        assert SecurityUtils.get_client_ip(mock_request) == "192.168.1.1"
+
+    def test_zero_hops_forged_header_does_not_change_the_rate_limit_key(
+        self, mock_request, set_hops
+    ):
+        """Rotar X-Forwarded-For no cambia el identificador sobre el que se cuenta"""
+        set_hops(0)
+        keys = set()
+        for forged in ("1.1.1.1", "2.2.2.2, 3.3.3.3", "203.0.113.50"):
+            mock_request.headers = {"X-Forwarded-For": forged}
+            keys.add(SecurityUtils.hash_ip_address(SecurityUtils.get_client_ip(mock_request)))
+
+        assert len(keys) == 1
+
+    def test_one_hop_rotating_leading_entries_does_not_change_the_key(self, mock_request, set_hops):
+        """Con un proxy de confianza, falsificar las entradas de la izquierda no evade el límite"""
+        set_hops(1)
+        keys = set()
+        for forged in ("1.1.1.1", "2.2.2.2, 3.3.3.3", "4.4.4.4"):
+            mock_request.headers = {"X-Forwarded-For": f"{forged}, 203.0.113.9"}
+            keys.add(SecurityUtils.hash_ip_address(SecurityUtils.get_client_ip(mock_request)))
+
+        assert len(keys) == 1
 
 
 # ============================================================================

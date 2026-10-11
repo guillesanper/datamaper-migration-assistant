@@ -136,7 +136,13 @@ class SecurityUtils:
     @staticmethod
     def get_client_ip(request: Request) -> str:
         """
-        Obtiene la IP real del cliente considerando proxies
+        Obtiene la IP del cliente considerando los proxies de confianza
+
+        X-Forwarded-For solo cuenta si hay proxies de confianza delante (TRUSTED_PROXY_HOPS > 0):
+        con N saltos, la IP es la entrada N-ésima desde la derecha, la que añadió el primer proxy
+        de confianza; las de su izquierda las puede escribir el cliente. Con 0 saltos (por
+        defecto) la cabecera se ignora y se usa la IP del socket. X-Real-IP y X-Forwarded no se
+        usan: no hay forma de saber quién las escribió.
 
         Args:
             request: Request de FastAPI
@@ -144,22 +150,17 @@ class SecurityUtils:
         Returns:
             str: IP del cliente
         """
-        # Verificar headers de proxy en orden de prioridad
-        forwarded_for = request.headers.get("X-Forwarded-For")
+        socket_ip = str(request.client.host) if request.client else "unknown"
+
+        hops = security_settings.TRUSTED_PROXY_HOPS
+        forwarded_for = request.headers.get("X-Forwarded-For") if hops > 0 else None
         if forwarded_for:
-            # Tomar la primera IP (cliente original)
-            return str(forwarded_for.split(",")[0].strip())
+            entries = [entry.strip() for entry in forwarded_for.split(",") if entry.strip()]
+            # Con menos entradas que saltos la cadena no es la esperada: no se fía
+            if len(entries) >= hops:
+                return entries[-hops]
 
-        real_ip = request.headers.get("X-Real-IP")
-        if real_ip:
-            return str(real_ip.strip())
-
-        forwarded = request.headers.get("X-Forwarded")
-        if forwarded:
-            return str(forwarded.strip())
-
-        # Fallback a la IP directa
-        return str(request.client.host) if request.client else "unknown"
+        return socket_ip
 
     @staticmethod
     def hash_ip_address(ip_address: str) -> str:
