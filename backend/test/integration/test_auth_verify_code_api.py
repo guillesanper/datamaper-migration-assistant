@@ -124,8 +124,9 @@ def test_verify_code_cannot_be_replayed(client, unverified_user):
 
     second = _verify(client, unverified_user["email"], OTP_CODE)
 
+    # Un usuario ya verificado no se distingue de un código erróneo (anti-enumeración)
     assert second.status_code == 400
-    assert second.json()["message"] == "Email ya verificado"
+    assert second.json()["message"] == "Código inválido o expirado"
 
 
 # ============================================================================

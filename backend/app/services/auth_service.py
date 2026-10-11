@@ -181,7 +181,12 @@ class AuthService:
         self.db.commit()
 
     def verify_email_code(self, email: str, code: str) -> Dict[str, Any]:
-        """Verifica el código de email"""
+        """
+        Verifica el código de email.
+
+        El texto de cada AuthenticationError es el motivo real, para el log de seguridad: el
+        endpoint responde siempre lo mismo (no revela si la cuenta existe o ya está verificada).
+        """
         from app.crud import email_otp_crud
         from app.models.orm import User
 
@@ -192,10 +197,13 @@ class AuthService:
             # Obtener usuario
             user = self.db.query(User).filter(User.email == email, User.is_deleted == False).first()
 
+            # Sin cuenta o ya verificada no hay OTP que comprobar: se gasta el mismo bcrypt
             if not user:
+                email_otp_crud.simulate_otp_check()
                 raise AuthenticationError("Usuario no encontrado")
 
             if user.is_verified:
+                email_otp_crud.simulate_otp_check()
                 raise AuthenticationError("Email ya verificado")
 
             # Verificar OTP usando CRUD ORM (usa bcrypt internamente)
@@ -215,7 +223,12 @@ class AuthService:
             raise DatabaseError(f"Error al verificar código: {str(e)}")
 
     def reset_password(self, email: str, code: str, new_password: str) -> None:
-        """Resetea la contraseña usando un código OTP y revoca las sesiones abiertas del usuario"""
+        """
+        Resetea la contraseña usando un código OTP y revoca las sesiones abiertas del usuario.
+
+        Igual que verify_email_code, el texto de AuthenticationError es el motivo real (para el
+        log de seguridad); el endpoint no lo expone.
+        """
         from app.crud import email_otp_crud, session_crud
         from app.models.orm import User
 
@@ -230,6 +243,7 @@ class AuthService:
             user = self.db.query(User).filter(User.email == email, User.is_deleted == False).first()
 
             if not user:
+                email_otp_crud.simulate_otp_check()
                 raise AuthenticationError("Usuario no encontrado")
 
             # Verificar código OTP usando CRUD ORM

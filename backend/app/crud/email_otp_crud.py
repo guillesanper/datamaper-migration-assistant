@@ -12,6 +12,21 @@ from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
 
+# Hash bcrypt (12 rondas, como los OTP reales) de un valor que no es ningún código emitido:
+# solo sirve para gastar el mismo tiempo cuando no hay OTP que comprobar
+_DUMMY_OTP_HASH = b"$2b$12$9XTijnjNcZY/VgfXJrM15O73quxUg4jcAvmv7.7oexphe6M0cVZoG"
+
+
+def simulate_otp_check() -> None:
+    """
+    Gasta el tiempo de una comprobación de OTP (un bcrypt) sin comprobar nada.
+
+    Los caminos «sin cuenta» o «sin OTP» de verify-code, reset, resend-code y forgot la llaman
+    para no responder antes que los caminos con OTP real. Es una mitigación de mejor esfuerzo
+    contra la enumeración por tiempo, no una garantía.
+    """
+    bcrypt.checkpw(b"dummy-otp", _DUMMY_OTP_HASH)
+
 
 # ============================================================================
 # FUNCIONES ORM (SQLAlchemy)
@@ -119,6 +134,7 @@ def verify_otp_orm(db: Session, user_id: str, otp_code: str) -> bool:
 
         if not otp:
             logger.warning(f"OTP no encontrado para user_id: {str(user_id)[:8]}...")
+            simulate_otp_check()  # mismo tiempo que con un OTP: no delata «sin OTP»
             return False
 
         # Verificar expiración
@@ -129,6 +145,7 @@ def verify_otp_orm(db: Session, user_id: str, otp_code: str) -> bool:
             # Eliminar OTP expirado
             db.delete(otp)
             db.commit()
+            simulate_otp_check()
             return False
 
         # Reservar el intento de forma atómica (failed_attempts = failed_attempts + 1)

@@ -10,7 +10,7 @@ from starlette.concurrency import run_in_threadpool
 from app.config.security import security_settings
 
 # CRUDs ORM
-from app.crud import session_crud, user_crud
+from app.crud import email_otp_crud, session_crud, user_crud
 from app.database.session import get_db_session as get_db
 from app.middleware.rate_limiting import enforce_rate_limit, rate_limit
 from app.routers.dependencies import get_current_user, get_current_user_optional
@@ -50,6 +50,18 @@ RESET_LIMIT = (
     security_settings.RATE_LIMIT_RESET_ATTEMPTS,
     security_settings.RATE_LIMIT_RESET_WINDOW,
 )
+FORGOT_LIMIT = (
+    security_settings.RATE_LIMIT_FORGOT_ATTEMPTS,
+    security_settings.RATE_LIMIT_FORGOT_WINDOW,
+)
+
+# Respuesta única de verify-code y reset ante cualquier fallo de cuenta o de código: el motivo
+# real (cuenta inexistente, ya verificada, OTP ausente, caducado o erróneo) solo va al log de
+# seguridad, para que la respuesta no permita enumerar cuentas
+INVALID_CODE_MESSAGE = "Código inválido o expirado"
+# Respuestas neutras de resend-code y forgot: iguales exista o no la cuenta
+RESEND_CODE_MESSAGE = "Código reenviado correctamente"
+FORGOT_PASSWORD_MESSAGE = "Si la cuenta existe y está verificada, recibirás un código en tu correo"
 
 
 # Modelos Pydantic
@@ -371,17 +383,13 @@ async def verify_code(request: Request, db=Depends(get_db)):
         )
 
     except AuthenticationError as e:
+        # El motivo real va al log; al cliente siempre lo mismo
         await SecurityLogger.log_email_verification_attempt(
             request, body.get("email", ""), False, failure_reason=str(e)
         )
 
-        if "no encontrado" in str(e).lower():
-            status_code = 404
-        else:
-            status_code = 400
-
         return create_error_response(
-            message=str(e), error_code="verification_failed", status_code=status_code
+            message=INVALID_CODE_MESSAGE, error_code="verification_failed", status_code=400
         )
 
     except Exception as e:
@@ -415,25 +423,93 @@ async def resend_code(
         # Obtener usuario usando CRUD ORM
         user = user_crud.get_user_by_email_orm(db, email)
 
-        if not user:
-            return create_error_response(
-                message="Usuario no encontrado", error_code="user_not_found", status_code=404
+        if user and not user["is_verified"]:
+            await run_in_threadpool(
+                send_verification_code,
+                db,
+                email,
+                user["id"],
+                deliver=deliver_in_background(background_tasks),
+            )
+        else:
+            # Sin cuenta, borrada o ya verificada: no se envía nada y la respuesta es la misma.
+            # El reenvío solo sirve para verificar; el OTP de reset se pide con /forgot.
+            await run_in_threadpool(email_otp_crud.simulate_otp_check)
+            await SecurityLogger.log_event(
+                event_type="resend_code_ignored",
+                request=request,
+                user_id=user["id"] if user else None,
+                details={
+                    "email_attempted": email,
+                    "reason": "account_already_verified" if user else "user_not_found",
+                },
+                severity="info",
+                endpoint="/resend-code",
             )
 
-        await run_in_threadpool(
-            send_verification_code,
-            db,
-            email,
-            user["id"],
-            deliver=deliver_in_background(background_tasks),
-        )
-
-        return create_success_response(message="Código reenviado correctamente")
+        return create_success_response(message=RESEND_CODE_MESSAGE)
 
     except Exception as e:
         await SecurityLogger.log_suspicious_activity(
             request, "resend_code_error", {"error": str(e)}
         )
+        return create_error_response(
+            message="Error interno del servidor", error_code="internal_error", status_code=500
+        )
+
+
+@router.post("/forgot", response_model=StandardResponse)
+@rate_limit(*FORGOT_LIMIT)
+async def forgot_password(
+    request: Request,
+    data: ForgotPasswordRequest,
+    background_tasks: BackgroundTasks,
+    db=Depends(get_db),
+):
+    """
+    Solicitud de recuperación de contraseña: emite un OTP para /reset.
+
+    Responde 200 con el mismo mensaje exista o no la cuenta. Solo emite el código si la cuenta
+    existe, está verificada y no está borrada; el motivo real queda en el log de seguridad.
+    """
+
+    email = SecurityUtils.sanitize_email(data.email)
+
+    # Contador por cuenta además del de IP (como resend-code); va antes del try para que el
+    # 429 no acabe en el except general. Cuenta el email pedido, exista o no.
+    await enforce_rate_limit(request, *FORGOT_LIMIT, account=email)
+
+    try:
+        user = user_crud.get_user_by_email_orm(db, email)
+
+        if user and user["is_verified"]:
+            await run_in_threadpool(
+                send_verification_code,
+                db,
+                email,
+                user["id"],
+                deliver=deliver_in_background(background_tasks),
+            )
+            await SecurityLogger.log_password_reset_attempt(
+                request, email, True, user["id"], stage="request"
+            )
+        else:
+            # Sin cuenta, borrada o sin verificar: no se emite nada. Se gasta el mismo bcrypt
+            # que la emisión real (mejor esfuerzo contra la enumeración por tiempo).
+            await run_in_threadpool(email_otp_crud.simulate_otp_check)
+            await SecurityLogger.log_password_reset_attempt(
+                request,
+                email,
+                False,
+                user["id"] if user else None,
+                stage="request",
+                failure_reason="Cuenta sin verificar" if user else "Usuario no encontrado",
+            )
+
+        return create_success_response(message=FORGOT_PASSWORD_MESSAGE)
+
+    except Exception as e:
+        await SecurityLogger.log_suspicious_activity(request, "forgot_error", {"error": str(e)})
         return create_error_response(
             message="Error interno del servidor", error_code="internal_error", status_code=500
         )
@@ -464,7 +540,13 @@ async def reset_password(request: Request, data: ResetPasswordRequest, db=Depend
         return create_error_response(message=str(e), error_code="weak_password", status_code=400)
 
     except AuthenticationError as e:
-        return create_error_response(message=str(e), error_code="reset_failed", status_code=400)
+        # El motivo real va al log; al cliente siempre lo mismo
+        await SecurityLogger.log_password_reset_attempt(
+            request, data.email, False, None, stage="reset", failure_reason=str(e)  # type: ignore[arg-type]
+        )
+        return create_error_response(
+            message=INVALID_CODE_MESSAGE, error_code="reset_failed", status_code=400
+        )
 
     except DatabaseError as e:
         await SecurityLogger.log_suspicious_activity(
