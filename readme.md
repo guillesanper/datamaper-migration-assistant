@@ -40,6 +40,31 @@ docker-compose logs -f
 docker-compose down
 ```
 
+Servicios que levanta [`docker-compose.yml`](docker-compose.yml):
+
+| Servicio | Contenedor | Puerto en el host | Uso |
+|----------|------------|-------------------|-----|
+| backend | `datamap-backend` | 8000 | API FastAPI con hot reload |
+| postgres | `datamap-postgres` | 5432 | Base de datos |
+| redis | `datamap-redis` | 6379 | Caché de sesiones |
+| mailpit | `datamap-mailpit` | 8025 (web), 1025 (SMTP) | Servidor SMTP de **desarrollo**, solo en `127.0.0.1` |
+
+#### Correos de verificación en desarrollo (Mailpit)
+
+En desarrollo el backend envía los correos a Mailpit, que no los reenvía a ningún buzón real: se leen en **http://localhost:8025**.
+
+1. `docker-compose up -d`
+2. Registrar un usuario (`POST /api/auth/register`, o desde el frontend).
+3. Abrir http://localhost:8025 y copiar el código de 8 caracteres del correo «Tu código de verificación» (válido 10 minutos).
+4. Introducirlo en la verificación (`POST /api/auth/verify-code`).
+
+Cosas a tener en cuenta:
+
+- Los correos son **efímeros**: Mailpit no tiene volumen y los pierde al parar, reiniciar o recrear el contenedor.
+- Si el envío falla (Mailpit parado, SMTP mal configurado) el registro no falla, pero el código solo aparece en el log del backend: `docker logs datamap-backend` (línea «Código de verificación para …»).
+- Un reenvío (`POST /api/auth/resend-code`) sustituye al código anterior.
+- Mailpit solo es para desarrollo; en producción se usa un SMTP real (ver [`backend/docs/DEPLOYMENT_GUIDE.md`](backend/docs/DEPLOYMENT_GUIDE.md)).
+
 ## 🏗️ Arquitectura
 
 ```
@@ -60,6 +85,8 @@ docker-compose down
     │  :5432   │   │  :6379   │
     └──────────┘   └──────────┘
 ```
+
+En desarrollo con Docker Compose, el backend también envía los correos (códigos de verificación) a Mailpit (SMTP `:1025`, interfaz web `:8025`).
 
 ## 🧪 Testing
 
@@ -245,8 +272,20 @@ ENCRYPTION_ENABLED=true
 
 # External Services
 STRIPE_SECRET_KEY=your-stripe-key
-EMAIL_FROM=your-email@example.com
+
+# Email (desarrollo: Mailpit, ver «Correos de verificación en desarrollo»)
+EMAIL_FROM=no-reply@datamap.local
+# Con el backend fuera de Docker: SMTP_SERVER=localhost
+SMTP_SERVER=mailpit
+SMTP_PORT=1025
+SMTP_USER=
+SMTP_PASS=
+SMTP_USE_STARTTLS=false
 ```
+
+Con Docker Compose basta con no definir las variables `SMTP_*`: el compose ya usa `mailpit:1025` (no pongas `SMTP_SERVER=localhost` en el `.env` que lee el compose, porque dentro del contenedor `localhost` es el propio backend). Con el backend fuera de Docker, levanta solo Mailpit (`docker-compose up -d mailpit`) y exporta `SMTP_SERVER=localhost` en tu shell: `load_dotenv` no pisa las variables ya definidas.
+
+Para un SMTP real (Gmail o ProtonMail con contraseña de aplicación) usa `SMTP_PORT=587`, `SMTP_USER`, `SMTP_PASS` y **`SMTP_USE_STARTTLS=true`**: el valor por defecto del compose es `false`. Los detalles están en [`.env.example`](.env.example) y en [`backend/docs/DEPLOYMENT_GUIDE.md`](backend/docs/DEPLOYMENT_GUIDE.md).
 
 ### Frontend (`.env`)
 ```env

@@ -1,6 +1,6 @@
 # DataMap Backend - Deployment Guide
 
-**Última actualización**: 2025-01-06
+**Última actualización**: 2026-10-11
 **Versión**: 2.0 (con Redis)
 
 ---
@@ -33,7 +33,7 @@
 ### Servicios Externos
 
 - **Stripe** - Payment gateway (test keys para desarrollo)
-- **SMTP Server** - Email notifications (Gmail, Protonmail, etc.)
+- **SMTP Server** - Email notifications (Gmail, Protonmail, etc.). En desarrollo con Docker Compose no hace falta: se usa Mailpit (ver [Correos de verificación en desarrollo](#7-correos-de-verificación-en-desarrollo-mailpit))
 
 ---
 
@@ -124,6 +124,20 @@ SECRET_KEY=dev_secret_key_change_in_production
 ENV=development
 ENCRYPTION_ENABLED=true
 ```
+
+**Correo (opcional)**: sin variables `SMTP_*` el backend no envía nada: simula el envío e imprime el código de verificación en la consola (`Código de verificación para <email>: <código>`). Para ver los correos en una bandeja, levanta solo Mailpit y apunta el backend a él:
+
+```bash
+docker-compose up -d mailpit
+
+# En el shell que arranca uvicorn (o en backend/.env)
+export EMAIL_FROM=no-reply@datamap.local
+export SMTP_SERVER=localhost   # NO "mailpit": ese nombre solo existe dentro de la red de Docker
+export SMTP_PORT=1025
+export SMTP_USE_STARTTLS=false
+```
+
+Los correos se leen en http://localhost:8025. Más detalles en [Correos de verificación en desarrollo](#7-correos-de-verificación-en-desarrollo-mailpit).
 
 #### 5. Aplicar el esquema de la BD
 
@@ -227,6 +241,7 @@ NAME                    STATUS        PORTS
 datamap-backend         Up            0.0.0.0:8000->8000/tcp
 datamap-postgres        Up (healthy)  0.0.0.0:5432->5432/tcp
 datamap-redis           Up (healthy)  0.0.0.0:6379->6379/tcp
+datamap-mailpit         Up (healthy)  127.0.0.1:1025->1025/tcp, 127.0.0.1:8025->8025/tcp
 ```
 
 ### 4. Comandos Útiles
@@ -281,6 +296,50 @@ python
 >>> redis.ping()
 True
 ```
+
+### 7. Correos de verificación en desarrollo (Mailpit)
+
+`docker-compose.yml` incluye [Mailpit](https://mailpit.axllent.org/) (`axllent/mailpit:v1.31.4`, contenedor `datamap-mailpit`) como servidor SMTP de **desarrollo**. Recoge los correos con códigos de verificación que envía el backend (registro y reenvío de código) y los muestra en una interfaz web; no los entrega a ningún buzón real.
+
+> ⚠️ **Mailpit es solo para desarrollo.** No cifra ni reenvía nada y acepta cualquier usuario y contraseña. En producción se usa un SMTP real (ver [Correo (SMTP) en producción](#correo-smtp-en-producción)).
+
+**Flujo**:
+
+```bash
+# 1. Levantar los servicios (el backend espera a que Mailpit esté healthy)
+docker-compose up -d
+
+# 2. Registrar un usuario (o desde el frontend)
+# POST http://localhost:8000/api/auth/register
+
+# 3. Abrir http://localhost:8025 y copiar el código del correo
+#    "Tu código de verificación" (8 caracteres alfanuméricos, válido 10 minutos)
+
+# 4. Verificarlo
+# POST http://localhost:8000/api/auth/verify-code
+```
+
+- Un reenvío (`POST /api/auth/resend-code`) **sustituye** al código anterior; `verify-code` consume el código.
+- No hay ruta `/forgot`: el código del reset (`POST /api/auth/reset`) se obtiene con `resend-code`.
+- API de Mailpit (útil en scripts): `curl http://localhost:8025/api/v1/messages`.
+
+**Configuración** (valores por defecto del compose; todos se pueden sobrescribir en el `.env`):
+
+| Variable | Valor por defecto | Significado |
+|----------|-------------------|-------------|
+| `EMAIL_FROM` | `no-reply@datamap.local` | Remitente |
+| `SMTP_SERVER` | `mailpit` | Host SMTP (nombre del servicio en la red de Docker) |
+| `SMTP_PORT` | `1025` | Puerto SMTP |
+| `SMTP_USER` / `SMTP_PASS` | vacíos | Credenciales: ambas o ninguna (a medias se simula el envío) |
+| `SMTP_USE_STARTTLS` | `false` | Mailpit no ofrece TLS. El valor por defecto del **código** es `true`: solo `0/false/no/off` lo desactivan |
+
+**Limitaciones y detalles**:
+
+- Los puertos `8025` (web) y `1025` (SMTP) se publican **solo en `127.0.0.1`**: la interfaz muestra los códigos de verificación y no debe exponerse a la red.
+- Los correos son **efímeros**: sin volumen, se pierden al parar, reiniciar o recrear `datamap-mailpit` (`docker-compose stop/restart/up --force-recreate`). Guarda como máximo 500 mensajes (`MP_MAX_MESSAGES`).
+- Las dos variables `MP_SMTP_AUTH_ACCEPT_ANY` y `MP_SMTP_AUTH_ALLOW_INSECURE` del compose van **juntas**: con solo la primera Mailpit no arranca.
+- Si ya tienes un `.env` con un SMTP real, añade `SMTP_USE_STARTTLS=true`: el compose lo pone a `false` por defecto.
+- Ejecutando el backend fuera de Docker, usa `SMTP_SERVER=localhost` (ver [Desarrollo Local](#4-configurar-variables-de-entorno)) y no lo dejes en un `.env` compartido con el compose: dentro del contenedor `localhost` es el propio backend.
 
 ---
 
@@ -369,6 +428,7 @@ git push origin main
    SECRET_KEY=<genera_una_clave_segura>
    DB_PASSWORD=<tu_password_de_postgresql>
    STRIPE_SECRET_KEY=<tu_stripe_key>
+   SMTP_USER=<tu_smtp_usuario>
    SMTP_PASS=<tu_smtp_password>
    ```
 
@@ -397,6 +457,7 @@ git push origin main
 SECRET_KEY=<strong_random_key_64_chars>
 DB_PASSWORD=<secure_postgresql_password>
 STRIPE_SECRET_KEY=sk_live_...
+SMTP_USER=<smtp_user>
 SMTP_PASS=<app_password>
 CSRF_SECRET_KEY=<another_random_key>
 IP_HASH_SALT=<random_salt>
@@ -504,8 +565,28 @@ secrets.token_hex(32)
 - ✅ `ENV=production`
 - ✅ `SECURE_COOKIES=true`
 - ✅ Stripe keys de producción (si aplica)
-- ✅ SMTP credentials válidas
+- ✅ SMTP real con credenciales válidas (`SMTP_USER`, `SMTP_PASS`) y STARTTLS sin desactivar (ver [Correo (SMTP) en producción](#correo-smtp-en-producción))
+- ✅ Un registro de prueba entrega el correo y no deja líneas «Código de verificación para …» en el log
 - ✅ `DB_PASSWORD` fuerte
+
+### Correo (SMTP) en producción
+
+Mailpit **no se despliega en producción**. El backend necesita un SMTP real con STARTTLS y credenciales:
+
+```bash
+EMAIL_FROM=<remitente_autorizado_por_el_proveedor>
+SMTP_SERVER=smtp.protonmail.ch   # o smtp.gmail.com, etc.
+SMTP_PORT=587
+SMTP_USER=<smtp_user>
+SMTP_PASS=<app_password>         # secreto: solo en el panel del proveedor, nunca en Git
+SMTP_USE_STARTTLS=true
+```
+
+- `backend/render.yaml` ya define `EMAIL_FROM`, `SMTP_SERVER` (`smtp.protonmail.ch`) y `SMTP_PORT` (`587`); `SMTP_USER` y `SMTP_PASS` son secretos que se rellenan en el Dashboard. `SMTP_USE_STARTTLS` no está en `render.yaml`: si no se define, el código usa `true`. No la pongas a `false` en producción (puedes fijarla a `true` en el Dashboard para dejarlo explícito).
+- `SMTP_USER` y `SMTP_PASS` van **ambas o ninguna**. Con una sola (o sin `SMTP_SERVER`/`EMAIL_FROM`) el backend **simula** el envío: no manda ningún correo.
+- Las operaciones SMTP tienen un timeout de 10 s (`SMTP_TIMEOUT_SECONDS`).
+- ⚠️ **El código OTP se imprime en el log si falla el envío.** Con credenciales erróneas o el proveedor caído, el registro sigue respondiendo 201 y el log del backend contiene `Código de verificación para <email>: <código>` en claro (válido 10 minutos). Revisa el log antes de salir a producción y trata cualquier aparición como un fallo de configuración. La salida correcta es `Email de verificación enviado exitosamente a <email>`; la incorrecta, `Error enviando email: …`.
+- El envío es **síncrono**: con el SMTP caído o lento, el registro tarda hasta ~10 s y ese worker no atiende otras peticiones mientras tanto.
 
 ---
 
@@ -577,6 +658,32 @@ WARNING: Session hijacking attempt detected!
 3. Validar que `user_id` se está pasando correctamente
 
 **Solución normal**: Esto es un **comportamiento esperado** si detecta un intento real de hijacking. La sesión se invalida automáticamente.
+
+### Problema: No llega el correo de verificación (desarrollo)
+
+**Síntomas**:
+- El registro responde 201 pero no hay correo en http://localhost:8025.
+- El registro tarda entre 4 y 10 s.
+
+**Diagnóstico**:
+```bash
+# 1. Mailpit levantado y healthy
+docker-compose ps mailpit
+curl http://localhost:8025/api/v1/info
+
+# 2. Qué dice el backend (el código aparece aquí si el envío falló)
+docker logs datamap-backend 2>&1 | grep -E "Error enviando email|Código de verificación para|Email de verificación enviado"
+
+# 3. Variables SMTP que ve el backend (sin SMTP_PASS, para no volcar la contraseña)
+docker-compose exec backend env | grep -E "^(SMTP_SERVER|SMTP_PORT|SMTP_USER|SMTP_USE_STARTTLS|EMAIL_FROM)="
+```
+
+**Soluciones**:
+- `Error enviando email: … Name or service not known` o `Connection refused`: Mailpit parado o `SMTP_SERVER` incorrecto. `docker-compose up -d mailpit`; con Mailpit parado el registro tarda 4–8 s, y con el contenedor pausado unos 10 s (timeout). El código del log sirve igualmente para verificar la cuenta.
+- `Configuración SMTP incompleta, simulando envío`: falta `SMTP_SERVER` o `EMAIL_FROM`, o solo hay una de `SMTP_USER`/`SMTP_PASS`.
+- `STARTTLS extension not supported by server`: `SMTP_USE_STARTTLS` no está en `false` (típico de un `.env` antiguo que sobrescribe el valor del compose). Mailpit no ofrece TLS.
+- El correo estaba y desapareció: Mailpit es efímero y se vació al reiniciar el contenedor. Pide otro código con `POST /api/auth/resend-code`.
+- Mailpit no arranca tras tocar el compose: `MP_SMTP_AUTH_ACCEPT_ANY` y `MP_SMTP_AUTH_ALLOW_INSECURE` deben definirse juntas.
 
 ### Problema: Docker Compose no inicia
 
@@ -736,5 +843,5 @@ CONFIG SET save "900 1 300 10"
 
 ---
 
-**Última revisión**: 2025-01-06
+**Última revisión**: 2026-10-11
 **Mantenido por**: DataMap DevOps Team
