@@ -392,20 +392,20 @@ async def reset_password(request: Request, data: ResetPasswordRequest, db=Depend
 
 
 @router.post("/logout", response_model=StandardResponse)
-async def logout(current_user=Depends(get_current_user), db=Depends(get_db)):
+async def logout(request: Request, current_user=Depends(get_current_user), db=Depends(get_db)):
     """Cierre de sesión (solo actual dispositivo)"""
     try:
-        # Obtener cookie firmada
         import hashlib
-
-        from fastapi import Request
 
         from app.utils.cookies import verify_signed_cookie
 
-        # Revocar la sesión actual usando CRUD ORM
-        session_cookie = current_user.get("session_token")
-        if session_cookie:
-            hashed_token = hashlib.sha256(session_cookie.encode()).hexdigest()
+        # Revocar la sesión actual usando CRUD ORM. El token sale de la cookie firmada de la
+        # petición: current_user no lo incluye (y no debe, porque /me devuelve ese diccionario).
+        # Con autenticación por API key no hay cookie y no hay sesión que revocar.
+        signed_cookie = request.cookies.get("session")
+        session_token = verify_signed_cookie(signed_cookie) if signed_cookie else None
+        if session_token:
+            hashed_token = hashlib.sha256(session_token.encode()).hexdigest()
             session_crud.revoke_session_orm(db, hashed_token, reason="user_logout")
 
         response = create_success_response("Sesión cerrada exitosamente")

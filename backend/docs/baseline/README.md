@@ -99,3 +99,17 @@ Resultado: `17 failed, 1569 passed, 1 skipped, 31 errors` (1618 tests). Frente a
   `TestSendVerificationCodeSmtpModes` 7), `test_auth_router_serialize_user.py` (9) y
   `test_auth_verify_code_api.py` (6, ruta real contra la BD de test).
 - Los mismos 48 fallos/errores ajenos, uno a uno y con el mismo mensaje.
+
+## Después de revocar sesiones en logout y reset
+
+`baseline_after.xml`, `baseline_after_passed.txt` y `baseline_after_summary.txt` se regeneraron con la
+misma suite y arnés sobre el código en el que `POST /api/auth/logout` revoca la sesión de la cookie
+recibida y `POST /api/auth/reset` revoca las sesiones previas del usuario.
+
+Resultado: `17 failed, 1576 passed, 1 skipped, 31 errors` (1625 tests). Frente a la línea base anterior (1569 pasados):
+
+- **0 tests que pasaban y fallan ahora** (`comm -23` de las listas de pasados: vacío).
+- **+7 pasados**, todos nuevos: `test_auth_session_revocation_api.py` (logout revoca la sesión en BD, la misma
+  cookie da 401, solo se revoca la sesión actual, `/me` no expone identificadores de sesión, y reset revoca las
+  sesiones previas, permite entrar con la contraseña nueva y no revoca con un código erróneo).
+- Los mismos 48 fallos/errores ajenos, uno a uno y con el mismo mensaje.

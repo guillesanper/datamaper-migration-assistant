@@ -200,8 +200,8 @@ class AuthService:
             raise DatabaseError(f"Error al verificar código: {str(e)}")
 
     def reset_password(self, email: str, code: str, new_password: str) -> None:
-        """Resetea la contraseña usando un código OTP"""
-        from app.crud import email_otp_crud
+        """Resetea la contraseña usando un código OTP y revoca las sesiones abiertas del usuario"""
+        from app.crud import email_otp_crud, session_crud
         from app.models.orm import User
 
         # Validar nueva contraseña
@@ -230,6 +230,11 @@ class AuthService:
             user.locked_until = None  # type: ignore[assignment]
 
             self.db.commit()
+
+            # Una contraseña nueva invalida las sesiones anteriores (cierra a quien la conociera)
+            session_crud.revoke_all_user_sessions_orm(
+                self.db, user_id=str(user.id), reason="password_reset"
+            )
 
         except AuthenticationError:
             raise
