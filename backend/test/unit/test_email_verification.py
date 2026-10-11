@@ -751,3 +751,130 @@ class TestEmailVerificationIntegration:
         assert call_kwargs["recipient_id"] == test_user_id
         assert call_kwargs["notification_kind"] == "system"
         assert call_kwargs["title"] == "¡Bienvenido!"
+
+
+# ============================================================================
+# EMISIÓN Y ENTREGA SEPARADAS (hallazgo 1)
+# ============================================================================
+
+
+class TestIssueAndDeliverSplit:
+    """
+    issue_verification_code (con BD) y deliver_verification_email (sin BD) por separado, para
+    poder entregar el correo en segundo plano; send_verification_code los compone.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _enable_module_logger(self, monkeypatch):
+        """Ver TestOtpNotLoggedOutsideDevelopment: el arnés deshabilita los loggers"""
+        monkeypatch.setattr(email_verification.logger, "disabled", False)
+
+    def test_issue_returns_the_code_and_stores_it_without_sending(self, mock_db, test_user_id):
+        from app.utils.email_verification import issue_verification_code
+
+        with ExitStack() as stack:
+            mock_create_otp = stack.enter_context(patch("app.crud.email_otp_crud.create_otp_orm"))
+            stack.enter_context(
+                patch("app.utils.email_verification.generate_numeric_code", return_value=_OTP)
+            )
+            mock_smtp = stack.enter_context(patch("app.utils.email_verification.smtplib.SMTP"))
+
+            code = issue_verification_code(mock_db, test_user_id)
+
+        assert code == _OTP
+        mock_create_otp.assert_called_once_with(
+            mock_db, user_id=test_user_id, otp_code=_OTP, expires_in_minutes=10
+        )
+        mock_smtp.assert_not_called()
+
+    def test_deliver_takes_no_database_session(self):
+        """La tarea de fondo no puede recibir db: la sesión se cierra al terminar la petición"""
+        import inspect
+
+        from app.utils.email_verification import deliver_verification_email
+
+        assert list(inspect.signature(deliver_verification_email).parameters) == [
+            "to_email",
+            "code",
+        ]
+
+    def test_deliver_sends_the_email_with_the_given_code(self, test_email):
+        from app.utils.email_verification import deliver_verification_email
+
+        with ExitStack() as stack:
+            for name, value in _FULL_SMTP.items():
+                stack.enter_context(patch.object(email_verification, name, value))
+            mock_smtp = stack.enter_context(patch("app.utils.email_verification.smtplib.SMTP"))
+            connection = _configure_smtp_mock(mock_smtp)
+
+            result = deliver_verification_email(test_email, _OTP)
+
+        assert result is None
+        connection.send_message.assert_called_once()
+        message = connection.send_message.call_args[0][0]
+        assert message["To"] == test_email
+        assert _OTP in message.get_content()
+
+    @pytest.mark.parametrize("scenario", list(_UNDELIVERED_SCENARIOS))
+    @pytest.mark.parametrize("development", [True, False])
+    def test_deliver_keeps_the_otp_policy(self, scenario, development, test_email, capsys, caplog):
+        """Mismo criterio que send_verification_code: el código solo sale en desarrollo"""
+        from app.utils.email_verification import deliver_verification_email
+
+        caplog.set_level(logging.DEBUG)
+        smtp_config = _UNDELIVERED_SCENARIOS[scenario]
+        with ExitStack() as stack:
+            for name, value in smtp_config.items():
+                stack.enter_context(patch.object(email_verification, name, value))
+            stack.enter_context(patch.object(security_settings, "DEVELOPMENT_MODE", development))
+            mock_smtp = stack.enter_context(patch("app.utils.email_verification.smtplib.SMTP"))
+            _configure_smtp_mock(mock_smtp)
+            if scenario == "smtp_error":
+                mock_smtp.side_effect = Exception("SMTP connection failed")
+            elif scenario == "smtp_error_echoes_message":
+                mock_smtp.side_effect = Exception(f"550 rechazado {test_email} contenido {_OTP}")
+
+            deliver_verification_email(test_email, _OTP)
+
+        captured = capsys.readouterr()
+        if development:
+            assert _OTP in captured.out
+        else:
+            assert _OTP not in captured.out
+            assert _OTP not in captured.err
+            assert _OTP not in caplog.text
+
+    def test_send_verification_code_is_issue_plus_deliver(self, mock_db, test_email, test_user_id):
+        """Compatibilidad: misma firma, mismo orden, no devuelve el código"""
+        manager = MagicMock()
+        with (
+            patch.object(
+                email_verification, "issue_verification_code", return_value=_OTP
+            ) as mock_issue,
+            patch.object(email_verification, "deliver_verification_email") as mock_deliver,
+        ):
+            manager.attach_mock(mock_issue, "issue")
+            manager.attach_mock(mock_deliver, "deliver")
+
+            result = email_verification.send_verification_code(mock_db, test_email, test_user_id)
+
+        assert result is None
+        assert manager.mock_calls == [
+            call.issue(mock_db, test_user_id),
+            call.deliver(test_email, _OTP),
+        ]
+
+    def test_send_verification_code_uses_the_injected_deliver(
+        self, mock_db, test_email, test_user_id
+    ):
+        deliver = MagicMock()
+        with (
+            patch.object(email_verification, "issue_verification_code", return_value=_OTP),
+            patch.object(email_verification, "deliver_verification_email") as mock_default,
+        ):
+            email_verification.send_verification_code(
+                mock_db, test_email, test_user_id, deliver=deliver
+            )
+
+        deliver.assert_called_once_with(test_email, _OTP)
+        mock_default.assert_not_called()

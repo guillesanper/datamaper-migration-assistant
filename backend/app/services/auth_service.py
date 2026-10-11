@@ -1,7 +1,7 @@
 # app/services/auth_service.py
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 from passlib.context import CryptContext
 from sqlalchemy import or_
@@ -38,8 +38,20 @@ class AuthService:
         if not validation["is_valid"]:
             raise ValueError("; ".join(validation["errors"]))
 
-    def create_user(self, username: str, email: str, password: str) -> Dict[str, Any]:
-        """Crea un nuevo usuario en la base de datos"""
+    def create_user(
+        self,
+        username: str,
+        email: str,
+        password: str,
+        deliver: Optional[Callable[[str, str], None]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Crea un nuevo usuario en la base de datos.
+
+        El OTP se crea aquí y se entrega con `deliver(email, código)`; sin `deliver` se envía por
+        correo en el acto. Un endpoint async inyecta una función que lo encola en segundo plano
+        (el servicio no depende de FastAPI). El resultado nunca incluye el código.
+        """
         from app.models.orm import User
 
         # Validar contraseña
@@ -73,7 +85,7 @@ class AuthService:
             self.db.refresh(new_user)
 
             # Enviar código de verificación (usa CRUD ORM internamente)
-            send_verification_code(self.db, email, user_id)
+            send_verification_code(self.db, email, user_id, deliver=deliver)
 
             return {
                 "user_id": str(new_user.id),

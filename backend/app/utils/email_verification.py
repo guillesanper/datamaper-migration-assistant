@@ -2,6 +2,7 @@ import logging
 import os
 import smtplib
 from email.message import EmailMessage
+from typing import Callable, Optional
 
 from sqlalchemy.orm import Session
 
@@ -113,9 +114,31 @@ def _send_message(message: EmailMessage) -> None:
         server.send_message(message)
 
 
-def send_verification_code(db: Session, to_email: str, user_id: str):
+def issue_verification_code(db: Session, user_id: str) -> str:
     """
-    Genera y guarda un OTP para el usuario y lo envía por correo.
+    Genera un OTP para el usuario, lo guarda cifrado en BD y lo devuelve en claro.
+
+    Es la parte del envío que necesita la sesión de BD y debe hacerse dentro de la petición.
+    La entrega por correo va aparte (`deliver_verification_email`): no usa la BD y puede
+    ejecutarse en segundo plano. El código devuelto no debe incluirse en ninguna respuesta.
+    """
+    from app.crud import email_otp_crud
+
+    code = generate_numeric_code()
+
+    # Crear OTP usando CRUD (cifra automáticamente con bcrypt y hace UPSERT)
+    email_otp_crud.create_otp_orm(db, user_id=user_id, otp_code=code, expires_in_minutes=10)
+
+    return code
+
+
+def deliver_verification_email(to_email: str, code: str) -> None:
+    """
+    Entrega por correo un código ya generado; los errores de envío no se propagan.
+
+    No recibe la sesión de BD a propósito: se ejecuta como tarea de fondo, cuando la sesión de
+    la petición ya se ha cerrado. Es bloqueante (smtplib, hasta SMTP_TIMEOUT_SECONDS por
+    operación): fuera de una tarea de fondo hay que llamarla desde un hilo, no desde el loop.
 
     Compatibilidad: con usuario y contraseña el comportamiento es el de siempre (STARTTLS +
     login). Antes, con servidor y remitente pero sin usuario ni contraseña, se simulaba el
@@ -126,13 +149,6 @@ def send_verification_code(db: Session, to_email: str, user_id: str):
     (`_log_code_fallback_allowed`); fuera de él el fallo se registra con logging, sin el código
     y con el email enmascarado. El OTP guardado en BD no depende de que el correo salga.
     """
-    from app.crud import email_otp_crud
-
-    code = generate_numeric_code()
-
-    # Crear OTP usando CRUD (cifra automáticamente con bcrypt y hace UPSERT)
-    email_otp_crud.create_otp_orm(db, user_id=user_id, otp_code=code, expires_in_minutes=10)
-
     # Enviar el código por correo
     try:
         # Verificar que las variables de entorno estén configuradas
@@ -163,6 +179,26 @@ def send_verification_code(db: Session, to_email: str, user_id: str):
             )
         # No lanzar excepción para no interrumpir el registro
         # En producción, podrías querer manejar esto de manera diferente
+
+
+def send_verification_code(
+    db: Session,
+    to_email: str,
+    user_id: str,
+    deliver: Optional[Callable[[str, str], None]] = None,
+) -> None:
+    """
+    Genera y guarda un OTP para el usuario y lo entrega por correo.
+
+    Es `issue_verification_code` + entrega. Sin `deliver` el correo se envía en el acto
+    (`deliver_verification_email`, bloqueante); un endpoint async pasa una función que lo
+    encole en segundo plano. No devuelve el código.
+    """
+    code = issue_verification_code(db, user_id)
+
+    if deliver is None:
+        deliver = deliver_verification_email
+    deliver(to_email, code)
 
 
 def create_welcome_notification(db: Session, user_id: str, _):

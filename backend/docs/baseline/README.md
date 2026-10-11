@@ -154,3 +154,25 @@ Resultado: `17 failed, 1613 passed, 1 skipped, 31 errors` (1662 tests). Frente a
 
 El generador se validó antes de usarlo: sobre el `baseline_after.xml` anterior reproduce
 `baseline_after_passed.txt` y `baseline_after_summary.txt` byte a byte.
+
+## Después de sacar el envío del correo del event loop (P3 de la deuda de autenticación)
+
+`baseline_after.xml`, `baseline_after_passed.txt` y `baseline_after_summary.txt` se regeneraron con la
+misma suite y arnés sobre el código en el que `register` y `resend-code` entregan el correo en segundo
+plano (`BackgroundTasks`, sin sesión de BD) y los servicios síncronos de login, register, verify-code y
+reset se ejecutan en el threadpool.
+
+Resultado: `17 failed, 1639 passed, 1 skipped, 31 errors` (1688 tests). Frente a la línea base anterior (1613 pasados):
+
+- **0 tests que pasaban y fallan ahora** (`comm -23` de las listas de pasados: vacío).
+- **+26 pasados**, todos nuevos: `test_auth_background_delivery_api.py` (11: la respuesta de register y
+  resend-code sale mientras el SMTP lento sigue en curso, el cuerpo nunca contiene el código, el código
+  entregado es el guardado, el event loop sigue atendiendo durante el envío, `create_user` entrega por
+  `deliver` y no devuelve el código, y los 4 servicios pesados corren fuera del hilo del loop) y
+  `test_email_verification.py::TestIssueAndDeliverSplit` (15: emisión y entrega por separado, la entrega
+  no recibe `db`, conserva la política del OTP en 5 escenarios × 2 entornos, `send_verification_code` =
+  emisión + entrega).
+- Los mismos 48 fallos/errores ajenos, uno a uno y con el mismo mensaje.
+
+El generador se validó antes de usarlo: sobre el `baseline_after.xml` anterior reproduce
+`baseline_after_passed.txt` y `baseline_after_summary.txt` byte a byte.

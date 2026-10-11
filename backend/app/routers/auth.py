@@ -1,10 +1,11 @@
 # app/routers/auth.py
 from datetime import date, datetime
-from typing import Annotated, Any, Dict, Optional
+from typing import Annotated, Any, Callable, Dict, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, EmailStr, Field, ValidationError, field_validator
+from starlette.concurrency import run_in_threadpool
 
 # CRUDs ORM
 from app.crud import session_crud, user_crud
@@ -13,7 +14,7 @@ from app.middleware.rate_limiting import rate_limit
 from app.routers.dependencies import get_current_user, get_current_user_optional
 from app.services.auth_service import AuthenticationError, AuthService, DatabaseError
 from app.utils.cookies import SESSION_COOKIE_CONFIG, get_session_token_hash, sign_cookie
-from app.utils.email_verification import send_verification_code
+from app.utils.email_verification import deliver_verification_email, send_verification_code
 from app.utils.security import SecurityUtils
 from app.utils.security_logger import (
     SecurityLogger,
@@ -116,18 +117,42 @@ def serialize_user(user_dict: Optional[Dict[str, Any]]) -> Optional[Dict[str, An
     return serialized
 
 
+def deliver_in_background(background_tasks: BackgroundTasks) -> Callable[[str, str], None]:
+    """
+    Entrega del código de verificación después de responder, sin bloquear el event loop.
+
+    La tarea recibe solo destinatario y código: la sesión de BD de la petición ya está cerrada
+    cuando se ejecuta. El código no puede llegar a la respuesta: solo viaja a la tarea.
+    """
+
+    def deliver(to_email: str, code: str) -> None:
+        background_tasks.add_task(deliver_verification_email, to_email, code)
+
+    return deliver
+
+
 # Endpoints
 
 
 @router.post("/register", response_model=StandardResponse, status_code=201)
-async def register(request: Request, data: RegisterRequest, db=Depends(get_db)):
+async def register(
+    request: Request,
+    data: RegisterRequest,
+    background_tasks: BackgroundTasks,
+    db=Depends(get_db),
+):
     """Registro de nuevo usuario"""
 
     auth_service = AuthService(db)
 
     try:
-        result = auth_service.create_user(
-            username=data.username, email=data.email, password=data.password
+        # En el threadpool: bcrypt y las consultas síncronas no deben bloquear el event loop
+        result = await run_in_threadpool(
+            auth_service.create_user,
+            username=data.username,
+            email=data.email,
+            password=data.password,
+            deliver=deliver_in_background(background_tasks),
         )
 
         await log_registration_success(
@@ -170,8 +195,11 @@ async def login(request: Request, data: LoginRequest, db=Depends(get_db)):
     client_ip = SecurityUtils.get_client_ip(request)
 
     try:
-        user = auth_service.authenticate_user(
-            identifier=data.identifier, password=data.password, client_ip=client_ip
+        user = await run_in_threadpool(
+            auth_service.authenticate_user,
+            identifier=data.identifier,
+            password=data.password,
+            client_ip=client_ip,
         )
 
         await log_login_success(request, user["username"], user["id"])
@@ -260,7 +288,9 @@ async def verify_code(request: Request, db=Depends(get_db)):
 
         # Llamar al servicio
         auth_service = AuthService(db)
-        result = auth_service.verify_email_code(email=data.email, code=data.code)
+        result = await run_in_threadpool(
+            auth_service.verify_email_code, email=data.email, code=data.code
+        )
 
         # Obtener datos del usuario usando CRUD ORM
         user = user_crud.get_user_by_id_orm(db, result["user_id"])
@@ -339,7 +369,12 @@ async def verify_code(request: Request, db=Depends(get_db)):
 
 @router.post("/resend-code", response_model=StandardResponse)
 @rate_limit(3, 600)
-async def resend_code(request: Request, data: ResendCodeRequest, db=Depends(get_db)):
+async def resend_code(
+    request: Request,
+    data: ResendCodeRequest,
+    background_tasks: BackgroundTasks,
+    db=Depends(get_db),
+):
     """Reenvío de código de verificación"""
 
     email = SecurityUtils.sanitize_email(data.email)
@@ -353,7 +388,13 @@ async def resend_code(request: Request, data: ResendCodeRequest, db=Depends(get_
                 message="Usuario no encontrado", error_code="user_not_found", status_code=404
             )
 
-        send_verification_code(db, email, user["id"])
+        await run_in_threadpool(
+            send_verification_code,
+            db,
+            email,
+            user["id"],
+            deliver=deliver_in_background(background_tasks),
+        )
 
         return create_success_response(message="Código reenviado correctamente")
 
@@ -374,8 +415,11 @@ async def reset_password(request: Request, data: ResetPasswordRequest, db=Depend
     auth_service = AuthService(db)
 
     try:
-        auth_service.reset_password(
-            email=data.email, code=data.code, new_password=data.new_password
+        await run_in_threadpool(
+            auth_service.reset_password,
+            email=data.email,
+            code=data.code,
+            new_password=data.new_password,
         )
 
         await SecurityLogger.log_password_reset_attempt(

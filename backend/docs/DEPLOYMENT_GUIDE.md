@@ -591,7 +591,7 @@ SMTP_USE_STARTTLS=true
   - `Configuración SMTP incompleta: no se entregó el código de verificación a u***@dominio`
 
   Cualquiera de las dos líneas en producción es un fallo de configuración o del proveedor: busca esas cadenas en el log. La salida correcta es `Email de verificación enviado exitosamente a <email>`. Solo con `ENV=development` el fallo conserva el comportamiento de desarrollo (`Error enviando email: …` + `Código de verificación para <email>: <código>` en la consola).
-- El envío es **síncrono**: con el SMTP caído o lento, el registro tarda hasta ~10 s y ese worker no atiende otras peticiones mientras tanto.
+- El envío es **asíncrono respecto a la petición**: `register` y `resend-code` crean el OTP, responden y entregan el correo después (tarea de fondo, en un hilo, sin sesión de BD). Con el SMTP caído o lento la respuesta no espera y el resto de peticiones no se bloquean; el fallo solo aparece en el log (las dos líneas de arriba). Consecuencias: la respuesta 201/200 **no garantiza** que el correo haya salido, y si el proceso se reinicia entre la respuesta y el envío, ese correo se pierde (no hay cola persistente: el usuario puede pedir otro código con reenviar).
 
 ---
 
@@ -667,8 +667,7 @@ WARNING: Session hijacking attempt detected!
 ### Problema: No llega el correo de verificación (desarrollo)
 
 **Síntomas**:
-- El registro responde 201 pero no hay correo en http://localhost:8025.
-- El registro tarda entre 4 y 10 s.
+- El registro responde 201 pero no hay correo en http://localhost:8025 (la entrega es en segundo plano: el 201 no garantiza que el correo haya salido; el resultado del envío aparece en el log del backend unos segundos después).
 
 **Diagnóstico**:
 ```bash
@@ -684,7 +683,7 @@ docker-compose exec backend env | grep -E "^(SMTP_SERVER|SMTP_PORT|SMTP_USER|SMT
 ```
 
 **Soluciones**:
-- `Error enviando email: … Name or service not known` o `Connection refused`: Mailpit parado o `SMTP_SERVER` incorrecto. `docker-compose up -d mailpit`; con Mailpit parado el registro tarda 4–8 s, y con el contenedor pausado unos 10 s (timeout). El código del log sirve igualmente para verificar la cuenta.
+- `Error enviando email: … Name or service not known` o `Connection refused`: Mailpit parado o `SMTP_SERVER` incorrecto. `docker-compose up -d mailpit`. El registro responde igual de rápido (el envío va en segundo plano); el error aparece en el log cuando termina el intento de envío (hasta ~10 s, el timeout, con el contenedor pausado). El código del log sirve igualmente para verificar la cuenta.
 - `Configuración SMTP incompleta, simulando envío`: falta `SMTP_SERVER` o `EMAIL_FROM`, o solo hay una de `SMTP_USER`/`SMTP_PASS`.
 - No aparece el código en el log ni hay correo, y el log solo dice `Error enviando el email de verificación a u***@dominio: …` o `Configuración SMTP incompleta: no se entregó …`: el backend **no está en modo desarrollo** (`ENV` distinto de `development`/`dev`/`debug`, o sin definir; por defecto es producción) y por eso no imprime el código. Define `ENV=development` en tu `.env` local; en producción corrige la configuración SMTP (ver [Correo (SMTP) en producción](#correo-smtp-en-producción)) y pide otro código con `POST /api/auth/resend-code`.
 - `STARTTLS extension not supported by server`: `SMTP_USE_STARTTLS` no está en `false` (típico de un `.env` antiguo que sobrescribe el valor del compose). Mailpit no ofrece TLS.
