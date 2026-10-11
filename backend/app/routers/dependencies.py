@@ -1,5 +1,4 @@
 # app/routers/dependencies.py
-import hashlib
 import os
 from datetime import datetime
 from typing import Optional
@@ -8,7 +7,7 @@ from fastapi import Cookie, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.database.session import get_db_session
-from app.utils.cookies import verify_signed_cookie
+from app.utils.cookies import get_session_token_hash
 from app.utils.error_codes import ErrorCode, make_error
 
 
@@ -79,15 +78,12 @@ class CurrentUserORM:
                 raise HTTPException(401, detail=make_error(ErrorCode.NOT_AUTHENTICATED))
             return None
 
-        # Verificar token (misma lógica que CurrentUser)
-        session_token = verify_signed_cookie(session)
-        if not session_token:
+        # Verificar token y obtener su hash para buscar en BD (misma lógica que CurrentUser)
+        hashed_token = get_session_token_hash(request)
+        if not hashed_token:
             if self.required:
                 raise HTTPException(401, detail=make_error(ErrorCode.SESSION_INVALID))
             return None
-
-        # Hash del token para buscar en BD
-        hashed_token = hashlib.sha256(session_token.encode()).hexdigest()
 
         try:
             from app.crud import session_crud, user_crud

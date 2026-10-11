@@ -109,9 +109,12 @@ class AuthService:
             if not user:
                 raise AuthenticationError("Credenciales inválidas")
 
-            # Verificar bloqueo
-            now = datetime.now(timezone.utc).replace(tzinfo=None)
-            if user.locked_until and now < user.locked_until:
+            # Verificar bloqueo (locked_until es timestamptz: llega aware; se normaliza por si no)
+            now = datetime.now(timezone.utc)
+            locked_until = user.locked_until
+            if locked_until is not None and locked_until.tzinfo is None:
+                locked_until = locked_until.replace(tzinfo=timezone.utc)
+            if locked_until and now < locked_until:
                 raise AuthenticationError("Cuenta bloqueada temporalmente")
 
             # Verificar contraseña
@@ -145,7 +148,7 @@ class AuthService:
         failed_attempts = (user.failed_login_attempts or 0) + 1
 
         if failed_attempts >= security_settings.MAX_FAILED_LOGIN_ATTEMPTS:
-            lockout_until = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(
+            lockout_until = datetime.now(timezone.utc) + timedelta(
                 seconds=security_settings.ACCOUNT_LOCKOUT_DURATION
             )
             user.locked_until = lockout_until
@@ -225,6 +228,7 @@ class AuthService:
             now = datetime.now(timezone.utc).replace(tzinfo=None)
 
             user.password_hash = pwd_context.hash(new_password)
+            user.password_changed_at = now  # type: ignore[assignment]
             user.updated_at = now  # type: ignore[assignment]
             user.failed_login_attempts = 0  # type: ignore[assignment]
             user.locked_until = None  # type: ignore[assignment]

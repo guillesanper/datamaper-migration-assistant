@@ -41,7 +41,7 @@ from app.crud.user_preferences_crud import get_or_create_preferences_orm, update
 from app.database.session import get_db_session
 from app.models.orm.security import SecurityLog
 from app.routers.dependencies import get_current_user_orm
-from app.utils.cookies import verify_signed_cookie
+from app.utils.cookies import get_session_token_hash, verify_signed_cookie
 from app.utils.error_codes import ErrorCode, make_error
 from app.utils.security import SecurityUtils
 
@@ -203,6 +203,7 @@ def delete_avatar(
 
 @router.put("/password")
 def change_password(
+    request: Request,
     body: ChangePasswordRequest,
     current_user: dict = Depends(get_current_user_orm),
     db: Session = Depends(get_db_session),
@@ -220,6 +221,15 @@ def change_password(
     )
     if not ok:
         raise HTTPException(400, detail=make_error(ErrorCode.USER_WRONG_PASSWORD))
+
+    # Una contraseña nueva cierra las demás sesiones (quien la conociera) y conserva la actual.
+    # Con API key no hay cookie de sesión: except_token queda en None y se revocan todas.
+    session_crud.revoke_all_user_sessions_orm(
+        db,
+        user_id,
+        except_token=get_session_token_hash(request),
+        reason="password_change",
+    )
 
     return {"success": True, "message": "Contraseña actualizada"}
 

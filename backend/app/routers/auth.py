@@ -12,7 +12,7 @@ from app.database.session import get_db_session as get_db
 from app.middleware.rate_limiting import rate_limit
 from app.routers.dependencies import get_current_user, get_current_user_optional
 from app.services.auth_service import AuthenticationError, AuthService, DatabaseError
-from app.utils.cookies import SESSION_COOKIE_CONFIG, sign_cookie
+from app.utils.cookies import SESSION_COOKIE_CONFIG, get_session_token_hash, sign_cookie
 from app.utils.email_verification import send_verification_code
 from app.utils.security import SecurityUtils
 from app.utils.security_logger import (
@@ -390,22 +390,24 @@ async def reset_password(request: Request, data: ResetPasswordRequest, db=Depend
     except AuthenticationError as e:
         return create_error_response(message=str(e), error_code="reset_failed", status_code=400)
 
+    except DatabaseError as e:
+        await SecurityLogger.log_suspicious_activity(
+            request, "reset_password_error", {"error": str(e)}
+        )
+        return create_error_response(
+            message="Error interno del servidor", error_code="internal_error", status_code=500
+        )
+
 
 @router.post("/logout", response_model=StandardResponse)
 async def logout(request: Request, current_user=Depends(get_current_user), db=Depends(get_db)):
     """Cierre de sesión (solo actual dispositivo)"""
     try:
-        import hashlib
-
-        from app.utils.cookies import verify_signed_cookie
-
         # Revocar la sesión actual usando CRUD ORM. El token sale de la cookie firmada de la
         # petición: current_user no lo incluye (y no debe, porque /me devuelve ese diccionario).
         # Con autenticación por API key no hay cookie y no hay sesión que revocar.
-        signed_cookie = request.cookies.get("session")
-        session_token = verify_signed_cookie(signed_cookie) if signed_cookie else None
-        if session_token:
-            hashed_token = hashlib.sha256(session_token.encode()).hexdigest()
+        hashed_token = get_session_token_hash(request)
+        if hashed_token:
             session_crud.revoke_session_orm(db, hashed_token, reason="user_logout")
 
         response = create_success_response("Sesión cerrada exitosamente")

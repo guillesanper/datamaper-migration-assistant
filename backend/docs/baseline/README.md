@@ -113,3 +113,25 @@ Resultado: `17 failed, 1576 passed, 1 skipped, 31 errors` (1625 tests). Frente a
   cookie da 401, solo se revoca la sesión actual, `/me` no expone identificadores de sesión, y reset revoca las
   sesiones previas, permite entrar con la contraseña nueva y no revoca con un código erróneo).
 - Los mismos 48 fallos/errores ajenos, uno a uno y con el mismo mensaje.
+
+## Después de la sesión, la cookie y la contraseña (P1 de la deuda de autenticación)
+
+`baseline_after.xml`, `baseline_after_passed.txt` y `baseline_after_summary.txt` se regeneraron con la
+misma suite y arnés sobre el código con la vigencia única de sesión y cookie (`SESSION_LIFETIME_HOURS`),
+el helper `get_session_token_hash`, la revocación de sesiones en `PUT /api/settings/password`,
+`password_changed_at` en el reset y el 423 (en vez de 500) al entrar en una cuenta bloqueada.
+
+Resultado: `17 failed, 1589 passed, 1 skipped, 31 errors` (1638 tests). Frente a la línea base anterior (1576 pasados):
+
+- **0 tests que pasaban y fallan ahora** (`comm -23` de las listas de pasados: vacío).
+- **+13 pasados**, todos nuevos: `test_auth_session_revocation_api.py` (10: change-password revoca las otras
+  sesiones y conserva la actual, no revoca con la contraseña actual errónea, con API key revoca todas,
+  permite entrar con la nueva; `password_changed_at` se actualiza en el reset y un `DatabaseError` del reset
+  responde 500 con el formato estándar; `Max-Age` de la cookie igual a
+  24 h y a la vigencia de la sesión; login con bloqueo activo y con bloqueo por intentos da 423 y con bloqueo
+  vencido entra) y `test_cookies.py::TestGetSessionTokenHash` (3).
+- Los mismos 48 fallos/errores ajenos, uno a uno y con el mismo mensaje.
+
+El generador de `*_passed.txt` y `*_summary.txt` se validó antes de usarlo: sobre el `baseline_after.xml`
+anterior reproduce los dos ficheros byte a byte (pasados ordenados con LF; resumen con la cabecera
+`total=… passed=… failed=… error=… skipped=…` y, por sección, `classname::name  | primera línea del mensaje`).

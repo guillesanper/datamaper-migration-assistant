@@ -9,6 +9,10 @@ if ENV in ["development", "dev", "debug"]:
 else:
     SECURE_COOKIES = os.getenv("SECURE_COOKIES", "True").lower() == "true"
 
+# Vigencia de la sesión de usuario (horas): una única fuente para la fila de user_sessions
+# (expires_at) y para el Max-Age de la cookie, que no pueden diferir
+SESSION_LIFETIME_HOURS = int(os.getenv("SESSION_LIFETIME_HOURS", "24"))
+
 # Redis Configuration (Encryption Session Cache)
 REDIS_URL = os.getenv("REDIS_URL")  # Formato: redis://[:password@]host:port/db
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
