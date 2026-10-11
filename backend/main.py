@@ -10,7 +10,6 @@ from fastapi.staticfiles import StaticFiles
 
 from app.middleware.csrf_protection import csrf_middleware
 from app.middleware.encryption_session import EncryptionSessionMiddleware
-from app.middleware.rate_limiting import rate_limit_middleware
 from app.middleware.request_logging import request_logging_middleware
 
 # Importar middlewares de seguridad
@@ -77,9 +76,7 @@ app.add_middleware(EncryptionSessionMiddleware)
 # En desarrollo, deshabilitar HSTS
 setup_security_middlewares(app, enable_csp=True, enable_hsts=not IS_DEVELOPMENT)
 
-# Middleware de rate limiting (deshabilitado en desarrollo)
-if not IS_DEVELOPMENT:
-    app.middleware("http")(rate_limit_middleware)
+# El rate limiting va por ruta (@rate_limit en routers/auth.py), no como middleware global
 
 # Middleware de protección CSRF (deshabilitado en desarrollo)
 if not IS_DEVELOPMENT:

@@ -7,10 +7,12 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, EmailStr, Field, ValidationError, field_validator
 from starlette.concurrency import run_in_threadpool
 
+from app.config.security import security_settings
+
 # CRUDs ORM
 from app.crud import session_crud, user_crud
 from app.database.session import get_db_session as get_db
-from app.middleware.rate_limiting import rate_limit
+from app.middleware.rate_limiting import enforce_rate_limit, rate_limit
 from app.routers.dependencies import get_current_user, get_current_user_optional
 from app.services.auth_service import AuthenticationError, AuthService, DatabaseError
 from app.utils.cookies import SESSION_COOKIE_CONFIG, get_session_token_hash, sign_cookie
@@ -25,6 +27,29 @@ from app.utils.security_logger import (
 )
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+# Límite por IP de cada ruta sensible: (máximo de peticiones, ventana en segundos), de
+# security_settings (ajustables por entorno con RATE_LIMIT_*)
+LOGIN_LIMIT = (
+    security_settings.RATE_LIMIT_LOGIN_ATTEMPTS,
+    security_settings.RATE_LIMIT_LOGIN_WINDOW,
+)
+REGISTER_LIMIT = (
+    security_settings.RATE_LIMIT_REGISTER_ATTEMPTS,
+    security_settings.RATE_LIMIT_REGISTER_WINDOW,
+)
+VERIFY_LIMIT = (
+    security_settings.RATE_LIMIT_VERIFY_ATTEMPTS,
+    security_settings.RATE_LIMIT_VERIFY_WINDOW,
+)
+RESEND_LIMIT = (
+    security_settings.RATE_LIMIT_RESEND_ATTEMPTS,
+    security_settings.RATE_LIMIT_RESEND_WINDOW,
+)
+RESET_LIMIT = (
+    security_settings.RATE_LIMIT_RESET_ATTEMPTS,
+    security_settings.RATE_LIMIT_RESET_WINDOW,
+)
 
 
 # Modelos Pydantic
@@ -135,6 +160,7 @@ def deliver_in_background(background_tasks: BackgroundTasks) -> Callable[[str, s
 
 
 @router.post("/register", response_model=StandardResponse, status_code=201)
+@rate_limit(*REGISTER_LIMIT)
 async def register(
     request: Request,
     data: RegisterRequest,
@@ -185,6 +211,7 @@ async def register(
 
 
 @router.post("/login", response_model=StandardResponse)
+@rate_limit(*LOGIN_LIMIT)
 async def login(request: Request, data: LoginRequest, db=Depends(get_db)):
     """Login de usuario"""
     import hashlib
@@ -276,6 +303,7 @@ async def login(request: Request, data: LoginRequest, db=Depends(get_db)):
 
 
 @router.post("/verify-code")
+@rate_limit(*VERIFY_LIMIT)
 async def verify_code(request: Request, db=Depends(get_db)):
     """Verificación de código OTP con login automático"""
 
@@ -368,7 +396,7 @@ async def verify_code(request: Request, db=Depends(get_db)):
 
 
 @router.post("/resend-code", response_model=StandardResponse)
-@rate_limit(3, 600)
+@rate_limit(*RESEND_LIMIT)
 async def resend_code(
     request: Request,
     data: ResendCodeRequest,
@@ -378,6 +406,10 @@ async def resend_code(
     """Reenvío de código de verificación"""
 
     email = SecurityUtils.sanitize_email(data.email)
+
+    # Además de por IP, por cuenta: quien reparte las peticiones entre IPs no puede llenar de
+    # correos a una víctima. Va antes del try (el 429 no debe acabar en el except general)
+    await enforce_rate_limit(request, *RESEND_LIMIT, account=email)
 
     try:
         # Obtener usuario usando CRUD ORM
@@ -408,7 +440,7 @@ async def resend_code(
 
 
 @router.post("/reset", response_model=StandardResponse)
-@rate_limit(5, 600)
+@rate_limit(*RESET_LIMIT)
 async def reset_password(request: Request, data: ResetPasswordRequest, db=Depends(get_db)):
     """Reset de contraseña con código OTP"""
 

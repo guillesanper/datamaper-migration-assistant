@@ -176,3 +176,30 @@ Resultado: `17 failed, 1639 passed, 1 skipped, 31 errors` (1688 tests). Frente a
 
 El generador se validó antes de usarlo: sobre el `baseline_after.xml` anterior reproduce
 `baseline_after_passed.txt` y `baseline_after_summary.txt` byte a byte.
+
+## Después de unificar el rate limiting, fijar la IP del cliente y limitar los intentos por OTP (P4 de la deuda de autenticación)
+
+`baseline_after.xml`, `baseline_after_passed.txt` y `baseline_after_summary.txt` se regeneraron con la
+misma suite y arnés sobre el código en el que `@rate_limit` honra sus argumentos y lo llevan login,
+register, verify-code, resend-code y reset (el middleware global y su tabla de rutas cortas se retiran),
+`get_client_ip` solo confía en `X-Forwarded-For` según `TRUSTED_PROXY_HOPS` (0 por defecto), `resend-code`
+cuenta además por email, y cada OTP admite `OTP_MAX_ATTEMPTS` fallos (columna `email_otps.failed_attempts`,
+migración 0003).
+
+Resultado: `17 failed, 1699 passed, 1 skipped, 31 errors` (1748 tests). Frente a la línea base anterior (1639 pasados):
+
+- **0 tests que pasaban y fallan ahora** (`comm -23` de las listas de pasados: vacío).
+- **+60 pasados**, todos nuevos: `test_rate_limiting.py` (21: la regla explícita manda, la ventana se
+  reinicia, aislamiento por IP y por cuenta, contadores de IP y de cuenta que conviven, X-Forwarded-For
+  falsificado no cambia la clave, configuración permisiva en desarrollo, fail-open, 429 con
+  `Retry-After`), `test_auth_rate_limits_api.py` (20: 429 por ruta e IP, aislamiento, límite por email entre
+  IPs, 5 fallos invalidan el OTP en verify-code y reset, el reenvío da otra tanda),
+  `test_email_otp_crud_orm.py` (10: contador, invalidación, reinicio, atomicidad) y
+  `test_security.py::TestTrustedProxyHops` (9).
+- Tres tests existentes de `TestClientIPDetection` cambian de aserción a propósito
+  (`test_get_client_ip_x_forwarded_for`, `…_x_real_ip`, `…_x_forwarded`: fijaban que la IP la elige el
+  cliente) y siguen pasando; por nombre no hay diferencias en el resto.
+- Los mismos 48 fallos/errores ajenos, uno a uno y con el mismo mensaje.
+
+El generador se validó antes de usarlo: sobre el `baseline_after.xml` anterior reproduce
+`baseline_after_passed.txt` y `baseline_after_summary.txt` byte a byte.

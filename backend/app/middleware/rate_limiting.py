@@ -5,6 +5,8 @@ Implementa control de límites de requests por IP y endpoint usando base de dato
 
 import asyncio
 import functools
+import hashlib
+import math
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
@@ -19,29 +21,47 @@ get_db = get_db_session  # Alias para backward compatibility con tests
 from app.crud import rate_limit_crud
 
 
+def _account_identifier(account: str) -> str:
+    """Identificador del contador por cuenta: hash con sal del email normalizado (sin PII)"""
+    normalized = SecurityUtils.sanitize_email(account)
+    salt = security_settings.IP_HASH_SALT.encode("utf-8")
+    return "acct:" + hashlib.sha256(salt + normalized.encode("utf-8")).hexdigest()[:32]
+
+
 class DatabaseRateLimiter:
     """Rate limiter que usa base de datos para persistencia"""
 
     @staticmethod
-    async def check_rate_limit(request: Request, endpoint: Optional[str] = None) -> bool:
+    async def count_request(
+        request: Request,
+        endpoint: Optional[str] = None,
+        rule: Optional[Dict[str, Any]] = None,
+        account: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """
-        Verifica si el request está dentro de los límites permitidos
+        Cuenta el request contra su regla y devuelve el estado del contador
 
         Args:
             request: Request de FastAPI
-            endpoint: Endpoint específico (si no se proporciona, se usa request.url.path)
+            endpoint: Clave del contador (si no se proporciona, se usa request.url.path)
+            rule: Regla explícita ({"max_attempts", "window_seconds"[, "block_duration"]}).
+                Sin regla se usa la de por defecto; en desarrollo manda siempre la permisiva
+            account: Cuenta (p. ej. el email) sobre la que contar en lugar de la IP, para que
+                quien reparte las peticiones entre IPs no eluda el límite
 
         Returns:
-            bool: True si está dentro del límite, False si excede
+            dict: resultado de check_limit_orm (is_allowed, blocked_until...). Si la BD falla
+            se permite el request (fail-open)
         """
         if endpoint is None:
             endpoint = request.url.path
 
         client_ip = SecurityUtils.get_client_ip(request)
         hashed_ip = SecurityUtils.hash_ip_address(client_ip)
+        identifier = _account_identifier(account) if account is not None else hashed_ip
 
         # Obtener configuración para este endpoint
-        config = security_settings.get_rate_limit_config(endpoint)
+        config = security_settings.get_rate_limit_config(endpoint, rule)
         max_attempts = config["max_attempts"]
         window_seconds = config["window_seconds"]
         block_duration = config.get("block_duration", window_seconds)
@@ -59,16 +79,16 @@ class DatabaseRateLimiter:
                 # incrementa contador, resetea ventana si expiró, bloquea si excede límite
                 result = rate_limit_crud.check_limit_orm(
                     db,
-                    identifier=hashed_ip,  # Usar IP como identificador
-                    ip_address=hashed_ip,
+                    identifier=identifier,  # IP (hash) o cuenta
+                    # (ip_address, endpoint) es único: el contador de cuenta ocupa su propia fila
+                    ip_address=identifier,
                     endpoint=endpoint,
                     max_requests=max_attempts,
                     window_minutes=window_minutes,
                     block_duration_minutes=block_duration_minutes,
                 )
 
-                # Retornar si está permitido
-                return bool(result["is_allowed"])
+                return dict(result)
 
             finally:
                 db.close()
@@ -76,7 +96,29 @@ class DatabaseRateLimiter:
         except Exception as e:
             print(f"Error en rate limiting: {e}")
             # Fail-open: permitir request si DB falla (evita bloquear tráfico legítimo)
-            return True
+            return {"is_allowed": True, "is_blocked": False, "blocked_until": None}
+
+    @staticmethod
+    async def check_rate_limit(
+        request: Request,
+        endpoint: Optional[str] = None,
+        rule: Optional[Dict[str, Any]] = None,
+        account: Optional[str] = None,
+    ) -> bool:
+        """
+        Verifica si el request está dentro de los límites permitidos
+
+        Args:
+            request: Request de FastAPI
+            endpoint: Endpoint específico (si no se proporciona, se usa request.url.path)
+            rule: Regla explícita; tiene prioridad sobre la de por defecto
+            account: Cuenta sobre la que contar en lugar de la IP
+
+        Returns:
+            bool: True si está dentro del límite, False si excede
+        """
+        result = await DatabaseRateLimiter.count_request(request, endpoint, rule, account)
+        return bool(result["is_allowed"])
 
     @staticmethod
     async def get_rate_limit_info(
@@ -257,52 +299,46 @@ simple_limiter = Limiter()
 db_rate_limiter = DatabaseRateLimiter()
 
 
-async def rate_limit_middleware(request: Request, call_next):
+def _retry_after_seconds(result: Dict[str, Any], fallback: int) -> int:
+    """Segundos hasta que el contador deja de bloquear (mínimo 1)"""
+    blocked_until = result.get("blocked_until")
+    if blocked_until is None:
+        return max(1, fallback)
+    if blocked_until.tzinfo is None:
+        blocked_until = blocked_until.replace(tzinfo=timezone.utc)
+    remaining = (blocked_until - datetime.now(timezone.utc)).total_seconds()
+    return max(1, math.ceil(remaining))
+
+
+async def enforce_rate_limit(
+    request: Request,
+    max_requests: int,
+    window_seconds: int,
+    account: Optional[str] = None,
+    endpoint: Optional[str] = None,
+) -> None:
     """
-    Middleware de rate limiting
+    Cuenta el request contra la regla y responde 429 con Retry-After si la supera
 
     Args:
         request: Request de FastAPI
-        call_next: Siguiente middleware/handler
+        max_requests: Máximo número de requests en la ventana
+        window_seconds: Ventana de tiempo en segundos
+        account: Cuenta (p. ej. el email) sobre la que contar en lugar de la IP
+        endpoint: Clave del contador (por defecto request.url.path)
 
-    Returns:
-        Response: Respuesta procesada
+    Raises:
+        HTTPException: 429 si se supera el límite
     """
-    endpoint = request.url.path
+    rule = {"max_attempts": max_requests, "window_seconds": window_seconds}
+    result = await db_rate_limiter.count_request(request, endpoint, rule, account)
 
-    # Verificar si el endpoint tiene configuración de rate limiting
-    if endpoint in security_settings.RATE_LIMITS:
-        if not await db_rate_limiter.check_rate_limit(request, endpoint):
-            # Obtener información para el mensaje de error
-            info = await db_rate_limiter.get_rate_limit_info(request, endpoint)
-
-            if info["blocked_until"]:
-                blocked_until = info["blocked_until"]
-                remaining_time = (blocked_until - datetime.now(timezone.utc)).total_seconds()
-
-                raise HTTPException(
-                    status_code=429,
-                    detail=make_error(ErrorCode.RATE_LIMIT_BLOCKED, seconds=int(remaining_time)),
-                    headers={"Retry-After": str(int(remaining_time))},
-                )
-            else:
-                raise HTTPException(
-                    status_code=429,
-                    detail=make_error(ErrorCode.RATE_LIMIT_EXCEEDED),
-                    headers={"Retry-After": "900"},  # 15 minutos por defecto
-                )
-
-    # Procesar request
-    response = await call_next(request)
-
-    # Añadir headers informativos de rate limiting
-    if endpoint in security_settings.RATE_LIMITS:
-        info = await db_rate_limiter.get_rate_limit_info(request, endpoint)
-        response.headers["X-RateLimit-Limit"] = str(info["max_attempts"])
-        response.headers["X-RateLimit-Remaining"] = str(info["remaining_attempts"])
-        response.headers["X-RateLimit-Window"] = str(info["window_seconds"])
-
-    return response
+    if not result["is_allowed"]:
+        raise HTTPException(
+            status_code=429,
+            detail=make_error(ErrorCode.RATE_LIMIT_EXCEEDED),
+            headers={"Retry-After": str(_retry_after_seconds(result, window_seconds))},
+        )
 
 
 # Decorador para rate limiting específico
@@ -347,16 +383,19 @@ def rate_limit(max_requests: int, window_seconds: int, use_database: bool = True
                 raise HTTPException(status_code=500, detail=make_error(ErrorCode.INTERNAL_ERROR))
 
             if use_database:
-                # Usar rate limiter de base de datos
-                if not await db_rate_limiter.check_rate_limit(request):
-                    raise HTTPException(status_code=429, detail=make_error(ErrorCode.RATE_LIMIT_EXCEEDED))
+                # Usar rate limiter de base de datos, con los argumentos del decorador
+                await enforce_rate_limit(request, max_requests, window_seconds)
             else:
                 # Usar rate limiter simple
                 client_ip = SecurityUtils.get_client_ip(request)
                 key = f"{client_ip}:{request.url.path}"
 
                 if not simple_limiter.is_allowed(key, max_requests, window_seconds):
-                    raise HTTPException(status_code=429, detail=make_error(ErrorCode.RATE_LIMIT_EXCEEDED))
+                    raise HTTPException(
+                        status_code=429,
+                        detail=make_error(ErrorCode.RATE_LIMIT_EXCEEDED),
+                        headers={"Retry-After": str(window_seconds)},
+                    )
 
             return await func(*args, **kwargs)
 
