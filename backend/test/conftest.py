@@ -10,6 +10,7 @@ import psycopg2
 import pytest
 from dotenv import load_dotenv
 from fastapi.testclient import TestClient
+from passlib.context import CryptContext
 
 from alembic import command
 from alembic.config import Config
@@ -634,6 +635,13 @@ def client(test_db_connection, setup_worker_databases):
     app.dependency_overrides.clear()
 
 
+TEST_USER_PASSWORD = "Test123!@#"
+# bcrypt cuesta ~0,25 s: se calcula una vez por proceso y no en cada test
+TEST_USER_PASSWORD_HASH = CryptContext(schemes=["bcrypt"], deprecated="auto").hash(
+    TEST_USER_PASSWORD
+)
+
+
 @pytest.fixture
 def test_user(db_session, worker_id):
     """Usuario de prueba verificado - único por worker para pytest-xdist"""
@@ -649,15 +657,19 @@ def test_user(db_session, worker_id):
 
     email = f"test{suffix}@example.com"
     username = f"testuser{suffix}"
-    password = "Test123!@#"
+    password = TEST_USER_PASSWORD
 
     try:
         # Intentar obtener usuario existente primero usando SQLAlchemy
         existing_user = db_session.query(User).filter(User.email == email).first()
 
         if existing_user:
-            # Si el usuario ya existe, solo asegurarse de que está verificado
+            # El usuario se comparte entre tests: otros tests cambian su contraseña o
+            # provocan bloqueos por intentos fallidos, así que se restaura el estado conocido
+            existing_user.password_hash = TEST_USER_PASSWORD_HASH
             existing_user.is_verified = True
+            existing_user.failed_login_attempts = 0
+            existing_user.locked_until = None
             db_session.commit()
 
             return {
