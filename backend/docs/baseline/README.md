@@ -203,3 +203,29 @@ Resultado: `17 failed, 1699 passed, 1 skipped, 31 errors` (1748 tests). Frente a
 
 El generador se validó antes de usarlo: sobre el `baseline_after.xml` anterior reproduce
 `baseline_after_passed.txt` y `baseline_after_summary.txt` byte a byte.
+
+## Después de las respuestas uniformes y POST /api/auth/forgot (P5 de la deuda de autenticación)
+
+`baseline_after.xml`, `baseline_after_passed.txt` y `baseline_after_summary.txt` se regeneraron con la
+misma suite y arnés sobre el código en el que verify-code y reset responden siempre 400 «Código inválido
+o expirado» (el motivo real va al log de seguridad), resend-code y forgot responden 200 con el mismo
+cuerpo exista o no la cuenta, existe `POST /api/auth/forgot`, y los caminos «sin cuenta» gastan el mismo
+bcrypt que los reales (`email_otp_crud.simulate_otp_check`).
+
+Resultado: `17 failed, 1737 passed, 1 skipped, 31 errors` (1786 tests). Frente a la línea base anterior (1699 pasados):
+
+- **0 tests que pasaban y fallan ahora** (`comm -23` de las listas de pasados: vacío).
+- **+38 pasados**, todos nuevos y de `test_auth_uniform_responses_api.py`: los seis fallos de
+  verify-code y de reset (cuenta inexistente, borrada, ya verificada, código erróneo, sin OTP, OTP
+  caducado) devuelven el mismo estado y cuerpo; el motivo real queda en el log de seguridad; resend-code
+  y forgot son 200 e idénticos exista o no la cuenta y solo entregan a las cuentas que toca (resend: no
+  verificadas; forgot: verificadas y no borradas); forgot + reset cambia la contraseña; el 429 por cuenta y
+  por IP de forgot no depende de que la cuenta exista; el camino «sin cuenta» gasta el bcrypt simulado;
+  los cuerpos de éxito y el 409 de register no cambian.
+- Un test existente cambia de aserción a propósito: `test_auth_verify_code_api.py::test_verify_code_cannot_be_replayed`
+  (esperaba «Email ya verificado»; ahora «Código inválido o expirado») y sigue pasando; por nombre no hay
+  diferencias en el resto.
+- Los mismos 48 fallos/errores ajenos, uno a uno y con el mismo mensaje (el resumen solo cambia en la cabecera).
+
+El generador se validó antes de usarlo: sobre el `baseline_after.xml` anterior reproduce
+`baseline_after_passed.txt` y `baseline_after_summary.txt` byte a byte.
