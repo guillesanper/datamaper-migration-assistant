@@ -284,6 +284,12 @@ def validate_security_config():
     if security_settings.OTP_LENGTH < 6:
         errors.append("OTP_LENGTH debe ser al menos 6 caracteres")
 
+    # Sin SMTP el código OTP no llega al usuario (fuera de desarrollo tampoco se imprime)
+    if not (os.getenv("SMTP_SERVER") and os.getenv("EMAIL_FROM")):
+        warnings.append(
+            "SMTP_SERVER/EMAIL_FROM no configurados: los códigos de verificación no se entregarán"
+        )
+
     # Validaciones de cifrado
     if security_settings.ENCRYPTION_ENABLED:
         # Validar Argon2id memory cost (mínimo 16 MiB, recomendado 64 MiB)

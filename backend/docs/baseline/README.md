@@ -135,3 +135,22 @@ Resultado: `17 failed, 1589 passed, 1 skipped, 31 errors` (1638 tests). Frente a
 El generador de `*_passed.txt` y `*_summary.txt` se validó antes de usarlo: sobre el `baseline_after.xml`
 anterior reproduce los dos ficheros byte a byte (pasados ordenados con LF; resumen con la cabecera
 `total=… passed=… failed=… error=… skipped=…` y, por sección, `classname::name  | primera línea del mensaje`).
+
+## Después de sacar el OTP del log fuera de desarrollo (P2 de la deuda de autenticación)
+
+`baseline_after.xml`, `baseline_after_passed.txt` y `baseline_after_summary.txt` se regeneraron con la
+misma suite y arnés sobre el código en el que el código de verificación solo se imprime con
+`DEVELOPMENT_MODE` (fuera de él se registra un `ERROR` sin código y con el email enmascarado) y en el que
+`validate_security_config` avisa si faltan `SMTP_SERVER`/`EMAIL_FROM`.
+
+Resultado: `17 failed, 1613 passed, 1 skipped, 31 errors` (1662 tests). Frente a la línea base anterior (1589 pasados):
+
+- **0 tests que pasaban y fallan ahora** (`comm -23` de las listas de pasados: vacío).
+- **+24 pasados**, todos nuevos, en `test_email_verification.py`: `TestOtpNotLoggedOutsideDevelopment` (19: el
+  código no aparece en stdout, stderr ni logging fuera de desarrollo en 5 escenarios de fallo; el fallo se
+  registra con el email enmascarado; en desarrollo se conserva el fallback; el envío correcto nunca lo
+  registra; el helper sigue a `DEVELOPMENT_MODE`) y `TestSmtpStartupWarning` (5: aviso de arranque).
+- Los mismos 48 fallos/errores ajenos, uno a uno y con el mismo mensaje.
+
+El generador se validó antes de usarlo: sobre el `baseline_after.xml` anterior reproduce
+`baseline_after_passed.txt` y `baseline_after_summary.txt` byte a byte.

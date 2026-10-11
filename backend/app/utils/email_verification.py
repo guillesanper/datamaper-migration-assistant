@@ -1,8 +1,13 @@
+import logging
 import os
 import smtplib
 from email.message import EmailMessage
 
 from sqlalchemy.orm import Session
+
+from app.config.security import security_settings
+
+logger = logging.getLogger(__name__)
 
 
 def _env_flag(name: str, default: bool) -> bool:
@@ -49,6 +54,34 @@ def _smtp_is_configured() -> bool:
     return bool(SMTP_SERVER and EMAIL_FROM) and bool(SMTP_USER) == bool(SMTP_PASS)
 
 
+def _log_code_fallback_allowed() -> bool:
+    """
+    Indica si, cuando el envío falla o se simula, el código puede imprimirse en la salida.
+
+    Solo en desarrollo (permite probar el registro sin SMTP). Se lee en cada llamada, no al
+    importar, para que los tests y el entorno puedan cambiarlo.
+    """
+    return bool(security_settings.DEVELOPMENT_MODE)
+
+
+def _mask_email(email: str) -> str:
+    """Enmascara el usuario de un email para el log conservando el dominio (u***@dominio)"""
+    local, separator, domain = email.partition("@")
+    if not separator:
+        return "***"
+    return f"{local[:1]}***@{domain}"
+
+
+def _redact_delivery_error(error: Exception, to_email: str, code: str) -> str:
+    """Texto del error de envío sin el código ni el destinatario (un servidor puede devolverlos)"""
+    detail = str(error)
+    if code:
+        detail = detail.replace(code, "***")
+    if to_email:
+        detail = detail.replace(to_email, _mask_email(to_email))
+    return detail
+
+
 def _build_verification_message(to_email: str, code: str) -> EmailMessage:
     """Construye el correo con el código de verificación (válido 10 minutos)"""
     message = EmailMessage()
@@ -87,8 +120,11 @@ def send_verification_code(db: Session, to_email: str, user_id: str):
     Compatibilidad: con usuario y contraseña el comportamiento es el de siempre (STARTTLS +
     login). Antes, con servidor y remitente pero sin usuario ni contraseña, se simulaba el
     envío; ahora se intenta enviar sin autenticar (con STARTTLS salvo que SMTP_USE_STARTTLS lo
-    desactive). Contra un SMTP real mal configurado falla igual que antes y el código acaba en
-    el log. Con credenciales a medias o sin servidor/remitente sigue simulándose el envío.
+    desactive). Con credenciales a medias o sin servidor/remitente sigue simulándose el envío.
+
+    Si el envío falla o se simula, el código se imprime solo en desarrollo
+    (`_log_code_fallback_allowed`); fuera de él el fallo se registra con logging, sin el código
+    y con el email enmascarado. El OTP guardado en BD no depende de que el correo salga.
     """
     from app.crud import email_otp_crud
 
@@ -101,17 +137,30 @@ def send_verification_code(db: Session, to_email: str, user_id: str):
     try:
         # Verificar que las variables de entorno estén configuradas
         if not _smtp_is_configured():
-            print(" Configuración SMTP incompleta, simulando envío de email")
-            print(f" Código de verificación para {to_email}: {code}")
-            return  # Simular envío exitoso en desarrollo
+            if _log_code_fallback_allowed():
+                print(" Configuración SMTP incompleta, simulando envío de email")
+                print(f" Código de verificación para {to_email}: {code}")
+            else:
+                logger.error(
+                    "Configuración SMTP incompleta: no se entregó el código de verificación a %s",
+                    _mask_email(to_email),
+                )
+            return  # Simular envío exitoso (el código solo se imprime en desarrollo)
 
         _send_message(_build_verification_message(to_email, code))
 
         print(f" Email de verificación enviado exitosamente a {to_email}")
 
     except Exception as e:
-        print(f"❌ Error enviando email: {e}")
-        print(f"📧 Código de verificación para {to_email}: {code}")
+        if _log_code_fallback_allowed():
+            print(f"❌ Error enviando email: {e}")
+            print(f"📧 Código de verificación para {to_email}: {code}")
+        else:
+            logger.error(
+                "Error enviando el email de verificación a %s: %s",
+                _mask_email(to_email),
+                _redact_delivery_error(e, to_email, code),
+            )
         # No lanzar excepción para no interrumpir el registro
         # En producción, podrías querer manejar esto de manera diferente
 

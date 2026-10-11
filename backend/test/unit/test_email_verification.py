@@ -8,12 +8,15 @@ Tests for email verification utilities:
 """
 
 import importlib
+import logging
 import uuid
+from contextlib import ExitStack
 from datetime import datetime, timedelta
 from unittest.mock import ANY, MagicMock, call, patch
 
 import pytest
 
+from app.config.security import security_settings
 from app.utils import email_verification
 
 # ============================================================================
@@ -525,6 +528,175 @@ class TestSmtpUseStarttlsEnvironment:
     def test_smtp_use_starttls_empty_or_invalid_keeps_default(self, value):
         """Un valor vacío o no reconocido no desactiva STARTTLS (fallo hacia el lado seguro)"""
         assert self._reload_with_env({"SMTP_USE_STARTTLS": value}) is True
+
+
+# ============================================================================
+# OTP FUERA DEL LOG (hallazgo 8)
+# ============================================================================
+
+_OTP = "12345678"
+_FULL_SMTP = {
+    "SMTP_SERVER": "smtp.example.com",
+    "SMTP_USER": "user@example.com",
+    "SMTP_PASS": "password",
+    "EMAIL_FROM": "noreply@example.com",
+}
+
+# Escenarios en los que el código no llega al usuario: configuración SMTP que se simula
+# (sin servidor, credenciales a medias) y error real al enviar.
+_UNDELIVERED_SCENARIOS = {
+    "smtp_not_configured": {**_FULL_SMTP, "SMTP_SERVER": None},
+    "only_user": {**_FULL_SMTP, "SMTP_PASS": None},
+    "only_password": {**_FULL_SMTP, "SMTP_USER": None},
+    "smtp_error": dict(_FULL_SMTP),
+    # El servidor devuelve en su error datos del mensaje: ni el destinatario ni el código
+    # pueden acabar en el log a través del texto de la excepción.
+    "smtp_error_echoes_message": dict(_FULL_SMTP),
+}
+
+
+def _send_code(scenario, development, mock_db, to_email, user_id):
+    """Ejecuta send_verification_code en un escenario y entorno; devuelve el mock del OTP"""
+    smtp_config = _UNDELIVERED_SCENARIOS.get(scenario, _FULL_SMTP)
+    with ExitStack() as stack:
+        mock_create_otp = stack.enter_context(patch("app.crud.email_otp_crud.create_otp_orm"))
+        stack.enter_context(
+            patch("app.utils.email_verification.generate_numeric_code", return_value=_OTP)
+        )
+        for name, value in smtp_config.items():
+            stack.enter_context(patch.object(email_verification, name, value))
+        stack.enter_context(patch.object(security_settings, "DEVELOPMENT_MODE", development))
+        mock_smtp = stack.enter_context(patch("app.utils.email_verification.smtplib.SMTP"))
+        _configure_smtp_mock(mock_smtp)
+        if scenario == "smtp_error":
+            mock_smtp.side_effect = Exception("SMTP connection failed")
+        elif scenario == "smtp_error_echoes_message":
+            mock_smtp.side_effect = Exception(f"550 rechazado {to_email} contenido {_OTP}")
+
+        email_verification.send_verification_code(mock_db, to_email, user_id)
+    return mock_create_otp
+
+
+class TestOtpNotLoggedOutsideDevelopment:
+    """El OTP en claro solo puede salir por stdout/log en desarrollo; fuera de él, nunca"""
+
+    @pytest.fixture(autouse=True)
+    def _enable_module_logger(self, monkeypatch):
+        """
+        El conftest ejecuta `alembic upgrade head` en el proceso con alembic.ini y su
+        fileConfig deshabilita los loggers ya creados; sin esto caplog no vería nada y los
+        tests de ausencia pasarían en vacío. En producción alembic corre en otro proceso.
+        """
+        monkeypatch.setattr(email_verification.logger, "disabled", False)
+
+    @pytest.mark.parametrize("scenario", list(_UNDELIVERED_SCENARIOS))
+    def test_code_absent_from_output_and_logs_in_production(
+        self, scenario, mock_db, test_email, test_user_id, capsys, caplog
+    ):
+        """Fuera de desarrollo el código no aparece ni en stdout, ni en stderr ni en logging"""
+        caplog.set_level(logging.DEBUG)
+
+        _send_code(scenario, False, mock_db, test_email, test_user_id)
+
+        captured = capsys.readouterr()
+        assert _OTP not in captured.out
+        assert _OTP not in captured.err
+        assert _OTP not in caplog.text
+
+    @pytest.mark.parametrize("scenario", list(_UNDELIVERED_SCENARIOS))
+    def test_failure_is_logged_with_masked_email_in_production(
+        self, scenario, mock_db, test_email, test_user_id, capsys, caplog
+    ):
+        """El fallo se registra (nivel ERROR) con el email enmascarado y el OTP queda guardado"""
+        caplog.set_level(logging.DEBUG)
+
+        mock_create_otp = _send_code(scenario, False, mock_db, test_email, test_user_id)
+
+        errors = [r for r in caplog.records if r.levelno >= logging.ERROR]
+        assert errors, "el fallo de entrega debe quedar registrado"
+        logged = "\n".join(r.getMessage() for r in errors)
+        assert test_email not in logged
+        assert test_email not in capsys.readouterr().out
+        assert "@example.com" in logged  # dominio visible para diagnosticar
+        mock_create_otp.assert_called_once()
+
+    @pytest.mark.parametrize("scenario", list(_UNDELIVERED_SCENARIOS))
+    def test_code_still_printed_in_development(
+        self, scenario, mock_db, test_email, test_user_id, capsys
+    ):
+        """En desarrollo se conserva el fallback: el código sale por stdout (como hasta ahora)"""
+        _send_code(scenario, True, mock_db, test_email, test_user_id)
+
+        assert _OTP in capsys.readouterr().out
+
+    @pytest.mark.parametrize("development", [True, False])
+    def test_successful_delivery_never_logs_code(
+        self, development, mock_db, test_email, test_user_id, capsys, caplog
+    ):
+        """Con envío correcto el código viaja solo en el correo, en cualquier entorno"""
+        caplog.set_level(logging.DEBUG)
+
+        _send_code("delivered", development, mock_db, test_email, test_user_id)
+
+        captured = capsys.readouterr()
+        assert _OTP not in captured.out + captured.err + caplog.text
+
+    @pytest.mark.parametrize("development", [True, False])
+    def test_fallback_helper_follows_development_mode(self, development):
+        """El helper lee DEVELOPMENT_MODE en tiempo de llamada (parcheable en tests)"""
+        with patch.object(security_settings, "DEVELOPMENT_MODE", development):
+            assert email_verification._log_code_fallback_allowed() is development
+
+
+class TestSmtpStartupWarning:
+    """validate_security_config avisa en producción si los códigos no podrán entregarse"""
+
+    @pytest.fixture
+    def production(self, monkeypatch):
+        """Producción con secretos válidos: la validación no debe elevar errores críticos"""
+        monkeypatch.setattr(security_settings, "DEVELOPMENT_MODE", False)
+        monkeypatch.setattr(security_settings, "CSRF_SECRET_KEY", "csrf-secret-de-prueba")
+        monkeypatch.setattr(security_settings, "IP_HASH_SALT", "ip-salt-de-prueba")
+        return monkeypatch
+
+    @pytest.mark.parametrize(
+        "smtp_server,email_from",
+        [(None, None), ("smtp.example.com", None), (None, "noreply@example.com")],
+    )
+    def test_warns_when_smtp_incomplete_in_production(
+        self, production, capsys, smtp_server, email_from
+    ):
+        from app.config.security import validate_security_config
+
+        for name, value in (("SMTP_SERVER", smtp_server), ("EMAIL_FROM", email_from)):
+            if value is None:
+                production.delenv(name, raising=False)
+            else:
+                production.setenv(name, value)
+
+        assert validate_security_config() is True  # es un aviso, no un error crítico
+        assert "no se entregarán" in capsys.readouterr().out
+
+    def test_no_warning_when_smtp_configured(self, production, capsys):
+        from app.config.security import validate_security_config
+
+        production.setenv("SMTP_SERVER", "smtp.example.com")
+        production.setenv("EMAIL_FROM", "noreply@example.com")
+
+        validate_security_config()
+
+        assert "no se entregarán" not in capsys.readouterr().out
+
+    def test_no_warning_in_development(self, production, capsys):
+        from app.config.security import validate_security_config
+
+        production.setattr(security_settings, "DEVELOPMENT_MODE", True)
+        production.delenv("SMTP_SERVER", raising=False)
+        production.delenv("EMAIL_FROM", raising=False)
+
+        validate_security_config()
+
+        assert "no se entregarán" not in capsys.readouterr().out
 
 
 # ============================================================================
