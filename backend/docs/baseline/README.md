@@ -229,3 +229,17 @@ Resultado: `17 failed, 1737 passed, 1 skipped, 31 errors` (1786 tests). Frente a
 
 El generador se validó antes de usarlo: sobre el `baseline_after.xml` anterior reproduce
 `baseline_after_passed.txt` y `baseline_after_summary.txt` byte a byte.
+
+## Documentación de la deuda de autenticación (P6): sin cambios de código desde P5; baseline vigente
+
+La fase P6 solo toca documentación (`backend/docs/DEPLOYMENT_GUIDE.md` y `readme.md`): variables y límites
+de autenticación, respuestas uniformes, `POST /api/auth/forgot`, `TRUSTED_PROXY_HOPS`, migración `0003` y
+riesgos residuales. `git diff --name-only 771a7b8` (el commit de código de P5) solo lista ficheros `.md` y
+los de esta carpeta: ningún `.py`, `.yml` ni `.env*` ha cambiado desde la suite de P5.
+
+Por eso **no se regeneró** `baseline_after*` ni se lanzó la suite: los ficheros de esta carpeta siguen siendo
+los de P5 y son la línea base vigente: `17 failed, 1737 passed, 1 skipped, 31 errors` (1786 tests).
+
+Resumen de la deuda de autenticación (P0–P6): `1576 passed` al empezar → `1737 passed` al terminar
+(+161 tests nuevos), con los mismos 48 fallos/errores ajenos (17 failed + 31 errors) y 0 tests que pasaban
+y dejan de pasar en ninguna fase.

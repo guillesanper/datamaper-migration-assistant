@@ -61,8 +61,10 @@ En desarrollo el backend envía los correos a Mailpit, que no los reenvía a nin
 Cosas a tener en cuenta:
 
 - Los correos son **efímeros**: Mailpit no tiene volumen y los pierde al parar, reiniciar o recrear el contenedor.
-- Si el envío falla (Mailpit parado, SMTP mal configurado) el registro no falla, pero el código solo aparece en el log del backend: `docker logs datamap-backend` (línea «Código de verificación para …»).
-- Un reenvío (`POST /api/auth/resend-code`) sustituye al código anterior.
+- El correo se entrega **en segundo plano**: el `201` del registro no garantiza que haya salido; el resultado del envío aparece en el log del backend unos segundos después.
+- Si el envío falla (Mailpit parado, SMTP mal configurado) el registro no falla, pero el código solo aparece en el log del backend: `docker logs datamap-backend` (línea «Código de verificación para …»). Esto ocurre **solo con `ENV=development`** (lo que usa el compose): fuera de desarrollo el código no se imprime nunca.
+- Un reenvío (`POST /api/auth/resend-code`) sustituye al código anterior y solo envía a cuentas sin verificar. El código de recuperación de contraseña se pide con `POST /api/auth/forgot` (API: el frontend aún no tiene pantalla) y se usa en `POST /api/auth/reset`.
+- Cada código admite 5 comprobaciones erróneas (`OTP_MAX_ATTEMPTS`); al llegar se invalida y hay que pedir otro. Las rutas de autenticación tienen límite de peticiones (429 con `Retry-After`): en desarrollo es permisivo; valores y variables en [Autenticación: límites y variables](#autenticación-límites-y-variables).
 - Mailpit solo es para desarrollo; en producción se usa un SMTP real (ver [`backend/docs/DEPLOYMENT_GUIDE.md`](backend/docs/DEPLOYMENT_GUIDE.md)).
 
 ## 🏗️ Arquitectura
@@ -286,6 +288,24 @@ SMTP_USE_STARTTLS=false
 Con Docker Compose basta con no definir las variables `SMTP_*`: el compose ya usa `mailpit:1025` (no pongas `SMTP_SERVER=localhost` en el `.env` que lee el compose, porque dentro del contenedor `localhost` es el propio backend). Con el backend fuera de Docker, levanta solo Mailpit (`docker-compose up -d mailpit`) y exporta `SMTP_SERVER=localhost` en tu shell: `load_dotenv` no pisa las variables ya definidas.
 
 Para un SMTP real (Gmail o ProtonMail con contraseña de aplicación) usa `SMTP_PORT=587`, `SMTP_USER`, `SMTP_PASS` y **`SMTP_USE_STARTTLS=true`**: el valor por defecto del compose es `false`. Los detalles están en [`.env.example`](.env.example) y en [`backend/docs/DEPLOYMENT_GUIDE.md`](backend/docs/DEPLOYMENT_GUIDE.md).
+
+### Autenticación: límites y variables
+
+Valores por defecto del código (todas opcionales; la tabla completa, la lectura de los logs y el troubleshooting están en [`backend/docs/DEPLOYMENT_GUIDE.md`](backend/docs/DEPLOYMENT_GUIDE.md#autenticación-límites-intentos-y-respuestas)):
+
+| Variable | Por defecto | Efecto |
+|----------|-------------|--------|
+| `ENV` | sin definir = producción | Solo `development`/`dev`/`debug` activan el modo desarrollo (límites permisivos, OTP en el log si el envío falla) |
+| `SESSION_LIFETIME_HOURS` | `24` | Vigencia de la sesión y de su cookie |
+| `OTP_MAX_ATTEMPTS` | `5` | Comprobaciones erróneas por código |
+| `TRUSTED_PROXY_HOPS` | `0` | Proxies de confianza delante de la app: IP del cliente = entrada N-ésima desde la derecha de `X-Forwarded-For` (con `0`, la IP del socket) |
+| `RATE_LIMIT_<RUTA>_ATTEMPTS` / `_WINDOW` (s) | `LOGIN` 5/900, `REGISTER` 3/3600, `VERIFY` 10/3600, `RESEND` 3/600, `RESET` 5/3600, `FORGOT` 3/3600 | Límite por IP y por ruta; `resend-code` y `forgot` cuentan además por email |
+
+> ⚠️ **Despliegue**: `TRUSTED_PROXY_HOPS` no está en `backend/render.yaml`. Con `0` detrás de un proxy todos los usuarios comparten IP y los límites por IP bloquean el sitio entero tras unos pocos logins: fíjalo tras comprobar `X-Forwarded-For` en staging.
+
+Respuestas: `verify-code` y `reset` devuelven siempre `400 «Código inválido o expirado»`, y `resend-code` / `forgot` un `200` idéntico exista o no la cuenta (el motivo real queda en `security_logs`). Riesgo residual: el `409` de `register` sigue permitiendo comprobar si un email está registrado; solo lo frena el límite de `register` (3 por hora y por IP).
+
+La migración `0003` (`email_otps.failed_attempts`) la aplica el compose al arrancar el backend; si la BD de desarrollo sigue en `0002`: `docker-compose exec backend alembic upgrade head`.
 
 ### Frontend (`.env`)
 ```env

@@ -319,8 +319,8 @@ docker-compose up -d
 # POST http://localhost:8000/api/auth/verify-code
 ```
 
-- Un reenvío (`POST /api/auth/resend-code`) **sustituye** al código anterior; `verify-code` consume el código.
-- No hay ruta `/forgot`: el código del reset (`POST /api/auth/reset`) se obtiene con `resend-code`.
+- Un reenvío (`POST /api/auth/resend-code`) **sustituye** al código anterior y le da otra tanda de intentos; `verify-code` consume el código. `resend-code` solo envía a cuentas **sin verificar**: a una cuenta ya verificada (o inexistente) responde igual y no manda nada.
+- El código del reset (`POST /api/auth/reset`) se pide con `POST /api/auth/forgot` (solo cuentas verificadas). Respuestas, límites y variables: [Autenticación: límites, intentos y respuestas](#autenticación-límites-intentos-y-respuestas).
 - API de Mailpit (útil en scripts): `curl http://localhost:8025/api/v1/messages`.
 
 **Configuración** (valores por defecto del compose; todos se pueden sobrescribir en el `.env`):
@@ -461,6 +461,7 @@ SMTP_USER=<smtp_user>
 SMTP_PASS=<app_password>
 CSRF_SECRET_KEY=<another_random_key>
 IP_HASH_SALT=<random_salt>
+TRUSTED_PROXY_HOPS=<saltos_de_proxy_de_confianza>  # no está en render.yaml; sin él los límites por IP son globales (ver "Autenticación")
 ```
 
 **Auto-configuradas por render.yaml**:
@@ -567,6 +568,8 @@ secrets.token_hex(32)
 - ✅ Stripe keys de producción (si aplica)
 - ✅ SMTP real con credenciales válidas (`SMTP_USER`, `SMTP_PASS`) y STARTTLS sin desactivar (ver [Correo (SMTP) en producción](#correo-smtp-en-producción))
 - ✅ Un registro de prueba entrega el correo y no deja líneas «Código de verificación para …» en el log
+- ✅ `TRUSTED_PROXY_HOPS` fijado al número de proxies de confianza delante de la app: con `0` (el valor por defecto) todos los usuarios detrás del proxy comparten IP y los límites por IP dejan de ser por usuario (ver [Autenticación](#autenticación-límites-intentos-y-respuestas))
+- ✅ Migración `0003` aplicada (`alembic current` → `0003 (head)`); `render.yaml` ejecuta `alembic upgrade head` antes de gunicorn
 - ✅ `DB_PASSWORD` fuerte
 
 ### Correo (SMTP) en producción
@@ -591,7 +594,90 @@ SMTP_USE_STARTTLS=true
   - `Configuración SMTP incompleta: no se entregó el código de verificación a u***@dominio`
 
   Cualquiera de las dos líneas en producción es un fallo de configuración o del proveedor: busca esas cadenas en el log. La salida correcta es `Email de verificación enviado exitosamente a <email>`. Solo con `ENV=development` el fallo conserva el comportamiento de desarrollo (`Error enviando email: …` + `Código de verificación para <email>: <código>` en la consola).
-- El envío es **asíncrono respecto a la petición**: `register` y `resend-code` crean el OTP, responden y entregan el correo después (tarea de fondo, en un hilo, sin sesión de BD). Con el SMTP caído o lento la respuesta no espera y el resto de peticiones no se bloquean; el fallo solo aparece en el log (las dos líneas de arriba). Consecuencias: la respuesta 201/200 **no garantiza** que el correo haya salido, y si el proceso se reinicia entre la respuesta y el envío, ese correo se pierde (no hay cola persistente: el usuario puede pedir otro código con reenviar).
+- El envío es **asíncrono respecto a la petición**: `register` y `resend-code` crean el OTP, responden y entregan el correo después (tarea de fondo, en un hilo, sin sesión de BD). Con el SMTP caído o lento la respuesta no espera y el resto de peticiones no se bloquean; el fallo solo aparece en el log (las dos líneas de arriba). Consecuencias: la respuesta 201/200 **no garantiza** que el correo haya salido, y si el proceso se reinicia entre la respuesta y el envío, ese correo se pierde (no hay cola persistente: el usuario puede pedir otro código con reenviar). Además, si `create_otp_orm` falla después de confirmar el usuario, la cuenta queda creada sin código (se resuelve con `resend-code`).
+
+### Autenticación: límites, intentos y respuestas
+
+Valores por defecto **del código** (`backend/config.py` y `backend/app/config/security.py`); todas son opcionales:
+
+| Variable | Por defecto | Efecto |
+|----------|-------------|--------|
+| `ENV` | sin definir = producción | Solo `development`, `dev` o `debug` activan el modo desarrollo: límites permisivos (1000 peticiones / 60 s), el OTP puede salir en el log si el envío falla y las cookies no llevan `Secure`. |
+| `SESSION_LIFETIME_HOURS` | `24` | Vigencia única de la sesión (`expires_at`) y de la cookie (`Max-Age`). |
+| `OTP_MAX_ATTEMPTS` | `5` | Comprobaciones erróneas que admite cada código (`verify-code` y `reset`); al llegar, se borra y hay que pedir otro. |
+| `MAX_FAILED_LOGIN_ATTEMPTS` / `ACCOUNT_LOCKOUT_DURATION` | `5` / `1800` | Fallos de login antes del bloqueo y duración del bloqueo (s). |
+| `TRUSTED_PROXY_HOPS` | `0` | Proxies de confianza delante de la app (ver abajo). |
+| `RATE_LIMIT_<RUTA>_ATTEMPTS` / `_WINDOW` | ver tabla | Límite por IP y por ruta; `_WINDOW` en segundos. |
+
+Límites por defecto (`POST /api/auth/...`; cada ruta tiene su propio contador por IP):
+
+| Ruta | Variables | Máximo / ventana | Además, por cuenta |
+|------|-----------|------------------|--------------------|
+| `login` | `RATE_LIMIT_LOGIN_*` | 5 / 900 s | no |
+| `register` | `RATE_LIMIT_REGISTER_*` | 3 / 3600 s | no |
+| `verify-code` | `RATE_LIMIT_VERIFY_*` | 10 / 3600 s | no |
+| `resend-code` | `RATE_LIMIT_RESEND_*` | 3 / 600 s | sí, por email (mismo límite) |
+| `reset` | `RATE_LIMIT_RESET_*` | 5 / 3600 s | no |
+| `forgot` | `RATE_LIMIT_FORGOT_*` | 3 / 3600 s | sí, por email (mismo límite) |
+
+- Al superar el límite: **429** con `Retry-After` (segundos hasta que termina el bloqueo, mínimo 1) y `detail.code = rate_limit.exceeded`. El bloqueo dura una ventana.
+- El contador por cuenta (`resend-code`, `forgot`) cuenta el email pedido, exista o no, con un identificador `acct:` + sha256 con sal (`IP_HASH_SALT`); no guarda el email en claro. Efecto secundario: tres peticiones con el email de otra persona bastan para que esa persona no pueda pedir un reenvío durante la ventana.
+- El límite de `login` cuenta **todas** las peticiones, no solo los fallos: una IP compartida (campus, oficina) con 6 logins correctos en 15 minutos recibe 429.
+- El contador trabaja en minutos enteros (`ventana // 60`, `rate_limiting.py`): usa ventanas múltiplos de 60 s. Una ventana de menos de 60 s da 0 minutos (no probado).
+- Si la base de datos del limitador falla, la petición se **permite** (fail-open) y el error solo se imprime en el log.
+- Con `ENV=development` todo es permisivo (1000 / 60 s); para probar los límites hay que ejecutar con `ENV=production`, y entonces el arranque exige `CSRF_SECRET_KEY` e `IP_HASH_SALT` (o `SECRET_KEY`, de la que heredan si no se definen). Los tests parchean `security_settings.DEVELOPMENT_MODE`.
+
+#### `TRUSTED_PROXY_HOPS`
+
+`get_client_ip` solo confía en `X-Forwarded-For` según este valor; `X-Real-IP` y `X-Forwarded` ya no se leen.
+
+- `0` (por defecto): la IP es la del socket y la cabecera se ignora.
+- `N > 0`: la IP es la entrada N-ésima **desde la derecha** de `X-Forwarded-For` (la que añadió el primer proxy de confianza; lo que hay a su izquierda lo escribe el cliente). Con menos entradas que `N`, o sin cabecera, se usa la IP del socket.
+
+> ⚠️ **Antes de desplegar.** `backend/render.yaml` **no** lo define. Con `0` detrás del proxy de Render todos los usuarios comparten IP, y los límites por IP pasan a ser del sitio entero: 5 logins en 15 minutos para todos. Pasos: (1) registrar la cabecera `X-Forwarded-For` de una petición real en staging; (2) contar cuántas entradas añaden proxies **de confianza** (un solo balanceador → `1`; con Cloudflare delante puede ser `2`: no comprobado); (3) fijarlo en el Dashboard (o en `render.yaml`); (4) comprobar que gunicorn/uvicorn no reescribe ya `request.client` a partir de `FORWARDED_ALLOW_IPS` (no revisado): si lo hiciera, el cálculo se aplicaría dos veces.
+
+#### Intentos por código (OTP)
+
+Cada OTP admite `OTP_MAX_ATTEMPTS` comprobaciones erróneas (5). El intento se reserva **antes** de comprobar el código (incremento atómico), así que peticiones simultáneas no obtienen intentos de más. Al llegar al máximo el OTP se borra y el código correcto posterior tampoco vale: hay que pedir otro (`resend-code` o `forgot`). Un reenvío reinicia el contador. Se guarda en `email_otps.failed_attempts` (migración `0003`). El código caduca a los 10 minutos (fijados en el código: `OTP_EXPIRY_MINUTES` existe en la configuración pero no se usa).
+
+#### Respuestas uniformes
+
+| Ruta | Respuesta | Motivo real |
+|------|-----------|-------------|
+| `verify-code` | **400** `Código inválido o expirado` (`verification_failed`) ante cuenta inexistente, borrada, ya verificada, OTP ausente, caducado o erróneo | `security_logs.event_type = email_verification_failed`, `details.failure_reason` |
+| `reset` | **400** `Código inválido o expirado` (`reset_failed`), mismos casos | `password_reset_reset_failed`, `details.failure_reason` |
+| `resend-code` | **200** `Código reenviado correctamente` exista o no la cuenta; solo envía a cuentas existentes, no borradas y **sin verificar** | `resend_code_ignored`, `details.reason` (`user_not_found` / `account_already_verified`) |
+| `forgot` | **200** `Si la cuenta existe y está verificada, recibirás un código en tu correo`; solo emite a cuentas existentes, verificadas y no borradas | `password_reset_request_failed`, `details.failure_reason` |
+| `login` con la cuenta bloqueada | **423** `account_locked` | `login_failed`, `details.failure_reason` |
+
+Para ver por qué falló una petición concreta:
+
+```sql
+SELECT created_at, event_type, details->>'failure_reason' AS motivo, details->>'reason' AS reason
+FROM security_logs
+WHERE event_type IN ('email_verification_failed', 'password_reset_reset_failed',
+                     'password_reset_request_failed', 'resend_code_ignored')
+ORDER BY created_at DESC LIMIT 20;
+```
+
+`POST /api/auth/forgot` existe solo como API: el frontend no tiene pantalla de recuperación (`Login.tsx` enlaza a `/forgot-password`, que no tiene ruta).
+
+#### Sesiones y contraseña
+
+- `PUT /api/settings/password` revoca las **demás** sesiones del usuario (motivo `password_change`) y conserva la actual; con API key, sin cookie, las revoca todas.
+- `reset` revoca todas las sesiones (motivo `password_reset`) y fija `password_changed_at`.
+- Las cookies de 7 días emitidas antes de `SESSION_LIFETIME_HOURS` conservan su `Max-Age`; pero su sesión en BD dura 24 h: pasado ese tiempo, la cookie responde `auth.session_expired` y el usuario vuelve a entrar con login. No hay migración de cookies.
+
+#### Migración `0003`
+
+Añade `email_otps.failed_attempts INTEGER NOT NULL DEFAULT 0`: aditiva y reversible (`alembic downgrade -1`). `docker-compose.yml` la aplica al arrancar el backend (`alembic upgrade head && uvicorn …`) y `render.yaml` ejecuta `alembic upgrade head` antes de gunicorn. Un backend con el código nuevo sobre una BD en `0002` falla en cualquier consulta a `email_otps` (`UndefinedColumn`): aplica la migración (`docker-compose exec backend alembic upgrade head`, o reinicia el contenedor). No se ha probado en Render ni con tráfico concurrente.
+
+#### Riesgos residuales (decisiones explícitas, no defectos pendientes de arreglar en esta fase)
+
+- **El 409 de `register` permite enumerar cuentas.** Solo lo frena el límite de `register` (3 por hora y por IP). Es una decisión: la alternativa rompe el alta.
+- **La igualación de tiempos es de mejor esfuerzo.** Los caminos «sin cuenta» gastan un bcrypt simulado (`simulate_otp_check`). Medido (n=7, contenedor de test): sin él 20–30 ms frente a 310–440 ms; con él 310–410 ms con rangos solapados. No es una garantía: no se descartan diferencias de decenas de ms ni se midió con carga o por red.
+- **El 201 de `register` no garantiza que el correo salga** (entrega en segundo plano, sin cola persistente; ver arriba).
+- **Frontend (sin cambios en esta fase)**: la UI muestra el `message` del servidor, así que `VerifyEmail` mostrará «Código inválido o expirado» donde antes decía «Usuario no encontrado» o «Email ya verificado»; `resend-code` da éxito aunque no envíe nada (cuenta inexistente o ya verificada); y el 429 se lee de `detail.code` (`rate_limit.exceeded`, locales `es`/`en`) sin usar `Retry-After`.
 
 ---
 
@@ -689,6 +775,36 @@ docker-compose exec backend env | grep -E "^(SMTP_SERVER|SMTP_PORT|SMTP_USER|SMT
 - `STARTTLS extension not supported by server`: `SMTP_USE_STARTTLS` no está en `false` (típico de un `.env` antiguo que sobrescribe el valor del compose). Mailpit no ofrece TLS.
 - El correo estaba y desapareció: Mailpit es efímero y se vació al reiniciar el contenedor. Pide otro código con `POST /api/auth/resend-code`.
 - Mailpit no arranca tras tocar el compose: `MP_SMTP_AUTH_ACCEPT_ANY` y `MP_SMTP_AUTH_ALLOW_INSECURE` deben definirse juntas.
+
+### Problema: 429 `rate_limit.exceeded` en el login de varios usuarios a la vez (producción)
+
+**Síntomas**: usuarios distintos reciben `429` en `login`, `register` o `verify-code` casi a la vez, con `Retry-After` de minutos.
+
+**Causa habitual**: `TRUSTED_PROXY_HOPS` sin fijar (`0`) detrás del proxy: todos los usuarios llegan con la IP del proxy y comparten el contador por IP (ver [Autenticación](#autenticación-límites-intentos-y-respuestas)).
+
+**Diagnóstico**:
+```sql
+-- Contadores por IP (los de cuenta empiezan por "acct:"): una sola fila con un request_count
+-- alto en /api/auth/login indica una IP compartida
+SELECT endpoint, identifier, request_count, blocked_until
+FROM security_rate_limits
+WHERE identifier NOT LIKE 'acct:%'
+ORDER BY request_count DESC LIMIT 10;
+```
+
+**Solución**: fija `TRUSTED_PROXY_HOPS` según la cadena real de `X-Forwarded-For`. Si el 429 es de verdad de una sola IP (campus, oficina), sube `RATE_LIMIT_LOGIN_ATTEMPTS`: el límite de login cuenta todas las peticiones, no solo los fallos.
+
+### Problema: `verify-code` o `reset` responden siempre «Código inválido o expirado»
+
+Es el comportamiento esperado: cuenta inexistente, ya verificada, código erróneo, caducado o agotado (`OTP_MAX_ATTEMPTS`) dan la misma respuesta. El motivo real está en `security_logs` (consulta de [Respuestas uniformes](#respuestas-uniformes)). Si el código se agotó, pide otro con `resend-code` (cuenta sin verificar) o `forgot` (cuenta verificada).
+
+### Problema: `UndefinedColumn … failed_attempts` en `email_otps`
+
+El backend lleva el modelo con `failed_attempts` y la BD sigue en `0002`. Aplica la migración: `docker-compose exec backend alembic upgrade head` (o reinicia el contenedor del backend: el compose la ejecuta al arrancar). Comprueba con `alembic current`.
+
+### Problema: login con `423 account_locked`
+
+`MAX_FAILED_LOGIN_ATTEMPTS` (5) logins erróneos bloquean la cuenta `ACCOUNT_LOCKOUT_DURATION` segundos (1800). El bloqueo se levanta solo al vencer; en desarrollo puedes limpiarlo con `UPDATE users SET locked_until = NULL, failed_login_attempts = 0 WHERE email = '<email>';`.
 
 ### Problema: Docker Compose no inicia
 
