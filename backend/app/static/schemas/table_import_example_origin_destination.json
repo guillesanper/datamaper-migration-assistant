@@ -1,0 +1,108 @@
+{
+  "tables": [
+    {
+      "name": "customers",
+      "type": "origin",
+      "columns": [
+        { "name": "customer_id", "type": "INTEGER", "is_primary": true, "is_nullable": false },
+        { "name": "first_name", "type": "TEXT", "is_primary": false, "is_nullable": false },
+        { "name": "last_name", "type": "TEXT", "is_primary": false, "is_nullable": false },
+        { "name": "email", "type": "TEXT", "is_primary": false, "is_nullable": true },
+        { "name": "phone", "type": "TEXT", "is_primary": false, "is_nullable": true },
+        { "name": "birth_date", "type": "DATE", "is_primary": false, "is_nullable": true },
+        { "name": "is_active", "type": "BOOLEAN", "is_primary": false, "is_nullable": false },
+        { "name": "created_at", "type": "DATETIME", "is_primary": false, "is_nullable": false }
+      ]
+    },
+    {
+      "name": "products",
+      "type": "origin",
+      "columns": [
+        { "name": "product_id", "type": "INTEGER", "is_primary": true, "is_nullable": false },
+        { "name": "sku", "type": "TEXT", "is_primary": false, "is_nullable": false },
+        { "name": "name", "type": "TEXT", "is_primary": false, "is_nullable": false },
+        { "name": "category", "type": "TEXT", "is_primary": false, "is_nullable": true },
+        { "name": "unit_price", "type": "REAL", "is_primary": false, "is_nullable": false },
+        { "name": "stock", "type": "INTEGER", "is_primary": false, "is_nullable": false },
+        { "name": "discontinued", "type": "BOOLEAN", "is_primary": false, "is_nullable": false }
+      ]
+    },
+    {
+      "name": "orders",
+      "type": "origin",
+      "columns": [
+        { "name": "order_id", "type": "INTEGER", "is_primary": true, "is_nullable": false },
+        { "name": "customer_id", "type": "INTEGER", "is_primary": false, "is_nullable": false },
+        { "name": "order_date", "type": "DATETIME", "is_primary": false, "is_nullable": false },
+        { "name": "status", "type": "TEXT", "is_primary": false, "is_nullable": false },
+        { "name": "shipping_address", "type": "TEXT", "is_primary": false, "is_nullable": true },
+        { "name": "total_amount", "type": "REAL", "is_primary": false, "is_nullable": false }
+      ]
+    },
+    {
+      "name": "order_items",
+      "type": "origin",
+      "columns": [
+        { "name": "order_id", "type": "INTEGER", "is_primary": true, "is_nullable": false },
+        { "name": "line_number", "type": "INTEGER", "is_primary": true, "is_nullable": false },
+        { "name": "product_id", "type": "INTEGER", "is_primary": false, "is_nullable": false },
+        { "name": "quantity", "type": "INTEGER", "is_primary": false, "is_nullable": false },
+        { "name": "unit_price", "type": "REAL", "is_primary": false, "is_nullable": false },
+        { "name": "discount", "type": "REAL", "is_primary": false, "is_nullable": true }
+      ]
+    },
+    {
+      "name": "dim_customer",
+      "type": "destination",
+      "columns": [
+        { "name": "customer_key", "type": "INTEGER", "is_primary": true, "is_nullable": false },
+        { "name": "customer_id", "type": "INTEGER", "is_primary": false, "is_nullable": false },
+        { "name": "full_name", "type": "TEXT", "is_primary": false, "is_nullable": false },
+        { "name": "email", "type": "TEXT", "is_primary": false, "is_nullable": true },
+        { "name": "is_active", "type": "BOOLEAN", "is_primary": false, "is_nullable": false },
+        { "name": "first_order_date", "type": "DATE", "is_primary": false, "is_nullable": true },
+        { "name": "loaded_at", "type": "DATETIME", "is_primary": false, "is_nullable": false }
+      ]
+    },
+    {
+      "name": "dim_product",
+      "type": "destination",
+      "columns": [
+        { "name": "product_key", "type": "INTEGER", "is_primary": true, "is_nullable": false },
+        { "name": "product_id", "type": "INTEGER", "is_primary": false, "is_nullable": false },
+        { "name": "sku", "type": "TEXT", "is_primary": false, "is_nullable": false },
+        { "name": "product_name", "type": "TEXT", "is_primary": false, "is_nullable": false },
+        { "name": "category", "type": "TEXT", "is_primary": false, "is_nullable": true },
+        { "name": "list_price", "type": "REAL", "is_primary": false, "is_nullable": false },
+        { "name": "is_discontinued", "type": "BOOLEAN", "is_primary": false, "is_nullable": false }
+      ]
+    },
+    {
+      "name": "dim_date",
+      "type": "destination",
+      "columns": [
+        { "name": "date_key", "type": "INTEGER", "is_primary": true, "is_nullable": false },
+        { "name": "full_date", "type": "DATE", "is_primary": false, "is_nullable": false },
+        { "name": "year", "type": "INTEGER", "is_primary": false, "is_nullable": false },
+        { "name": "month", "type": "INTEGER", "is_primary": false, "is_nullable": false },
+        { "name": "day", "type": "INTEGER", "is_primary": false, "is_nullable": false },
+        { "name": "day_of_week", "type": "TEXT", "is_primary": false, "is_nullable": false }
+      ]
+    },
+    {
+      "name": "fact_sales",
+      "type": "destination",
+      "columns": [
+        { "name": "sale_key", "type": "INTEGER", "is_primary": true, "is_nullable": false },
+        { "name": "order_id", "type": "INTEGER", "is_primary": false, "is_nullable": false },
+        { "name": "customer_key", "type": "INTEGER", "is_primary": false, "is_nullable": false },
+        { "name": "product_key", "type": "INTEGER", "is_primary": false, "is_nullable": false },
+        { "name": "date_key", "type": "INTEGER", "is_primary": false, "is_nullable": false },
+        { "name": "quantity", "type": "INTEGER", "is_primary": false, "is_nullable": false },
+        { "name": "gross_amount", "type": "REAL", "is_primary": false, "is_nullable": false },
+        { "name": "discount_amount", "type": "REAL", "is_primary": false, "is_nullable": false },
+        { "name": "net_amount", "type": "REAL", "is_primary": false, "is_nullable": false }
+      ]
+    }
+  ]
+}

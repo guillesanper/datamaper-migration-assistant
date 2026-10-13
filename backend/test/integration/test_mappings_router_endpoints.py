@@ -12,6 +12,7 @@ import csv
 import io
 import json
 import uuid
+from pathlib import Path
 
 import pytest
 from openpyxl import load_workbook
@@ -153,6 +154,14 @@ IMPORT_TABLES = [
         ],
     },
 ]
+
+EXAMPLE_ORIGIN_DESTINATION = (
+    Path(__file__).resolve().parents[2]
+    / "app"
+    / "static"
+    / "schemas"
+    / "table_import_example_origin_destination.json"
+)
 
 
 # ============================================================================
@@ -399,6 +408,24 @@ class TestImportStructure:
             ("orders", "origin"),
             ("orders_dest", "destination"),
         }
+
+    def test_import_bundled_origin_destination_example_is_accepted_whole(
+        self, authenticated_client, test_project, db_session
+    ):
+        """El JSON de ejemplo que se entrega al usuario se importa entero, sin descartes."""
+        example = json.loads(EXAMPLE_ORIGIN_DESTINATION.read_text(encoding="utf-8"))
+        tables = example["tables"]
+        assert {t["type"] for t in tables} == {"origin", "destination"}
+
+        r = self._post(authenticated_client, test_project["id"], tables=tables)
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["tables_added"] == len(tables)
+        assert body["columns_added"] == sum(len(t["columns"]) for t in tables)
+        assert body["total_in_file"] == len(tables)
+        db_session.expire_all()
+        saved = db_session.query(Table).filter(Table.project_id == test_project["id"]).all()
+        assert {(t.name, t.type) for t in saved} == {(t["name"], t["type"]) for t in tables}
 
     def test_import_skip_strategy_does_not_duplicate(self, authenticated_client, test_project):
         assert self._post(authenticated_client, test_project["id"]).status_code == 200
