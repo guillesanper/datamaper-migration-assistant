@@ -263,3 +263,26 @@ Resultado: `17 failed, 1778 passed, 1 skipped, 31 errors` (1827 tests). Frente a
 
 El generador se validó antes de usarlo: sobre el `baseline_after.xml` anterior reproduce
 `baseline_after_passed.txt` y `baseline_after_summary.txt` byte a byte.
+
+## El login cuenta solo los fallos (R2 de la mitigación de riesgos abiertos)
+
+`baseline_after.xml`, `baseline_after_passed.txt` y `baseline_after_summary.txt` se regeneraron con la
+misma suite y arnés sobre el código en el que el límite por IP de `login` cuenta solo los fallos de
+credenciales (usuario inexistente o contraseña errónea): `check_rate_limit_only` comprueba al entrar sin
+contar y `record_failure` anota el fallo en la rama 401; el fallo número `RATE_LIMIT_LOGIN_ATTEMPTS` ya
+bloquea (`record_failure_orm`, `>=`). El resto de rutas conserva su contador por petición.
+
+Resultado: `17 failed, 1801 passed, 1 skipped, 31 errors` (1850 tests). Frente a la línea base anterior (1778 pasados):
+
+- **0 tests que pasaban y fallan ahora** (`comm -23` de las listas de pasados: vacío).
+- **+23 pasados**, todos nuevos: `test_auth_rate_limits_api.py` (13: logins correctos que no gastan cupo, 429
+  con `Retry-After` tras los fallos aunque el login sea correcto, la cuenta atrás no se reinicia con un
+  acierto, ventana que vence, aislamiento por IP, `X-Forwarded-For` falsificado, el 423 y el 403 no
+  cuentan, permisivo en desarrollo, fail-open y compatibilidad con `resend-code`) y
+  `test_rate_limit_crud_orm.py` (10: `peek_limit_orm` y `record_failure_orm`).
+- Ningún test existente cambia de aserción: los de límites de login enviaban usuarios inexistentes (401), que
+  siguen contando como fallo.
+- Los mismos 48 fallos/errores ajenos, uno a uno y con el mismo mensaje (el resumen solo cambia en la cabecera).
+
+El generador se validó antes de usarlo: sobre el `baseline_after.xml` anterior reproduce
+`baseline_after_passed.txt` y `baseline_after_summary.txt` byte a byte.

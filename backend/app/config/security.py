@@ -11,6 +11,7 @@ class SecuritySettings:
     """Configuraciones de seguridad centralizadas"""
 
     # === RATE LIMITING ===
+    # En login el máximo es de FALLOS por ventana: los logins correctos no cuentan
     RATE_LIMIT_LOGIN_ATTEMPTS = int(os.getenv("RATE_LIMIT_LOGIN_ATTEMPTS", "5"))
     RATE_LIMIT_LOGIN_WINDOW = int(os.getenv("RATE_LIMIT_LOGIN_WINDOW", "900"))  # 15 minutos
 

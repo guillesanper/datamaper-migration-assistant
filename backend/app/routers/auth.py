@@ -12,7 +12,12 @@ from app.config.security import security_settings
 # CRUDs ORM
 from app.crud import email_otp_crud, session_crud, user_crud
 from app.database.session import get_db_session as get_db
-from app.middleware.rate_limiting import enforce_rate_limit, rate_limit
+from app.middleware.rate_limiting import (
+    check_rate_limit_only,
+    enforce_rate_limit,
+    rate_limit,
+    record_failure,
+)
 from app.routers.dependencies import get_current_user, get_current_user_optional
 from app.services.auth_service import AuthenticationError, AuthService, DatabaseError
 from app.utils.cookies import SESSION_COOKIE_CONFIG, get_session_token_hash, sign_cookie
@@ -29,7 +34,8 @@ from app.utils.security_logger import (
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 # Límite por IP de cada ruta sensible: (máximo de peticiones, ventana en segundos), de
-# security_settings (ajustables por entorno con RATE_LIMIT_*)
+# security_settings (ajustables por entorno con RATE_LIMIT_*). En login el máximo es de
+# FALLOS por ventana: los logins correctos no cuentan
 LOGIN_LIMIT = (
     security_settings.RATE_LIMIT_LOGIN_ATTEMPTS,
     security_settings.RATE_LIMIT_LOGIN_WINDOW,
@@ -223,12 +229,15 @@ async def register(
 
 
 @router.post("/login", response_model=StandardResponse)
-@rate_limit(*LOGIN_LIMIT)
 async def login(request: Request, data: LoginRequest, db=Depends(get_db)):
     """Login de usuario"""
     import hashlib
     import secrets
     from datetime import datetime, timedelta, timezone
+
+    # El límite por IP cuenta solo los fallos de credenciales: aquí solo se comprueba (429 si
+    # la IP está bloqueada); el fallo se anota abajo, en la rama 401
+    await check_rate_limit_only(request, *LOGIN_LIMIT)
 
     auth_service = AuthService(db)
     client_ip = SecurityUtils.get_client_ip(request)
@@ -296,6 +305,10 @@ async def login(request: Request, data: LoginRequest, db=Depends(get_db)):
             status_code = 401
             error_code = "invalid_credentials"
             response_data = None
+            # Usuario inexistente o contraseña errónea: lo único que gasta cupo. El 423 (el
+            # bloqueo de cuenta se comprueba antes de la contraseña) y el 403 (solo ocurre con la
+            # contraseña acertada) no son intentos de adivinarla
+            await record_failure(request, *LOGIN_LIMIT)
 
         return JSONResponse(
             status_code=status_code,

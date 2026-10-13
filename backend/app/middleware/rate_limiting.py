@@ -8,7 +8,7 @@ import functools
 import hashlib
 import math
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 from fastapi import HTTPException, Request
 
@@ -26,6 +26,38 @@ def _account_identifier(account: str) -> str:
     normalized = SecurityUtils.sanitize_email(account)
     salt = security_settings.IP_HASH_SALT.encode("utf-8")
     return "acct:" + hashlib.sha256(salt + normalized.encode("utf-8")).hexdigest()[:32]
+
+
+def _counter_target(
+    request: Request,
+    endpoint: Optional[str],
+    rule: Optional[Dict[str, Any]],
+    account: Optional[str] = None,
+) -> Tuple[str, str, int, int, int]:
+    """
+    Clave y regla del contador al que pertenece el request
+
+    Es la única fuente de la clave: comprobar, contar y anotar fallos tienen que apuntar a la
+    misma fila.
+
+    Returns:
+        (identificador, endpoint, máximo, ventana en minutos, bloqueo en minutos)
+    """
+    if endpoint is None:
+        endpoint = request.url.path
+
+    client_ip = SecurityUtils.get_client_ip(request)
+    hashed_ip = SecurityUtils.hash_ip_address(client_ip)
+    identifier = _account_identifier(account) if account is not None else hashed_ip
+
+    # Obtener configuración para este endpoint
+    config = security_settings.get_rate_limit_config(endpoint, rule)
+    max_attempts = config["max_attempts"]
+    window_seconds = config["window_seconds"]
+    block_duration = config.get("block_duration", window_seconds)
+
+    # Convertir segundos a minutos para el CRUD
+    return identifier, endpoint, max_attempts, window_seconds // 60, block_duration // 60
 
 
 class DatabaseRateLimiter:
@@ -53,22 +85,9 @@ class DatabaseRateLimiter:
             dict: resultado de check_limit_orm (is_allowed, blocked_until...). Si la BD falla
             se permite el request (fail-open)
         """
-        if endpoint is None:
-            endpoint = request.url.path
-
-        client_ip = SecurityUtils.get_client_ip(request)
-        hashed_ip = SecurityUtils.hash_ip_address(client_ip)
-        identifier = _account_identifier(account) if account is not None else hashed_ip
-
-        # Obtener configuración para este endpoint
-        config = security_settings.get_rate_limit_config(endpoint, rule)
-        max_attempts = config["max_attempts"]
-        window_seconds = config["window_seconds"]
-        block_duration = config.get("block_duration", window_seconds)
-
-        # Convertir segundos a minutos para el CRUD
-        window_minutes = window_seconds // 60
-        block_duration_minutes = block_duration // 60
+        identifier, endpoint, max_attempts, window_minutes, block_duration_minutes = (
+            _counter_target(request, endpoint, rule, account)
+        )
 
         try:
             # Obtener sesión de SQLAlchemy
@@ -119,6 +138,86 @@ class DatabaseRateLimiter:
         """
         result = await DatabaseRateLimiter.count_request(request, endpoint, rule, account)
         return bool(result["is_allowed"])
+
+    @staticmethod
+    async def peek_request(
+        request: Request,
+        endpoint: Optional[str] = None,
+        rule: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Comprueba sin contar si la IP está bloqueada en el contador de la ruta
+
+        Args:
+            request: Request de FastAPI
+            endpoint: Clave del contador (si no se proporciona, se usa request.url.path)
+            rule: Regla explícita; en desarrollo manda siempre la permisiva
+
+        Returns:
+            dict: resultado de peek_limit_orm (is_allowed, blocked_until...). Si la BD falla
+            se permite el request (fail-open)
+        """
+        identifier, endpoint, _max, _window, _block = _counter_target(request, endpoint, rule)
+
+        try:
+            db = next(get_db_session())
+            try:
+                return dict(
+                    rate_limit_crud.peek_limit_orm(db, identifier=identifier, endpoint=endpoint)
+                )
+            finally:
+                db.close()
+
+        except Exception as e:
+            print(f"Error en rate limiting: {e}")
+            # Fail-open: igual que count_request
+            return {"is_allowed": True, "is_blocked": False, "blocked_until": None}
+
+    @staticmethod
+    async def count_failure(
+        request: Request,
+        endpoint: Optional[str] = None,
+        rule: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Anota un fallo de la IP en el contador de la ruta; al llegar al máximo, la bloquea
+
+        Args:
+            request: Request de FastAPI
+            endpoint: Clave del contador (si no se proporciona, se usa request.url.path)
+            rule: Regla explícita ({"max_attempts", "window_seconds"[, "block_duration"]}):
+                el máximo es de fallos por ventana. En desarrollo manda siempre la permisiva
+
+        Returns:
+            dict: resultado de record_failure_orm. Si la BD falla el fallo no se anota (el
+            request que ya falló no debe convertirse en un 500)
+        """
+        identifier, endpoint, max_failures, window_minutes, block_minutes = _counter_target(
+            request, endpoint, rule
+        )
+
+        try:
+            db = next(get_db_session())
+            try:
+                # record_failure_orm bloquea AL LLEGAR al máximo (check_limit_orm, con la
+                # siguiente petición): con solo fallos, si no, quedaría un intento de más
+                return dict(
+                    rate_limit_crud.record_failure_orm(
+                        db,
+                        identifier=identifier,
+                        ip_address=identifier,
+                        endpoint=endpoint,
+                        max_failures=max_failures,
+                        window_minutes=window_minutes,
+                        block_duration_minutes=block_minutes,
+                    )
+                )
+            finally:
+                db.close()
+
+        except Exception as e:
+            print(f"Error en rate limiting: {e}")
+            return {"is_allowed": True, "is_blocked": False, "blocked_until": None}
 
     @staticmethod
     async def get_rate_limit_info(
@@ -310,6 +409,15 @@ def _retry_after_seconds(result: Dict[str, Any], fallback: int) -> int:
     return max(1, math.ceil(remaining))
 
 
+def _rate_limited(result: Dict[str, Any], window_seconds: int) -> HTTPException:
+    """429 con Retry-After: respuesta única de todos los límites"""
+    return HTTPException(
+        status_code=429,
+        detail=make_error(ErrorCode.RATE_LIMIT_EXCEEDED),
+        headers={"Retry-After": str(_retry_after_seconds(result, window_seconds))},
+    )
+
+
 async def enforce_rate_limit(
     request: Request,
     max_requests: int,
@@ -334,11 +442,61 @@ async def enforce_rate_limit(
     result = await db_rate_limiter.count_request(request, endpoint, rule, account)
 
     if not result["is_allowed"]:
-        raise HTTPException(
-            status_code=429,
-            detail=make_error(ErrorCode.RATE_LIMIT_EXCEEDED),
-            headers={"Retry-After": str(_retry_after_seconds(result, window_seconds))},
-        )
+        raise _rate_limited(result, window_seconds)
+
+
+async def check_rate_limit_only(
+    request: Request,
+    max_requests: int,
+    window_seconds: int,
+    endpoint: Optional[str] = None,
+) -> None:
+    """
+    Responde 429 con Retry-After si la IP ya está bloqueada, sin contar este request
+
+    Es la mitad de entrada del límite que cuenta solo fallos (login): el request no gasta
+    cupo; lo gasta record_failure cuando el intento falla.
+
+    Args:
+        request: Request de FastAPI
+        max_requests: Máximo de fallos en la ventana
+        window_seconds: Ventana de tiempo en segundos
+        endpoint: Clave del contador (por defecto request.url.path)
+
+    Raises:
+        HTTPException: 429 si la IP está bloqueada
+    """
+    rule = {"max_attempts": max_requests, "window_seconds": window_seconds}
+    result = await db_rate_limiter.peek_request(request, endpoint, rule)
+
+    if not result["is_allowed"]:
+        raise _rate_limited(result, window_seconds)
+
+
+async def record_failure(
+    request: Request,
+    max_requests: int,
+    window_seconds: int,
+    endpoint: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Anota un fallo de la IP; el que llega a `max_requests` la bloquea la ventana completa
+
+    No responde 429: el intento que falla ya tiene su respuesta (401). El 429 llega en la
+    siguiente petición, a través de check_rate_limit_only. Un acierto no llama a esta función:
+    no suma ni reinicia el contador.
+
+    Args:
+        request: Request de FastAPI
+        max_requests: Máximo de fallos en la ventana
+        window_seconds: Ventana de tiempo en segundos
+        endpoint: Clave del contador (por defecto request.url.path)
+
+    Returns:
+        dict: estado del contador tras anotar el fallo
+    """
+    rule = {"max_attempts": max_requests, "window_seconds": window_seconds}
+    return await db_rate_limiter.count_failure(request, endpoint, rule)
 
 
 # Decorador para rate limiting específico

@@ -167,6 +167,176 @@ def check_limit_orm(
         raise
 
 
+def peek_limit_orm(db, identifier: str, endpoint: str) -> Dict[str, Any]:
+    """
+    Consulta sin contar si un identificador está bloqueado (ORM version).
+
+    Es de solo lectura: no crea el registro ni toca el contador. Un identificador sin
+    registro, o cuyo bloqueo ya venció, no está bloqueado. Mismo criterio de bloqueo que
+    check_limit_orm (blocked_until > ahora, con independencia de la ventana).
+
+    Args:
+        db: SQLAlchemy Session
+        identifier: Identificador único (IP hasheada, cuenta)
+        endpoint: Endpoint solicitado
+
+    Returns:
+        Dict con is_allowed, is_blocked, blocked_until y request_count (0 sin registro)
+
+    Raises:
+        Exception: Si hay error al consultar el límite
+    """
+    from app.models.orm import SecurityRateLimit
+
+    try:
+        now = datetime.now(timezone.utc)
+
+        rate_limit = (
+            db.query(SecurityRateLimit)
+            .filter(
+                SecurityRateLimit.identifier == identifier, SecurityRateLimit.endpoint == endpoint
+            )
+            .first()
+        )
+
+        if rate_limit is None:
+            return {
+                "is_allowed": True,
+                "is_blocked": False,
+                "blocked_until": None,
+                "request_count": 0,
+            }
+
+        is_blocked = bool(rate_limit.blocked_until and rate_limit.blocked_until > now)
+
+        return {
+            "is_allowed": not is_blocked,
+            "is_blocked": is_blocked,
+            "blocked_until": rate_limit.blocked_until if is_blocked else None,
+            "request_count": rate_limit.request_count,
+        }
+
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error al consultar rate limit: {str(e)}")
+        raise
+
+
+def record_failure_orm(
+    db,
+    identifier: str,
+    ip_address: str,
+    endpoint: str,
+    max_failures: int = 5,
+    window_minutes: int = 15,
+    block_duration_minutes: int = 15,
+) -> Dict[str, Any]:
+    """
+    Anota un fallo y bloquea al llegar al máximo de fallos de la ventana (ORM version).
+
+    A diferencia de check_limit_orm (que permite `max_requests` peticiones y bloquea con la
+    siguiente: `>`), aquí el fallo número `max_failures` ya fija el bloqueo (`>=`). Es lo que
+    hace falta cuando solo se cuentan los fallos: si no, tras `max_failures` fallos quedaría un
+    intento más (el login correcto de después pasaría) antes del primer 429.
+
+    Un identificador ya bloqueado no suma (como en check_limit_orm); con la ventana vencida el
+    contador reinicia en 1.
+
+    Args:
+        db: SQLAlchemy Session
+        identifier: Identificador único (IP hasheada)
+        ip_address: IP address (hasheada)
+        endpoint: Endpoint solicitado
+        max_failures: Fallos que caben en la ventana; el que llega a este número bloquea
+        window_minutes: Duración de la ventana en minutos
+        block_duration_minutes: Duración del bloqueo en minutos
+
+    Returns:
+        Dict con is_allowed, is_blocked, remaining, reset_at, blocked_until y request_count
+        (mismas claves que check_limit_orm; is_blocked ya es True en el fallo que bloquea)
+
+    Raises:
+        Exception: Si hay error al anotar el fallo
+    """
+    from app.models.orm import SecurityRateLimit
+
+    try:
+        now = datetime.now(timezone.utc)
+
+        rate_limit = (
+            db.query(SecurityRateLimit)
+            .filter(
+                SecurityRateLimit.identifier == identifier, SecurityRateLimit.endpoint == endpoint
+            )
+            .first()
+        )
+
+        if rate_limit is None:
+            rate_limit = SecurityRateLimit(
+                identifier=identifier,
+                ip_address=ip_address,
+                endpoint=endpoint,
+                request_count=1,
+                attempt_count=1,
+                window_start=now,
+                last_attempt=now,
+                created_at=now,
+                updated_at=now,
+            )
+            db.add(rate_limit)
+        elif rate_limit.blocked_until and rate_limit.blocked_until > now:
+            # Otra petición lo bloqueó entre la comprobación y este fallo: no suma
+            return {
+                "is_allowed": False,
+                "is_blocked": True,
+                "remaining": 0,
+                "reset_at": rate_limit.blocked_until,
+                "blocked_until": rate_limit.blocked_until,
+                "request_count": rate_limit.request_count,
+            }
+        elif now > rate_limit.window_start + timedelta(minutes=window_minutes):
+            # Ventana vencida: el fallo abre una nueva
+            rate_limit.window_start = now
+            rate_limit.request_count = 1
+            rate_limit.attempt_count = 1
+        else:
+            rate_limit.request_count += 1
+            rate_limit.attempt_count += 1
+
+        rate_limit.last_attempt = now
+        rate_limit.updated_at = now
+
+        is_blocked = rate_limit.request_count >= max_failures
+        if is_blocked:
+            rate_limit.blocked_until = now + timedelta(minutes=block_duration_minutes)
+
+        db.commit()
+
+        if is_blocked:
+            logger.warning(
+                f"Límite de fallos alcanzado para {identifier} en {endpoint}. "
+                f"Bloqueado hasta {rate_limit.blocked_until}"
+            )
+
+        return {
+            "is_allowed": not is_blocked,
+            "is_blocked": is_blocked,
+            "remaining": max(0, max_failures - rate_limit.request_count),
+            "reset_at": (
+                rate_limit.blocked_until
+                if is_blocked
+                else rate_limit.window_start + timedelta(minutes=window_minutes)
+            ),
+            "blocked_until": rate_limit.blocked_until if is_blocked else None,
+            "request_count": rate_limit.request_count,
+        }
+
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error al anotar fallo de rate limit: {str(e)}")
+        raise
+
+
 def update_orm(db, identifier: str, endpoint: str, increment: int = 1) -> bool:
     """
     Actualiza el contador de requests para un identificador/endpoint (ORM version).

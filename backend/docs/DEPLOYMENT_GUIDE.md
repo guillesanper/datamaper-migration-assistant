@@ -607,13 +607,13 @@ Valores por defecto **del código** (`backend/config.py` y `backend/app/config/s
 | `OTP_MAX_ATTEMPTS` | `5` | Comprobaciones erróneas que admite cada código (`verify-code` y `reset`); al llegar, se borra y hay que pedir otro. |
 | `MAX_FAILED_LOGIN_ATTEMPTS` / `ACCOUNT_LOCKOUT_DURATION` | `5` / `1800` | Fallos de login antes del bloqueo y duración del bloqueo (s). |
 | `TRUSTED_PROXY_HOPS` | `0` | Proxies de confianza delante de la app (ver abajo). |
-| `RATE_LIMIT_<RUTA>_ATTEMPTS` / `_WINDOW` | ver tabla | Límite por IP y por ruta; `_WINDOW` en segundos. |
+| `RATE_LIMIT_<RUTA>_ATTEMPTS` / `_WINDOW` | ver tabla | Límite por IP y por ruta; `_WINDOW` en segundos. En `login` el máximo es de **fallos** por ventana, en el resto de peticiones. |
 
 Límites por defecto (`POST /api/auth/...`; cada ruta tiene su propio contador por IP):
 
 | Ruta | Variables | Máximo / ventana | Además, por cuenta |
 |------|-----------|------------------|--------------------|
-| `login` | `RATE_LIMIT_LOGIN_*` | 5 / 900 s | no |
+| `login` | `RATE_LIMIT_LOGIN_*` | 5 **fallos** / 900 s | no (la cuenta tiene su propio bloqueo) |
 | `register` | `RATE_LIMIT_REGISTER_*` | 3 / 3600 s | no |
 | `verify-code` | `RATE_LIMIT_VERIFY_*` | 10 / 3600 s | no |
 | `resend-code` | `RATE_LIMIT_RESEND_*` | 3 / 600 s | sí, por email (mismo límite) |
@@ -622,7 +622,9 @@ Límites por defecto (`POST /api/auth/...`; cada ruta tiene su propio contador p
 
 - Al superar el límite: **429** con `Retry-After` (segundos hasta que termina el bloqueo, mínimo 1) y `detail.code = rate_limit.exceeded`. El bloqueo dura una ventana.
 - El contador por cuenta (`resend-code`, `forgot`) cuenta el email pedido, exista o no, con un identificador `acct:` + sha256 con sal (`IP_HASH_SALT`); no guarda el email en claro. Efecto secundario: tres peticiones con el email de otra persona bastan para que esa persona no pueda pedir un reenvío durante la ventana.
-- El límite de `login` cuenta **todas** las peticiones, no solo los fallos: una IP compartida (campus, oficina) con 6 logins correctos en 15 minutos recibe 429.
+- El límite de `login` cuenta **solo los fallos**: usuario inexistente o contraseña errónea (los `401 invalid_credentials`). Los logins correctos no gastan cupo ni reinician el contador, así que una IP compartida (campus, oficina) puede iniciar sesión tantas veces como haga falta; los fallos de todos sus usuarios suman. El fallo número `RATE_LIMIT_LOGIN_ATTEMPTS` (5) ya bloquea la IP la ventana completa: la siguiente petición, **aunque lleve la contraseña correcta**, recibe 429 con `Retry-After` (la comprobación va antes de autenticar, sin gastar bcrypt).
+  - El `423 account_locked` (el bloqueo de cuenta se comprueba **antes** de la contraseña) y el `403 email_not_verified` (solo ocurre con la contraseña **acertada**) no cuentan: no son intentos de adivinarla. Un atacante que solo reciba 423 o 403 no avanza en ningún sentido (no hay contraseña que probar contra una cuenta bloqueada, y el 403 ya es una contraseña correcta). La contrapartida: esas respuestas, y los logins correctos, ya no tienen techo por IP; cada uno de los que llegan a comprobar la contraseña (200 y 403) gasta un bcrypt. Quien tenga una cuenta propia puede pedir logins sin límite desde su IP; el techo es la capacidad del servidor (sin medir), no un contador.
+  - La comprobación (al entrar) y el registro del fallo (al terminar) son dos operaciones distintas y el contador no es atómico (lee, suma y escribe): varias peticiones concurrentes de una misma IP pueden pasar la comprobación antes de que se anote el fallo que bloquea, así que el cupo real puede excederse en tantos intentos como peticiones simultáneas. Límite conocido; la atomicidad del contador es el riesgo 6 de los riesgos abiertos.
 - El contador trabaja en minutos enteros (`ventana // 60`, `rate_limiting.py`): usa ventanas múltiplos de 60 s. Una ventana de menos de 60 s da 0 minutos (no probado).
 - Si la base de datos del limitador falla, la petición se **permite** (fail-open) y el error solo se imprime en el log.
 - Con `ENV=development` todo es permisivo (1000 / 60 s); para probar los límites hay que ejecutar con `ENV=production`, y entonces el arranque exige `CSRF_SECRET_KEY` e `IP_HASH_SALT` (o `SECRET_KEY`, de la que heredan si no se definen). Los tests parchean `security_settings.DEVELOPMENT_MODE`.
@@ -634,7 +636,7 @@ Límites por defecto (`POST /api/auth/...`; cada ruta tiene su propio contador p
 - `0` (por defecto): la IP es la del socket y la cabecera se ignora.
 - `N > 0`: la IP es la entrada N-ésima **desde la derecha** de `X-Forwarded-For` (la que añadió el primer proxy de confianza; lo que hay a su izquierda lo escribe el cliente). Con menos entradas que `N`, o sin cabecera, se usa la IP del socket.
 
-> ⚠️ **Antes de desplegar.** `backend/render.yaml` **no** lo define y el valor correcto **no se ha medido**: todavía no hay despliegue en Render y Render no documenta la estructura de `X-Forwarded-For` que recibe la aplicación. Con `0` detrás del proxy de Render todos los usuarios comparten IP y los límites por IP pasan a ser del sitio entero (5 logins en 15 minutos para todos). El valor no se adivina: se calibra en el primer despliegue (procedimiento abajo) y, mientras tanto, la aplicación avisa de la configuración peligrosa.
+> ⚠️ **Antes de desplegar.** `backend/render.yaml` **no** lo define y el valor correcto **no se ha medido**: todavía no hay despliegue en Render y Render no documenta la estructura de `X-Forwarded-For` que recibe la aplicación. Con `0` detrás del proxy de Render todos los usuarios comparten IP y los límites por IP pasan a ser del sitio entero (5 fallos de login en 15 minutos entre todos, y 3 altas por hora). El valor no se adivina: se calibra en el primer despliegue (procedimiento abajo) y, mientras tanto, la aplicación avisa de la configuración peligrosa.
 
 **Avisos de la aplicación** (solo fuera de desarrollo; ninguno cambia la IP que se usa ni el comportamiento):
 
@@ -813,7 +815,7 @@ WHERE identifier NOT LIKE 'acct:%'
 ORDER BY request_count DESC LIMIT 10;
 ```
 
-**Solución**: calibra `TRUSTED_PROXY_HOPS` con el procedimiento de [`TRUSTED_PROXY_HOPS`](#trusted_proxy_hops). Si el 429 es de verdad de una sola IP (campus, oficina), sube `RATE_LIMIT_LOGIN_ATTEMPTS`: el límite de login cuenta todas las peticiones, no solo los fallos.
+**Solución**: calibra `TRUSTED_PROXY_HOPS` con el procedimiento de [`TRUSTED_PROXY_HOPS`](#trusted_proxy_hops). Si el 429 es de verdad de una sola IP (campus, oficina), ten en cuenta que en `login` solo cuentan los fallos: los logins correctos no lo causan. Lo causan 5 contraseñas erróneas o usuarios inexistentes en 15 minutos entre todos los usuarios de esa IP; sube `RATE_LIMIT_LOGIN_ATTEMPTS` si es tráfico legítimo (usuarios que olvidaron la contraseña). En el `request_count` de la consulta anterior, para `/api/auth/login` el valor es de fallos.
 
 ### Problema: aviso `TRUSTED_PROXY_HOPS=0 pero llegan peticiones con X-Forwarded-For` en el log
 

@@ -9,13 +9,16 @@ Tests de integración: límites de las rutas de autenticación e intentos por c�
   confianza decide la última entrada.
 - Un OTP admite OTP_MAX_ATTEMPTS fallos: después el código correcto tampoco vale; el
   reenvío da otra tanda.
+- El límite de login por IP cuenta solo los fallos de credenciales (usuario inexistente o
+  contraseña errónea): los logins correctos, el 423 y el 403 no gastan cupo; al llegar al
+  máximo de fallos, el siguiente login (aunque sea correcto) recibe 429.
 
 Los contadores van a la BD de test sin rollback: cada test usa IPs únicas y borra los
 contadores de /api/auth al terminar.
 """
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -444,3 +447,254 @@ def test_reset_wrong_attempts_invalidate_the_otp(client, db_session, user_with_o
 
     assert response.status_code == 400
     assert response.json()["error"] == "reset_failed"
+
+
+# ============================================================================
+# Login: el límite por IP cuenta solo los fallos
+# ============================================================================
+
+
+@pytest.fixture
+def make_user(db_session, created_emails):
+    """Fábrica de usuarios con PASSWORD (verificados o no, con la cuenta bloqueada o no)"""
+
+    def _make(verified: bool = True, locked: bool = False) -> dict:
+        tag = _tag()
+        email = f"lg_{tag}@example.com"
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        user = User(
+            id=str(uuid.uuid4()),
+            username=f"lg_{tag}",
+            email=email,
+            password_hash=pwd_context.hash(PASSWORD),
+            created_at=now,
+            updated_at=now,
+            is_verified=verified,
+            is_deleted=False,
+            failed_login_attempts=0,
+            locked_until=(datetime.now(timezone.utc) + timedelta(minutes=30) if locked else None),
+        )
+        db_session.add(user)
+        db_session.commit()
+        created_emails.append(email)
+        return {"id": str(user.id), "email": email, "username": user.username}
+
+    return _make
+
+
+def _login(http, identifier: str, password: str = PASSWORD, headers=None):
+    return http.post(
+        "/api/auth/login",
+        json={"identifier": identifier, "password": password},
+        headers=headers or {},
+    )
+
+
+def _fail_login(http, headers=None):
+    """Un login de usuario inexistente: 401 que cuenta como fallo"""
+    response = http.post("/api/auth/login", json=_login_body(), headers=headers or {})
+    assert response.status_code == 401
+    return response
+
+
+def _expire_login_window(db_session, minutes: int = 16) -> None:
+    """Envejece los contadores de login: ventana y bloqueo vencidos"""
+    db_session.rollback()
+    db_session.execute(
+        text(
+            "UPDATE security_rate_limits "
+            "SET window_start = window_start - make_interval(mins => :minutes), "
+            "    blocked_until = blocked_until - make_interval(mins => :minutes) "
+            "WHERE endpoint = '/api/auth/login'"
+        ),
+        {"minutes": minutes},
+    )
+    db_session.commit()
+
+
+def test_correct_logins_never_spend_the_ip_limit(client, production_mode, trusted_hops, make_user):
+    """Una IP compartida (campus, oficina) puede iniciar sesión más veces que el límite"""
+    user = make_user()
+    http = _http(_ip())
+    attempts = security_settings.RATE_LIMIT_LOGIN_ATTEMPTS * 2
+
+    statuses = [_login(http, user["email"]).status_code for _ in range(attempts)]
+
+    assert statuses == [200] * attempts
+
+
+def test_after_the_failure_limit_even_the_correct_login_gets_429_with_retry_after(
+    client, production_mode, trusted_hops, make_user
+):
+    """El fallo que llega al máximo bloquea al llegar: el siguiente login ya es 429"""
+    user = make_user()
+    http = _http(_ip())
+
+    for _ in range(security_settings.RATE_LIMIT_LOGIN_ATTEMPTS):
+        _fail_login(http)
+    response = _login(http, user["email"])
+
+    assert response.status_code == 429
+    assert int(response.headers["Retry-After"]) > 0
+    assert response.json()["detail"] == make_error(ErrorCode.RATE_LIMIT_EXCEEDED)
+    assert "session" not in response.cookies
+
+
+def test_one_failure_below_the_limit_still_lets_the_correct_login_in(
+    client, production_mode, trusted_hops, make_user
+):
+    user = make_user()
+    http = _http(_ip())
+
+    for _ in range(security_settings.RATE_LIMIT_LOGIN_ATTEMPTS - 1):
+        _fail_login(http)
+    response = _login(http, user["email"])
+
+    assert response.status_code == 200
+
+
+def test_wrong_password_of_an_existing_account_counts_as_a_failure(
+    client, production_mode, trusted_hops, make_user
+):
+    """Contraseña errónea (no solo usuario inexistente): el 429 llega antes que el 423 de la cuenta"""
+    user = make_user()
+    http = _http(_ip())
+
+    for _ in range(security_settings.RATE_LIMIT_LOGIN_ATTEMPTS):
+        assert _login(http, user["email"], "WrongPass1!").status_code == 401
+    response = _login(http, user["email"])
+
+    assert response.status_code == 429
+
+
+def test_a_correct_login_does_not_reset_the_failure_counter(
+    client, production_mode, trusted_hops, make_user
+):
+    """Quien tiene una cuenta propia no puede reiniciar con un login bueno su cuenta atrás"""
+    own_account = make_user()
+    http = _http(_ip())
+
+    for _ in range(security_settings.RATE_LIMIT_LOGIN_ATTEMPTS - 1):
+        _fail_login(http)
+    assert _login(http, own_account["email"]).status_code == 200
+    _fail_login(http)  # el fallo número `limit`: ya bloquea
+    response = _login(http, own_account["email"])
+
+    assert response.status_code == 429
+
+
+def test_login_failures_restart_when_the_window_expires(
+    client, db_session, production_mode, trusted_hops, make_user
+):
+    user = make_user()
+    http = _http(_ip())
+    limit = security_settings.RATE_LIMIT_LOGIN_ATTEMPTS
+    for _ in range(limit):
+        _fail_login(http)
+    assert _login(http, user["email"]).status_code == 429
+
+    _expire_login_window(db_session)
+
+    # Vuelven a caber `limit - 1` fallos y el login correcto entra
+    for _ in range(limit - 1):
+        _fail_login(http)
+    assert _login(http, user["email"]).status_code == 200
+
+
+def test_login_failure_limit_is_isolated_by_ip(client, production_mode, trusted_hops, make_user):
+    user = make_user()
+    attacker, bystander = _http(_ip()), _http(_ip())
+    for _ in range(security_settings.RATE_LIMIT_LOGIN_ATTEMPTS):
+        _fail_login(attacker)
+
+    assert _login(attacker, user["email"]).status_code == 429
+    assert _login(bystander, user["email"]).status_code == 200
+
+
+def test_forged_x_forwarded_for_cannot_evade_the_failure_limit_nor_the_block(
+    client, production_mode, trusted_hops, make_user
+):
+    """Con 0 saltos la cabecera no cambia la clave: ni al contar fallos ni al comprobar"""
+    trusted_hops(0)
+    user = make_user()
+    http = _http(_ip())
+
+    for i in range(security_settings.RATE_LIMIT_LOGIN_ATTEMPTS):
+        _fail_login(http, headers={"X-Forwarded-For": f"203.0.113.{i}"})
+    response = _login(http, user["email"], headers={"X-Forwarded-For": "203.0.113.250"})
+
+    assert response.status_code == 429
+
+
+def test_locked_account_responses_do_not_spend_the_ip_limit(
+    client, production_mode, trusted_hops, make_user
+):
+    """423: el bloqueo de cuenta se comprueba antes de la contraseña, no es un intento de acertarla"""
+    locked = make_user(locked=True)
+    healthy = make_user()
+    http = _http(_ip())
+    attempts = security_settings.RATE_LIMIT_LOGIN_ATTEMPTS + 3
+
+    statuses = [_login(http, locked["email"]).status_code for _ in range(attempts)]
+
+    assert statuses == [423] * attempts
+    assert _login(http, healthy["email"]).status_code == 200
+
+
+def test_unverified_account_with_the_right_password_does_not_spend_the_ip_limit(
+    client, production_mode, trusted_hops, make_user
+):
+    """403: solo ocurre con la contraseña acertada, así que no es un fallo de contraseña"""
+    unverified = make_user(verified=False)
+    healthy = make_user()
+    http = _http(_ip())
+    attempts = security_settings.RATE_LIMIT_LOGIN_ATTEMPTS + 3
+
+    responses = [_login(http, unverified["email"]) for _ in range(attempts)]
+
+    assert [r.status_code for r in responses] == [403] * attempts
+    assert responses[0].json()["error"] == "email_not_verified"
+    assert _login(http, healthy["email"]).status_code == 200
+
+
+def test_login_stays_permissive_in_development_even_after_many_failures(
+    client, monkeypatch, trusted_hops, make_user
+):
+    monkeypatch.setattr(security_settings, "DEVELOPMENT_MODE", True)
+    user = make_user()
+    http = _http(_ip())
+
+    for _ in range(security_settings.RATE_LIMIT_LOGIN_ATTEMPTS * 2):
+        _fail_login(http)
+
+    assert _login(http, user["email"]).status_code == 200
+
+
+def test_login_keeps_answering_when_the_failure_counter_is_unavailable(
+    client, production_mode, trusted_hops, make_user
+):
+    """Fail-open: si el contador falla, el login responde lo de siempre (401 y 200, no 500)"""
+    user = make_user()
+    http = _http(_ip())
+
+    with patch("app.crud.rate_limit_crud.record_failure_orm", side_effect=RuntimeError("bd caída")):
+        wrong = _login(http, user["email"], "WrongPass1!")
+    with patch("app.crud.rate_limit_crud.peek_limit_orm", side_effect=RuntimeError("bd caída")):
+        right = _login(http, user["email"])
+
+    assert wrong.status_code == 401
+    assert right.status_code == 200
+
+
+def test_other_routes_still_count_every_request(client, production_mode, trusted_hops):
+    """Compatibilidad: solo login cambia; resend-code sigue contando cada petición (200 o no)"""
+    http = _http(_ip())
+    limit = security_settings.RATE_LIMIT_RESEND_ATTEMPTS
+
+    statuses = [
+        http.post("/api/auth/resend-code", json=_resend_body()).status_code
+        for _ in range(limit + 1)
+    ]
+
+    assert 429 not in statuses[:limit]
+    assert statuses[limit] == 429
