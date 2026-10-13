@@ -8,9 +8,10 @@ import functools
 import hashlib
 import math
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
 
 from fastapi import HTTPException, Request
+from starlette.concurrency import run_in_threadpool
 
 from app.config.security import security_settings
 from app.database.session import get_db_session
@@ -60,6 +61,21 @@ def _counter_target(
     return identifier, endpoint, max_attempts, window_seconds // 60, block_duration // 60
 
 
+def _in_session(operation: Callable[..., Any], **kwargs: Any) -> Dict[str, Any]:
+    """
+    Ejecuta una operación del CRUD con su propia sesión de BD
+
+    Es síncrona y está pensada para run_in_threadpool: la sesión se abre, se usa y se cierra en
+    el mismo hilo (una sesión por hilo, nunca la de la corrutina), y el event loop no espera a
+    la BD. `get_db_session` se resuelve al llamar: los tests lo parchean en este módulo.
+    """
+    db = next(get_db_session())
+    try:
+        return dict(operation(db, **kwargs))
+    finally:
+        db.close()
+
+
 class DatabaseRateLimiter:
     """Rate limiter que usa base de datos para persistencia"""
 
@@ -90,27 +106,20 @@ class DatabaseRateLimiter:
         )
 
         try:
-            # Obtener sesión de SQLAlchemy
-            db = next(get_db_session())
-            try:
-                # Verificar límite usando CRUD ORM
-                # check_limit_orm hace TODO: verifica bloqueo, crea/actualiza registro,
-                # incrementa contador, resetea ventana si expiró, bloquea si excede límite
-                result = rate_limit_crud.check_limit_orm(
-                    db,
-                    identifier=identifier,  # IP (hash) o cuenta
-                    # (ip_address, endpoint) es único: el contador de cuenta ocupa su propia fila
-                    ip_address=identifier,
-                    endpoint=endpoint,
-                    max_requests=max_attempts,
-                    window_minutes=window_minutes,
-                    block_duration_minutes=block_duration_minutes,
-                )
-
-                return dict(result)
-
-            finally:
-                db.close()
+            # check_limit_orm hace TODO: verifica bloqueo, crea/actualiza registro,
+            # incrementa contador, resetea ventana si expiró, bloquea si excede límite.
+            # La E/S de BD corre en el threadpool: no bloquea el event loop
+            return await run_in_threadpool(
+                _in_session,
+                rate_limit_crud.check_limit_orm,
+                identifier=identifier,  # IP (hash) o cuenta
+                # (ip_address, endpoint) es único: el contador de cuenta ocupa su propia fila
+                ip_address=identifier,
+                endpoint=endpoint,
+                max_requests=max_attempts,
+                window_minutes=window_minutes,
+                block_duration_minutes=block_duration_minutes,
+            )
 
         except Exception as e:
             print(f"Error en rate limiting: {e}")
@@ -160,13 +169,12 @@ class DatabaseRateLimiter:
         identifier, endpoint, _max, _window, _block = _counter_target(request, endpoint, rule)
 
         try:
-            db = next(get_db_session())
-            try:
-                return dict(
-                    rate_limit_crud.peek_limit_orm(db, identifier=identifier, endpoint=endpoint)
-                )
-            finally:
-                db.close()
+            return await run_in_threadpool(
+                _in_session,
+                rate_limit_crud.peek_limit_orm,
+                identifier=identifier,
+                endpoint=endpoint,
+            )
 
         except Exception as e:
             print(f"Error en rate limiting: {e}")
@@ -197,23 +205,18 @@ class DatabaseRateLimiter:
         )
 
         try:
-            db = next(get_db_session())
-            try:
-                # record_failure_orm bloquea AL LLEGAR al máximo (check_limit_orm, con la
-                # siguiente petición): con solo fallos, si no, quedaría un intento de más
-                return dict(
-                    rate_limit_crud.record_failure_orm(
-                        db,
-                        identifier=identifier,
-                        ip_address=identifier,
-                        endpoint=endpoint,
-                        max_failures=max_failures,
-                        window_minutes=window_minutes,
-                        block_duration_minutes=block_minutes,
-                    )
-                )
-            finally:
-                db.close()
+            # record_failure_orm bloquea AL LLEGAR al máximo (check_limit_orm, con la
+            # siguiente petición): con solo fallos, si no, quedaría un intento de más
+            return await run_in_threadpool(
+                _in_session,
+                rate_limit_crud.record_failure_orm,
+                identifier=identifier,
+                ip_address=identifier,
+                endpoint=endpoint,
+                max_failures=max_failures,
+                window_minutes=window_minutes,
+                block_duration_minutes=block_minutes,
+            )
 
         except Exception as e:
             print(f"Error en rate limiting: {e}")
