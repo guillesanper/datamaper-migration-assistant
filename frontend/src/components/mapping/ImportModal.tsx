@@ -8,6 +8,7 @@ import type { ApiErrorResponse } from '../../services/api.service';
 import { getApiError } from '../../utils/apiError';
 import { toast } from '../../utils/toast';
 import styles from '../../styles/mapping/mapping.module.css';
+import { buildImportExample } from './importExamples';
 
 interface ImportModalProps {
   isOpen: boolean;
@@ -115,21 +116,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
 
   if (!isOpen) return null;
 
-  const formatExamples = {
-    json: `{
-  "tables": [
-    {
-      "name": "customers",
-      "type": "origin",
-      "columns": [...]
-    }
-  ]
-}`,
-    csv: `table_name,type,column_name,data_type
-customers,origin,id,INTEGER
-customers,origin,name,TEXT`,
-    excel: t('import.example.excelHint' as any)
-  };
+  const formatExample = buildImportExample(selectedFormat, importType);
 
   return (
     <div className={styles.modalOverlay}>
@@ -179,6 +166,7 @@ customers,origin,name,TEXT`,
                 <span>{t('import.type.both' as any)}</span>
               </label>
             </div>
+            <p className="text-xs text-muted-foreground mt-1.5">{t('import.type.hint')}</p>
           </div>
 
           {/* Manejo de Duplicados */}
@@ -290,9 +278,16 @@ customers,origin,name,TEXT`,
           {/* Format example */}
           <div>
             <label className="text-sm font-medium mb-2 block">{t('import.example.label' as any)}</label>
-            <pre className="bg-muted p-3 rounded-lg text-xs overflow-x-auto">
-              {formatExamples[selectedFormat]}
+            <p className="text-xs mb-1.5">{t(`import.example.hint.${importType}`)}</p>
+            {selectedFormat === 'excel' && (
+              <p className="text-xs text-muted-foreground mb-1.5">
+                {t('import.example.excelHint')}
+              </p>
+            )}
+            <pre className="bg-muted border border-border p-3 rounded-lg text-xs font-mono leading-relaxed overflow-x-auto">
+              {formatExample}
             </pre>
+            <p className="text-xs text-muted-foreground mt-1.5">{t('import.example.required')}</p>
           </div>
 
           {/* Info alert */}
