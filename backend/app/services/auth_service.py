@@ -8,7 +8,12 @@ from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.utils.email_verification import create_welcome_notification, send_verification_code
+from app.crud import email_otp_crud
+from app.utils.email_verification import (
+    create_welcome_notification,
+    deliver_account_exists_email,
+    send_verification_code,
+)
 from app.utils.security import SecurityUtils
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -26,6 +31,33 @@ class AuthenticationError(Exception):
     pass
 
 
+class UsernameTakenError(AuthenticationError):
+    """El username pertenece a otra cuenta (viva o borrada): único 409 explícito de register"""
+
+    pass
+
+
+# Qué hizo create_user (`RegistrationResult.outcome`); solo va al log de seguridad. Los motivos
+# de las ramas «existente» coinciden con los de resend_code_ignored
+REGISTRATION_CREATED = "account_created"
+REGISTRATION_EXISTING_VERIFIED = "account_already_verified"
+REGISTRATION_EXISTING_UNVERIFIED = "account_unverified_reissued"
+REGISTRATION_EXISTING_DELETED = "account_deleted"
+
+
+class RegistrationResult(dict):
+    """
+    Datos del 201 de register (user_id, username, email) y qué se hizo de verdad.
+
+    Es un dict para que llegue a la respuesta tal cual y los llamadores de siempre no cambien.
+    `outcome` y `account_id` (la cuenta real, que en las ramas «existente» no es `user_id`) son
+    atributos, fuera de la respuesta: solo sirven para el log de seguridad.
+    """
+
+    outcome: str = REGISTRATION_CREATED
+    account_id: Optional[str] = None
+
+
 class AuthService:
     """Servicio de autenticación - Contiene toda la lógica de negocio"""
 
@@ -38,19 +70,77 @@ class AuthService:
         if not validation["is_valid"]:
             raise ValueError("; ".join(validation["errors"]))
 
+    def _find_existing_account(self, username: str, email: str):
+        """
+        Cuenta que ya ocupa el email o el username (incluidas las borradas) o None.
+
+        Las restricciones únicas de users cubren las filas borradas: sin mirarlas, un email o un
+        username de una cuenta borrada pasaría la consulta y saltaría en el INSERT. Si el
+        username es de OTRA cuenta que la del email (o el email no existe), UsernameTakenError:
+        con independencia de que el email exista, para que elegir un username ocupado no sirva
+        para enumerar emails.
+        """
+        from app.models.orm import User
+
+        rows = self.db.query(User).filter(or_(User.email == email, User.username == username)).all()
+        by_email = next((u for u in rows if u.email == email), None)
+        by_username = next((u for u in rows if u.username == username), None)
+
+        if by_username is not None and (by_email is None or by_email.id != by_username.id):
+            raise UsernameTakenError("El nombre de usuario ya está en uso")
+        return by_email
+
+    def _answer_for_existing_account(
+        self,
+        account,
+        username: str,
+        email: str,
+        deliver: Optional[Callable[[str, str], None]],
+        notify_existing: Optional[Callable[[str], None]],
+    ) -> RegistrationResult:
+        """
+        Resultado de register cuando el email ya tiene cuenta: igual que un alta nueva.
+
+        No se crea nada ni se toca la contraseña ni el username guardados. Verificada: aviso
+        «ya tienes una cuenta» (sin código) y bcrypt simulado en lugar del del OTP. Sin
+        verificar: código nuevo (invalida el anterior y repara una cuenta que se quedó sin
+        código). Borrada: no se envía nada. Los datos devueltos son los de la petición, con un
+        user_id aleatorio: ninguno revela la cuenta real.
+        """
+        result = RegistrationResult(user_id=str(uuid.uuid4()), username=username, email=email)
+        result.account_id = str(account.id)
+
+        if account.is_deleted:
+            email_otp_crud.simulate_otp_check()
+            result.outcome = REGISTRATION_EXISTING_DELETED
+        elif account.is_verified:
+            email_otp_crud.simulate_otp_check()
+            (notify_existing or deliver_account_exists_email)(email)
+            result.outcome = REGISTRATION_EXISTING_VERIFIED
+        else:
+            send_verification_code(self.db, email, str(account.id), deliver=deliver)
+            result.outcome = REGISTRATION_EXISTING_UNVERIFIED
+        return result
+
     def create_user(
         self,
         username: str,
         email: str,
         password: str,
         deliver: Optional[Callable[[str, str], None]] = None,
-    ) -> Dict[str, Any]:
+        notify_existing: Optional[Callable[[str], None]] = None,
+    ) -> RegistrationResult:
         """
-        Crea un nuevo usuario en la base de datos.
+        Crea un nuevo usuario en la base de datos, o responde como si lo creara si el email ya
+        tiene cuenta (ver `_answer_for_existing_account`).
 
         El OTP se crea aquí y se entrega con `deliver(email, código)`; sin `deliver` se envía por
-        correo en el acto. Un endpoint async inyecta una función que lo encola en segundo plano
+        correo en el acto. El aviso «ya tienes una cuenta» se entrega con `notify_existing(email)`
+        con la misma regla. Un endpoint async inyecta funciones que lo encolan en segundo plano
         (el servicio no depende de FastAPI). El resultado nunca incluye el código.
+
+        Raises:
+            UsernameTakenError: el username es de otra cuenta (409 explícito).
         """
         from app.models.orm import User
 
@@ -61,41 +151,58 @@ class AuthService:
         username = SecurityUtils.sanitize_input(username)
         email = SecurityUtils.sanitize_email(email)
 
-        # Hash de contraseña
+        # Hash de contraseña (antes de consultar: todas las ramas pagan un bcrypt de contraseña)
         hashed_password = pwd_context.hash(password)
         user_id = str(uuid.uuid4())
         now = datetime.now(timezone.utc).replace(tzinfo=None)
 
         try:
-            # Crear usuario usando SQLAlchemy ORM
-            new_user = User(
-                id=user_id,
-                username=username,
-                email=email,
-                password_hash=hashed_password,
-                created_at=now,
-                updated_at=now,
-                is_verified=False,
-                is_deleted=False,
-                failed_login_attempts=0,
-            )
+            existing = self._find_existing_account(username, email)
 
-            self.db.add(new_user)
-            self.db.commit()
-            self.db.refresh(new_user)
+            if existing is None:
+                try:
+                    # Crear usuario usando SQLAlchemy ORM
+                    new_user = User(
+                        id=user_id,
+                        username=username,
+                        email=email,
+                        password_hash=hashed_password,
+                        created_at=now,
+                        updated_at=now,
+                        is_verified=False,
+                        is_deleted=False,
+                        failed_login_attempts=0,
+                    )
+
+                    self.db.add(new_user)
+                    self.db.commit()
+                    self.db.refresh(new_user)
+                except IntegrityError:
+                    # Carrera: otra petición dio de alta el email o el username entre la
+                    # consulta previa y el INSERT. Se resuelve con lo que hay ahora, igual que
+                    # en el camino lento (no depende del nombre de la restricción)
+                    self.db.rollback()
+                    existing = self._find_existing_account(username, email)
+                    if existing is None:
+                        raise AuthenticationError("El usuario o email ya existe")
+
+            if existing is not None:
+                return self._answer_for_existing_account(
+                    existing, username, email, deliver, notify_existing
+                )
 
             # Enviar código de verificación (usa CRUD ORM internamente)
             send_verification_code(self.db, email, user_id, deliver=deliver)
 
-            return {
-                "user_id": str(new_user.id),
-                "username": new_user.username,
-                "email": new_user.email,
-            }
+            result = RegistrationResult(
+                user_id=str(new_user.id), username=new_user.username, email=new_user.email
+            )
+            result.account_id = str(new_user.id)
+            return result
 
-        except IntegrityError:
+        except AuthenticationError:
             self.db.rollback()
-            raise AuthenticationError("El usuario o email ya existe")
+            raise
         except Exception as e:
             self.db.rollback()
             raise DatabaseError(f"Error al crear usuario: {str(e)}")

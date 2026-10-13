@@ -4,6 +4,8 @@ import { useTranslation } from 'react-i18next';
 import { useDropzone } from 'react-dropzone';
 import { Upload, FileText, Table, FileSpreadsheet, X, AlertCircle } from '../icons';
 import { mappingService } from '../../services/mapping_service';
+import type { ApiErrorResponse } from '../../services/api.service';
+import { getApiError } from '../../utils/apiError';
 import { toast } from '../../utils/toast';
 import styles from '../../styles/mapping/mapping.module.css';
 
@@ -20,7 +22,8 @@ export const ImportModal: React.FC<ImportModalProps> = ({
   projectId,
   onSuccess
 }) => {
-  const { t } = useTranslation(['mapping', 'common']);
+  const { t, i18n } = useTranslation(['mapping', 'common']);
+  const { t: tCommon } = useTranslation('common');
   const [selectedFormat, setSelectedFormat] = useState<'json' | 'csv' | 'excel'>('json');
   const [file, setFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -51,6 +54,18 @@ export const ImportModal: React.FC<ImportModalProps> = ({
     maxFiles: 1,
     maxSize: 15 * 1024 * 1024
   });
+
+  // Código conocido → traducción (con params: campo, ubicación...). Sin código pero con
+  // texto del servidor 4xx (tamaño, extensión, encriptación...) → ese texto. Resto → genérico.
+  const getImportErrorMessage = (error: unknown): string => {
+    const err = error as Partial<ApiErrorResponse>;
+    if (error instanceof TypeError) return tCommon('errors.network');
+    if (err?.code && i18n.exists(`common:errors.${err.code}`)) {
+      return getApiError(error, tCommon);
+    }
+    if (err?.status && err.status < 500 && err.message) return err.message;
+    return getApiError(error, tCommon);
+  };
 
   const handleImport = async () => {
     if (!file) {
@@ -84,7 +99,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
       handleClose();
     } catch (error: unknown) {
       console.error('Import error:', error);
-      toast.error(error instanceof Error ? error.message : t('common:errors.generic'));
+      toast.error(getImportErrorMessage(error));
     } finally {
       setIsUploading(false);
     }

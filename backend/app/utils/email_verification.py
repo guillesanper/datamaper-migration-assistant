@@ -95,6 +95,21 @@ def _build_verification_message(to_email: str, code: str) -> EmailMessage:
     return message
 
 
+def _build_account_exists_message(to_email: str) -> EmailMessage:
+    """Construye el aviso «ya tienes una cuenta»: sin código ni enlaces con secretos"""
+    message = EmailMessage()
+    message["Subject"] = "Ya tienes una cuenta en DataMap Assistant"
+    message["From"] = EMAIL_FROM
+    message["To"] = to_email
+    message.set_content(
+        "Alguien (quizá tú) ha intentado crear una cuenta con este email, pero ya tienes una.\n"
+        "Si has sido tú, inicia sesión con tus datos; si no recuerdas la contraseña, puedes "
+        "restablecerla desde la pantalla de acceso.\n"
+        "Si no has sido tú, ignora este mensaje: no se ha cambiado nada en tu cuenta."
+    )
+    return message
+
+
 def _send_message(message: EmailMessage) -> None:
     """
     Envía el mensaje por SMTP según la configuración del módulo.
@@ -179,6 +194,36 @@ def deliver_verification_email(to_email: str, code: str) -> None:
             )
         # No lanzar excepción para no interrumpir el registro
         # En producción, podrías querer manejar esto de manera diferente
+
+
+def deliver_account_exists_email(to_email: str) -> None:
+    """
+    Avisa por correo de que el email ya tiene una cuenta verificada; los errores no se propagan.
+
+    Es lo que recibe quien intenta registrarse con un email ya registrado: la respuesta de
+    register es la misma que la de un alta nueva y este correo es la única diferencia, que solo
+    ve el dueño del buzón. No recibe la sesión de BD y es bloqueante, igual que
+    `deliver_verification_email`: se ejecuta como tarea de fondo. No lleva ningún secreto, así
+    que no hay fallback de desarrollo; un fallo se registra con el email enmascarado.
+    """
+    try:
+        if not _smtp_is_configured():
+            logger.error(
+                "Configuración SMTP incompleta: no se entregó el aviso de cuenta existente a %s",
+                _mask_email(to_email),
+            )
+            return
+
+        _send_message(_build_account_exists_message(to_email))
+
+        logger.info("Aviso de cuenta existente enviado a %s", _mask_email(to_email))
+
+    except Exception as e:
+        logger.error(
+            "Error enviando el aviso de cuenta existente a %s: %s",
+            _mask_email(to_email),
+            _redact_delivery_error(e, to_email, ""),
+        )
 
 
 def send_verification_code(

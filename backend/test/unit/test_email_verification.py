@@ -878,3 +878,93 @@ class TestIssueAndDeliverSplit:
 
         deliver.assert_called_once_with(test_email, _OTP)
         mock_default.assert_not_called()
+
+
+# ============================================================================
+# CORREO «YA TIENES UNA CUENTA» (R3: register uniforme)
+# ============================================================================
+
+
+class TestAccountExistsNotice:
+    """
+    deliver_account_exists_email avisa a quien intentó registrarse con un email que ya tiene
+    cuenta verificada. Misma política que el código: sin BD, sin propagar errores y sin
+    email completo en los logs; además no lleva ningún secreto (ni código ni enlaces).
+    """
+
+    @pytest.fixture(autouse=True)
+    def _enable_module_logger(self, monkeypatch):
+        """Ver TestOtpNotLoggedOutsideDevelopment: el arnés deshabilita los loggers"""
+        monkeypatch.setattr(email_verification.logger, "disabled", False)
+
+    def _deliver(self, to_email, smtp_config, *, side_effect=None):
+        from app.utils.email_verification import deliver_account_exists_email
+
+        with ExitStack() as stack:
+            for name, value in smtp_config.items():
+                stack.enter_context(patch.object(email_verification, name, value))
+            mock_smtp = stack.enter_context(patch("app.utils.email_verification.smtplib.SMTP"))
+            connection = _configure_smtp_mock(mock_smtp)
+            if side_effect is not None:
+                mock_smtp.side_effect = side_effect
+            result = deliver_account_exists_email(to_email)
+        return result, connection
+
+    def test_takes_only_the_recipient(self):
+        """Es una tarea de fondo: ni sesión de BD ni código"""
+        import inspect
+
+        from app.utils.email_verification import deliver_account_exists_email
+
+        assert list(inspect.signature(deliver_account_exists_email).parameters) == ["to_email"]
+
+    def test_sends_a_notice_without_code_or_links(self, test_email):
+        result, connection = self._deliver(test_email, _FULL_SMTP)
+
+        assert result is None
+        connection.send_message.assert_called_once()
+        message = connection.send_message.call_args[0][0]
+        assert message["To"] == test_email
+        assert message["Subject"] == "Ya tienes una cuenta en DataMap Assistant"
+        content = message.get_content()
+        assert "http" not in content
+        assert "código de verificación" not in content.lower()
+
+    def test_does_not_use_the_verification_subject(self, test_email):
+        """El aviso no se confunde con un código (el frontend no debe pedirlo)"""
+        _, connection = self._deliver(test_email, _FULL_SMTP)
+
+        message = connection.send_message.call_args[0][0]
+        assert message["Subject"] != "Tu código de verificación"
+
+    @pytest.mark.parametrize("scenario", list(_UNDELIVERED_SCENARIOS))
+    @pytest.mark.parametrize("development", [True, False])
+    def test_failures_are_logged_with_a_masked_email_and_never_raised(
+        self, scenario, development, test_email, capsys, caplog
+    ):
+        caplog.set_level(logging.DEBUG)
+        side_effect = None
+        if scenario == "smtp_error":
+            side_effect = Exception("SMTP connection failed")
+        elif scenario == "smtp_error_echoes_message":
+            side_effect = Exception(f"550 rechazado {test_email}")
+
+        with patch.object(security_settings, "DEVELOPMENT_MODE", development):
+            result, _ = self._deliver(
+                test_email, _UNDELIVERED_SCENARIOS[scenario], side_effect=side_effect
+            )
+
+        assert result is None
+        errors = [r for r in caplog.records if r.levelno >= logging.ERROR]
+        assert errors, "el fallo de entrega debe quedar registrado"
+        logged = "\n".join(r.getMessage() for r in errors)
+        assert test_email not in logged
+        assert test_email not in capsys.readouterr().out
+        assert "@example.com" in logged
+
+    def test_success_logs_nothing_with_the_full_email(self, test_email, capsys, caplog):
+        caplog.set_level(logging.DEBUG)
+
+        self._deliver(test_email, _FULL_SMTP)
+
+        assert test_email not in capsys.readouterr().out + caplog.text

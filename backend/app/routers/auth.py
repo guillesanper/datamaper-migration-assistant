@@ -19,9 +19,19 @@ from app.middleware.rate_limiting import (
     record_failure,
 )
 from app.routers.dependencies import get_current_user, get_current_user_optional
-from app.services.auth_service import AuthenticationError, AuthService, DatabaseError
+from app.services.auth_service import (
+    REGISTRATION_CREATED,
+    AuthenticationError,
+    AuthService,
+    DatabaseError,
+    UsernameTakenError,
+)
 from app.utils.cookies import SESSION_COOKIE_CONFIG, get_session_token_hash, sign_cookie
-from app.utils.email_verification import deliver_verification_email, send_verification_code
+from app.utils.email_verification import (
+    deliver_account_exists_email,
+    deliver_verification_email,
+    send_verification_code,
+)
 from app.utils.security import SecurityUtils
 from app.utils.security_logger import (
     SecurityLogger,
@@ -174,6 +184,17 @@ def deliver_in_background(background_tasks: BackgroundTasks) -> Callable[[str, s
     return deliver
 
 
+def notify_account_exists_in_background(
+    background_tasks: BackgroundTasks,
+) -> Callable[[str], None]:
+    """Entrega del aviso «ya tienes una cuenta» después de responder (misma regla que el código)"""
+
+    def notify(to_email: str) -> None:
+        background_tasks.add_task(deliver_account_exists_email, to_email)
+
+    return notify
+
+
 # Endpoints
 
 
@@ -185,9 +206,21 @@ async def register(
     background_tasks: BackgroundTasks,
     db=Depends(get_db),
 ):
-    """Registro de nuevo usuario"""
+    """
+    Registro de nuevo usuario.
+
+    Responde 201 con el mismo cuerpo exista o no una cuenta con ese email (verificada, sin
+    verificar o borrada): quien ya la tiene recibe un correo distinto, no una respuesta
+    distinta. El único 409 explícito es el de un username ocupado, con independencia del email.
+    """
 
     auth_service = AuthService(db)
+
+    # Además de por IP, por cuenta: quien reparte las peticiones entre IPs no puede llenar de
+    # correos (código o aviso) a una víctima. Cuenta el email pedido exista o no, así que el 429
+    # no revela nada. Va antes del try (el 429 no debe acabar en el except general)
+    email = SecurityUtils.sanitize_email(data.email)
+    await enforce_rate_limit(request, *REGISTER_LIMIT, account=email)
 
     try:
         # En el threadpool: bcrypt y las consultas síncronas no deben bloquear el event loop
@@ -197,14 +230,29 @@ async def register(
             email=data.email,
             password=data.password,
             deliver=deliver_in_background(background_tasks),
+            notify_existing=notify_account_exists_in_background(background_tasks),
         )
 
-        await log_registration_success(
-            request, result["username"], result["email"], result["user_id"]
-        )
+        outcome = getattr(result, "outcome", REGISTRATION_CREATED)
+        if outcome == REGISTRATION_CREATED:
+            await log_registration_success(
+                request, result["username"], result["email"], result["user_id"]
+            )
+        else:
+            # El motivo real solo va al log. El user_id de la respuesta es aleatorio (no
+            # cumpliría la FK de security_logs): se registra el de la cuenta real
+            await SecurityLogger.log_event(
+                event_type="registration_duplicate_email",
+                request=request,
+                username=result["username"],
+                user_id=result.account_id,
+                details={"email_attempted": result["email"], "reason": outcome},
+                severity="info",
+                endpoint="/register",
+            )
 
         return create_success_response(
-            message="Usuario registrado exitosamente", data=result, status_code=201
+            message="Usuario registrado exitosamente", data=dict(result), status_code=201
         )
 
     except ValueError as e:
@@ -212,6 +260,10 @@ async def register(
             request, data.username, data.email, f"weak_password: {str(e)}"
         )
         return create_error_response(message=str(e), error_code="weak_password", status_code=400)
+
+    except UsernameTakenError as e:
+        await log_registration_failed(request, data.username, data.email, "username_taken")
+        return create_error_response(message=str(e), error_code="username_taken", status_code=409)
 
     except AuthenticationError as e:
         await log_registration_failed(request, data.username, data.email, str(e))

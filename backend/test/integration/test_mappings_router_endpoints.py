@@ -430,6 +430,67 @@ class TestImportStructure:
         )
         assert r.status_code == 400, r.text
 
+    def _schema_error(self, client, project_id, mutate):
+        """Importa IMPORT_TABLES tras mutarlo y devuelve el `detail` estructurado del 400."""
+        tables = json.loads(json.dumps(IMPORT_TABLES))
+        mutate(tables)
+        r = self._post(client, project_id, tables=tables)
+        assert r.status_code == 400, r.text
+        detail = r.json()["detail"]
+        assert isinstance(detail, dict), detail
+        return detail
+
+    def test_import_schema_missing_field_reports_field_and_location(
+        self, authenticated_client, test_project
+    ):
+        detail = self._schema_error(
+            authenticated_client,
+            test_project["id"],
+            lambda t: t[0]["columns"][1].pop("is_primary"),
+        )
+        assert detail["code"] == "mapping.import_missing_field"
+        assert detail["params"]["field"] == "is_primary"
+        assert detail["params"]["where"] == 'tables[0] ("orders") › columns[1] ("total")'
+
+    def test_import_schema_unknown_field_reports_field_and_location(
+        self, authenticated_client, test_project
+    ):
+        detail = self._schema_error(
+            authenticated_client,
+            test_project["id"],
+            lambda t: t[1]["columns"][0].update(length=10),
+        )
+        assert detail["code"] == "mapping.import_unknown_field"
+        assert detail["params"]["field"] == "length"
+        assert detail["params"]["where"] == 'tables[1] ("orders_dest") › columns[0] ("order_id")'
+
+    def test_import_schema_invalid_value_lists_allowed_values(
+        self, authenticated_client, test_project
+    ):
+        detail = self._schema_error(
+            authenticated_client,
+            test_project["id"],
+            lambda t: t[0]["columns"][0].update(type="VARCHAR"),
+        )
+        assert detail["code"] == "mapping.import_invalid_value"
+        params = detail["params"]
+        assert params["field"] == "type"
+        assert params["value"] == "VARCHAR"
+        assert "INTEGER" in params["allowed"]
+        assert params["where"] == 'tables[0] ("orders") › columns[0] ("id")'
+
+    def test_import_schema_other_violation_falls_back_to_generic_code(
+        self, authenticated_client, test_project
+    ):
+        detail = self._schema_error(
+            authenticated_client,
+            test_project["id"],
+            lambda t: t[0].update(columns=[]),
+        )
+        assert detail["code"] == "mapping.import_schema_invalid"
+        assert detail["params"]["where"] == 'tables[0] ("orders") › columns'
+        assert detail["params"]["reason"]
+
     def test_import_unknown_project_returns_404(self, authenticated_client):
         r = self._post(authenticated_client, uuid.uuid4())
         assert r.status_code == 404, r.text

@@ -286,3 +286,24 @@ Resultado: `17 failed, 1801 passed, 1 skipped, 31 errors` (1850 tests). Frente a
 
 El generador se validó antes de usarlo: sobre el `baseline_after.xml` anterior reproduce
 `baseline_after_passed.txt` y `baseline_after_summary.txt` byte a byte.
+
+## `register` responde igual exista o no la cuenta (R3 de la mitigación de riesgos abiertos)
+
+`baseline_after.xml`, `baseline_after_passed.txt` y `baseline_after_summary.txt` se regeneraron con la
+misma suite y arnés sobre el código en el que `POST /api/auth/register` devuelve el mismo 201 para un
+email nuevo, de una cuenta verificada, sin verificar o borrada (verificada: aviso «Ya tienes una cuenta»;
+sin verificar: código nuevo; borrada: nada), con 409 `username_taken` para un username ocupado, resolución
+de carreras por `IntegrityError` y un contador por email (`enforce_rate_limit(..., account=email)`).
+
+Resultado: `17 failed, 1869 passed, 1 skipped, 31 errors` (1918 tests). Frente a la línea base anterior (1801 pasados):
+
+- **1 test que pasaba y deja de existir, a propósito**: `test_auth_uniform_responses_api::test_register_still_answers_409_for_an_existing_email`
+  fijaba el 409 por email (el riesgo residual que R3 cierra); lo sustituye `test_register_answers_201_for_an_existing_email`
+  (mismo escenario, aserción 201). El resto de `comm -23` está vacío.
+- **+69 nombres nuevos** (68 tests nuevos y el sustituto): `test_auth_register_uniform_api.py` (50),
+  `test_email_verification.py::TestAccountExistsNotice` (14), `test_auth_rate_limits_api.py` (4: contador por
+  email de `register`) y `test_auth_uniform_responses_api.py` (1, el sustituto).
+- Los mismos 48 fallos/errores ajenos, uno a uno y con el mismo mensaje (el resumen solo cambia en la cabecera).
+
+El generador se validó antes de usarlo: sobre el `baseline_after.xml` anterior reproduce
+`baseline_after_passed.txt` y `baseline_after_summary.txt` byte a byte.

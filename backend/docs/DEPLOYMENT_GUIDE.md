@@ -320,6 +320,7 @@ docker-compose up -d
 ```
 
 - Un reenvío (`POST /api/auth/resend-code`) **sustituye** al código anterior y le da otra tanda de intentos; `verify-code` consume el código. `resend-code` solo envía a cuentas **sin verificar**: a una cuenta ya verificada (o inexistente) responde igual y no manda nada.
+- Reintentar `POST /api/auth/register` con el email de una cuenta **sin verificar** también emite un código nuevo (201 con el mismo cuerpo que un alta); con el de una cuenta **verificada** no llega ningún código, sino el aviso «Ya tienes una cuenta en DataMap Assistant» (ver [Respuestas uniformes](#respuestas-uniformes)).
 - El código del reset (`POST /api/auth/reset`) se pide con `POST /api/auth/forgot` (solo cuentas verificadas). Respuestas, límites y variables: [Autenticación: límites, intentos y respuestas](#autenticación-límites-intentos-y-respuestas).
 - API de Mailpit (útil en scripts): `curl http://localhost:8025/api/v1/messages`.
 
@@ -594,7 +595,7 @@ SMTP_USE_STARTTLS=true
   - `Configuración SMTP incompleta: no se entregó el código de verificación a u***@dominio`
 
   Cualquiera de las dos líneas en producción es un fallo de configuración o del proveedor: busca esas cadenas en el log. La salida correcta es `Email de verificación enviado exitosamente a <email>`. Solo con `ENV=development` el fallo conserva el comportamiento de desarrollo (`Error enviando email: …` + `Código de verificación para <email>: <código>` en la consola).
-- El envío es **asíncrono respecto a la petición**: `register` y `resend-code` crean el OTP, responden y entregan el correo después (tarea de fondo, en un hilo, sin sesión de BD). Con el SMTP caído o lento la respuesta no espera y el resto de peticiones no se bloquean; el fallo solo aparece en el log (las dos líneas de arriba). Consecuencias: la respuesta 201/200 **no garantiza** que el correo haya salido, y si el proceso se reinicia entre la respuesta y el envío, ese correo se pierde (no hay cola persistente: el usuario puede pedir otro código con reenviar). Además, si `create_otp_orm` falla después de confirmar el usuario, la cuenta queda creada sin código (se resuelve con `resend-code`).
+- El envío es **asíncrono respecto a la petición**: `register` y `resend-code` crean el OTP, responden y entregan el correo después (tarea de fondo, en un hilo, sin sesión de BD). Con el SMTP caído o lento la respuesta no espera y el resto de peticiones no se bloquean; el fallo solo aparece en el log (las dos líneas de arriba). Consecuencias: la respuesta 201/200 **no garantiza** que el correo haya salido, y si el proceso se reinicia entre la respuesta y el envío, ese correo se pierde (no hay cola persistente: el usuario puede pedir otro código con reenviar). Además, si `create_otp_orm` falla después de confirmar el usuario, la cuenta queda creada sin código (se resuelve con `resend-code` o reintentando `register` con el mismo email, que emite uno nuevo).
 
 ### Autenticación: límites, intentos y respuestas
 
@@ -614,14 +615,14 @@ Límites por defecto (`POST /api/auth/...`; cada ruta tiene su propio contador p
 | Ruta | Variables | Máximo / ventana | Además, por cuenta |
 |------|-----------|------------------|--------------------|
 | `login` | `RATE_LIMIT_LOGIN_*` | 5 **fallos** / 900 s | no (la cuenta tiene su propio bloqueo) |
-| `register` | `RATE_LIMIT_REGISTER_*` | 3 / 3600 s | no |
+| `register` | `RATE_LIMIT_REGISTER_*` | 3 / 3600 s | sí, por email (mismo límite) |
 | `verify-code` | `RATE_LIMIT_VERIFY_*` | 10 / 3600 s | no |
 | `resend-code` | `RATE_LIMIT_RESEND_*` | 3 / 600 s | sí, por email (mismo límite) |
 | `reset` | `RATE_LIMIT_RESET_*` | 5 / 3600 s | no |
 | `forgot` | `RATE_LIMIT_FORGOT_*` | 3 / 3600 s | sí, por email (mismo límite) |
 
 - Al superar el límite: **429** con `Retry-After` (segundos hasta que termina el bloqueo, mínimo 1) y `detail.code = rate_limit.exceeded`. El bloqueo dura una ventana.
-- El contador por cuenta (`resend-code`, `forgot`) cuenta el email pedido, exista o no, con un identificador `acct:` + sha256 con sal (`IP_HASH_SALT`); no guarda el email en claro. Efecto secundario: tres peticiones con el email de otra persona bastan para que esa persona no pueda pedir un reenvío durante la ventana.
+- El contador por cuenta (`register`, `resend-code`, `forgot`) cuenta el email pedido, exista o no, con un identificador `acct:` + sha256 con sal (`IP_HASH_SALT`); no guarda el email en claro. Efecto secundario: tres peticiones con el email de otra persona bastan para que esa persona no pueda pedir un reenvío (o registrarse) durante la ventana.
 - El límite de `login` cuenta **solo los fallos**: usuario inexistente o contraseña errónea (los `401 invalid_credentials`). Los logins correctos no gastan cupo ni reinician el contador, así que una IP compartida (campus, oficina) puede iniciar sesión tantas veces como haga falta; los fallos de todos sus usuarios suman. El fallo número `RATE_LIMIT_LOGIN_ATTEMPTS` (5) ya bloquea la IP la ventana completa: la siguiente petición, **aunque lleve la contraseña correcta**, recibe 429 con `Retry-After` (la comprobación va antes de autenticar, sin gastar bcrypt).
   - El `423 account_locked` (el bloqueo de cuenta se comprueba **antes** de la contraseña) y el `403 email_not_verified` (solo ocurre con la contraseña **acertada**) no cuentan: no son intentos de adivinarla. Un atacante que solo reciba 423 o 403 no avanza en ningún sentido (no hay contraseña que probar contra una cuenta bloqueada, y el 403 ya es una contraseña correcta). La contrapartida: esas respuestas, y los logins correctos, ya no tienen techo por IP; cada uno de los que llegan a comprobar la contraseña (200 y 403) gasta un bcrypt. Quien tenga una cuenta propia puede pedir logins sin límite desde su IP; el techo es la capacidad del servidor (sin medir), no un contador.
   - La comprobación (al entrar) y el registro del fallo (al terminar) son dos operaciones distintas y el contador no es atómico (lee, suma y escribe): varias peticiones concurrentes de una misma IP pueden pasar la comprobación antes de que se anote el fallo que bloquea, así que el cupo real puede excederse en tantos intentos como peticiones simultáneas. Límite conocido; la atomicidad del contador es el riesgo 6 de los riesgos abiertos.
@@ -669,6 +670,8 @@ Cada OTP admite `OTP_MAX_ATTEMPTS` comprobaciones erróneas (5). El intento se r
 |------|-----------|-------------|
 | `verify-code` | **400** `Código inválido o expirado` (`verification_failed`) ante cuenta inexistente, borrada, ya verificada, OTP ausente, caducado o erróneo | `security_logs.event_type = email_verification_failed`, `details.failure_reason` |
 | `reset` | **400** `Código inválido o expirado` (`reset_failed`), mismos casos | `password_reset_reset_failed`, `details.failure_reason` |
+| `register` | **201** `Usuario registrado exitosamente` con las mismas claves (`user_id`, `username`, `email`) tanto para un email nuevo como para uno con cuenta verificada, sin verificar o borrada. En las ramas «existente» `user_id` es aleatorio y `username`/`email` son los de la petición. Cambia solo el correo: verificada → aviso «Ya tienes una cuenta» (sin código); sin verificar → código nuevo; borrada → nada | `registration_duplicate_email`, `details.reason` (`account_already_verified` / `account_unverified_reissued` / `account_deleted`) |
+| `register` con un username ocupado | **409** `username_taken` con independencia de que el email exista | `registration_failed`, `details.failure_reason = username_taken` |
 | `resend-code` | **200** `Código reenviado correctamente` exista o no la cuenta; solo envía a cuentas existentes, no borradas y **sin verificar** | `resend_code_ignored`, `details.reason` (`user_not_found` / `account_already_verified`) |
 | `forgot` | **200** `Si la cuenta existe y está verificada, recibirás un código en tu correo`; solo emite a cuentas existentes, verificadas y no borradas | `password_reset_request_failed`, `details.failure_reason` |
 | `login` con la cuenta bloqueada | **423** `account_locked` | `login_failed`, `details.failure_reason` |
@@ -679,9 +682,19 @@ Para ver por qué falló una petición concreta:
 SELECT created_at, event_type, details->>'failure_reason' AS motivo, details->>'reason' AS reason
 FROM security_logs
 WHERE event_type IN ('email_verification_failed', 'password_reset_reset_failed',
-                     'password_reset_request_failed', 'resend_code_ignored')
+                     'password_reset_request_failed', 'resend_code_ignored',
+                     'registration_duplicate_email', 'registration_failed')
 ORDER BY created_at DESC LIMIT 20;
 ```
+
+**`register` en detalle** (el 409 por email desaparece):
+
+- Orden de comprobaciones: primero el username y después el email. Si el username es de **otra** cuenta (viva o borrada) que la del email, o el email no existe, la respuesta es el 409 `username_taken` aunque el email exista; si el username es libre (o de la misma cuenta), el email existente da el 201 uniforme. Así elegir un username ocupado no sirve para preguntar por emails: `(username_ocupado, X)` da siempre 409 y `(username_libre, X)` da siempre 201.
+- Una cuenta **sin verificar** reintenta el alta con sus mismos datos (lo normal tras perder el correo) y recibe un código nuevo: el anterior deja de valer, `failed_attempts` vuelve a 0 y no se cambia ni la contraseña ni el username guardados. Esto repara también una cuenta que se quedó sin código (riesgo 5).
+- Una cuenta **borrada** (`is_deleted`) sigue ocupando su email y su username (los índices únicos `ix_users_email` / `ix_users_username` cubren también las filas borradas): su email recibe el 201 uniforme sin intentar el `INSERT` y **sin ningún correo** (el aviso «inicia sesión» sería falso), y su username da 409. Efecto: ese email no puede volver a registrarse y el interesado no recibe ninguna explicación. La aplicación no borra cuentas (`is_deleted` solo lo fija un proceso externo), así que hoy no se da.
+- Carreras: si otra petición da de alta el email o el username entre la consulta previa y el `INSERT`, el `IntegrityError` se resuelve volviendo a consultar y aplicando las mismas reglas (no depende del nombre de la restricción).
+- Contador por email: `register` cuenta además por email (3 / 3600 s, el mismo límite), exista o no la cuenta, para que nadie llene de correos a una víctima. Efecto: tres peticiones con el email de otra persona le impiden registrarse durante la ventana.
+- El tiempo de respuesta es de **mejor esfuerzo**: todas las ramas pagan el bcrypt de la contraseña y la rama «existente verificada» gasta además `simulate_otp_check` donde el alta nueva emite el OTP. No se ha medido ni se promete la igualdad.
 
 `POST /api/auth/forgot` existe solo como API: el frontend no tiene pantalla de recuperación (`Login.tsx` enlaza a `/forgot-password`, que no tiene ruta).
 
@@ -697,7 +710,9 @@ Añade `email_otps.failed_attempts INTEGER NOT NULL DEFAULT 0`: aditiva y revers
 
 #### Riesgos residuales (decisiones explícitas, no defectos pendientes de arreglar en esta fase)
 
-- **El 409 de `register` permite enumerar cuentas.** Solo lo frena el límite de `register` (3 por hora y por IP). Es una decisión: la alternativa rompe el alta.
+- **`register` ya no enumera emails, pero sí usernames.** El 409 `username_taken` confirma que un username existe (cuenta viva o borrada); es la única respuesta que distingue, porque uniformarla rompería el alta. Lo frenan el límite por IP (3 por hora) y el contador por email.
+- **Residuo del orden de comprobaciones.** `(username_de_A, email_de_A)` da 201 y `(username_de_A, otro_email)` da 409: quien conozca un username puede confirmar si un email concreto es el de esa cuenta. Es el precio de que una cuenta sin verificar pueda reintentar el alta con sus mismos datos; la alternativa (409 también para el mismo par) rompe el reenvío al reintentar.
+- **Pre-secuestro de una cuenta sin verificar (decisión pendiente).** Quien registra el email de otra persona antes que ella fija la contraseña y el username de esa cuenta sin verificar; si la persona se registra después, el reintento no cambia nada guardado, recibe un código nuevo, lo verifica (`verify-code` abre sesión) y queda dentro de una cuenta cuya contraseña conoce otro. Antes de R3 el reintento recibía 409 y no había nada que verificar. Requiere que la víctima se registre después y verifique; el atacante no puede verificar por su cuenta (no ve el correo). Opciones: sobrescribir contraseña y username en el reintento de una cuenta sin verificar (gana el último registro) o no abrir sesión al verificar tras un reintento. No se ha aplicado ninguna: el diseño de R3 pedía conservar la contraseña guardada.
 - **La igualación de tiempos es de mejor esfuerzo.** Los caminos «sin cuenta» gastan un bcrypt simulado (`simulate_otp_check`). Medido (n=7, contenedor de test): sin él 20–30 ms frente a 310–440 ms; con él 310–410 ms con rangos solapados. No es una garantía: no se descartan diferencias de decenas de ms ni se midió con carga o por red.
 - **El 201 de `register` no garantiza que el correo salga** (entrega en segundo plano, sin cola persistente; ver arriba).
 - **Frontend (sin cambios en esta fase)**: la UI muestra el `message` del servidor, así que `VerifyEmail` mostrará «Código inválido o expirado» donde antes decía «Usuario no encontrado» o «Email ya verificado»; `resend-code` da éxito aunque no envíe nada (cuenta inexistente o ya verificada); y el 429 se lee de `detail.code` (`rate_limit.exceeded`, locales `es`/`en`) sin usar `Retry-After`.

@@ -615,11 +615,11 @@ def test_verify_otp_without_a_stored_code_spends_an_otp_check(db_session, create
 
 
 # ============================================================================
-# register no cambia (riesgo residual documentado)
+# register: el 409 por email desaparece (R3; el detalle en test_auth_register_uniform_api.py)
 # ============================================================================
 
 
-def test_register_still_answers_409_for_an_existing_email(client, db_session, created_emails):
+def test_register_answers_201_for_an_existing_email(client, db_session, created_emails):
     existing = _make_user(db_session, created_emails, verified=True)
 
     response = client.post(
@@ -632,4 +632,4 @@ def test_register_still_answers_409_for_an_existing_email(client, db_session, cr
         },
     )
 
-    assert response.status_code == 409
+    assert response.status_code == 201

@@ -4,7 +4,8 @@ Tests de integración: límites de las rutas de autenticación e intentos por c�
 
 - login, register, verify-code, resend-code y reset responden 429 con `Retry-After` al
   superar su regla por IP (hoy solo resend-code y reset llevan decorador, y lo ignoran).
-- resend-code además cuenta por email: varias IPs no pueden mandar correos a una víctima.
+- resend-code y register además cuentan por email: varias IPs no pueden mandar correos a una
+  víctima (en register, el código o el aviso «ya tienes una cuenta»).
 - Falsificar X-Forwarded-For no cambia el contador (TRUSTED_PROXY_HOPS=0); con un salto de
   confianza decide la última entrada.
 - Un OTP admite OTP_MAX_ATTEMPTS fallos: después el código correcto tampoco vale; el
@@ -698,3 +699,74 @@ def test_other_routes_still_count_every_request(client, production_mode, trusted
 
     assert 429 not in statuses[:limit]
     assert statuses[limit] == 429
+
+
+# ============================================================================
+# Límite por cuenta (register)
+# ============================================================================
+
+
+def _register_as(http, email: str, headers=None):
+    return http.post(
+        "/api/auth/register", json={**_register_body(), "email": email}, headers=headers or {}
+    )
+
+
+def test_register_is_limited_per_email_across_ips(
+    client, production_mode, trusted_hops, register_fails_fast
+):
+    """Quien reparte las peticiones entre IPs no puede llenar de correos a una víctima"""
+    trusted_hops(1)
+    proxy = _http(_ip())
+    victim = f"victim_{_tag()}@example.com"
+    limit = security_settings.RATE_LIMIT_REGISTER_ATTEMPTS
+
+    for _ in range(limit):
+        assert _register_as(proxy, victim, {"X-Forwarded-For": _ip()}).status_code != 429
+
+    blocked = _register_as(proxy, victim, {"X-Forwarded-For": _ip()})
+    bystander = _register_as(proxy, f"bystander_{_tag()}@example.com", {"X-Forwarded-For": _ip()})
+
+    assert blocked.status_code == 429
+    assert int(blocked.headers["Retry-After"]) > 0
+    assert blocked.json()["detail"] == make_error(ErrorCode.RATE_LIMIT_EXCEEDED)
+    assert bystander.status_code != 429
+
+
+def test_register_email_counter_ignores_case(
+    client, production_mode, trusted_hops, register_fails_fast
+):
+    trusted_hops(1)
+    proxy = _http(_ip())
+    local = f"victim_{_tag()}"
+    limit = security_settings.RATE_LIMIT_REGISTER_ATTEMPTS
+
+    for i in range(limit):
+        variant = local.upper() if i % 2 else local
+        _register_as(proxy, f"{variant}@example.com", {"X-Forwarded-For": _ip()})
+    response = _register_as(proxy, f"{local}@Example.com", {"X-Forwarded-For": _ip()})
+
+    assert response.status_code == 429
+
+
+@pytest.mark.parametrize("kind", ["existing", "unknown"])
+def test_register_email_counter_does_not_tell_existing_from_unknown_accounts(
+    kind, client, production_mode, trusted_hops, make_user, created_emails
+):
+    """El contador cuenta el email pedido exista o no: el 429 llega en la misma petición"""
+    trusted_hops(1)
+    proxy = _http(_ip())
+    if kind == "existing":
+        email = make_user(verified=True)["email"]
+    else:
+        email = f"unknown_{_tag()}@example.com"
+        created_emails.append(email)
+    limit = security_settings.RATE_LIMIT_REGISTER_ATTEMPTS
+
+    with patch("app.utils.email_verification._send_message"):
+        statuses = [
+            _register_as(proxy, email, {"X-Forwarded-For": _ip()}).status_code
+            for _ in range(limit + 1)
+        ]
+
+    assert statuses == [201] * limit + [429]
