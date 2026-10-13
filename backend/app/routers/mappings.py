@@ -147,6 +147,70 @@ def _fetch_one(db, sql: str, params: Optional[Dict[str, Any]] = None) -> Optiona
     return {k: _plain(v) for k, v in row.items()} if row else None
 
 
+def _describe_import_path(data: Any, path) -> str:
+    """Ubicación legible (neutral al idioma) de un error de esquema en el JSON importado.
+
+    Ej.: path ('tables', 0, 'columns', 2) -> 'tables[0] ("orders") › columns[2] ("id")'.
+    """
+    parts: List[str] = []
+    node = data
+    for key in path:
+        try:
+            node = node[key]
+        except (KeyError, IndexError, TypeError):
+            node = None
+        if isinstance(key, int):
+            label = f"[{key}]"
+            name = node.get("name") if isinstance(node, dict) else None
+            if isinstance(name, str) and name:
+                label += f' ("{name[:60]}")'
+            if parts:
+                parts[-1] += label
+            else:
+                parts.append(label)
+        else:
+            parts.append(str(key))
+    return " › ".join(parts) or "$"
+
+
+def _import_schema_error(ve: schema_exceptions.ValidationError, data: Any) -> Dict[str, Any]:
+    """Convierte un ValidationError de jsonschema en un error con código, para que el
+    frontend lo traduzca y le diga al usuario qué campo falla y dónde."""
+    path = list(ve.absolute_path)
+
+    if ve.validator == "required" and isinstance(ve.instance, dict):
+        missing = [f for f in ve.validator_value if f not in ve.instance]
+        return make_error(
+            ErrorCode.IMPORT_MISSING_FIELD,
+            field=", ".join(missing),
+            where=_describe_import_path(data, path),
+        )
+
+    if ve.validator == "additionalProperties" and isinstance(ve.instance, dict):
+        allowed = ve.schema.get("properties", {})
+        unknown = [str(k) for k in ve.instance if k not in allowed]
+        return make_error(
+            ErrorCode.IMPORT_UNKNOWN_FIELD,
+            field=", ".join(unknown),
+            where=_describe_import_path(data, path),
+        )
+
+    if ve.validator == "enum" and path and isinstance(path[-1], str):
+        return make_error(
+            ErrorCode.IMPORT_INVALID_VALUE,
+            field=path[-1],
+            where=_describe_import_path(data, path[:-1]),
+            value=str(ve.instance)[:60],
+            allowed=", ".join(str(v) for v in ve.validator_value),
+        )
+
+    return make_error(
+        ErrorCode.IMPORT_SCHEMA_INVALID,
+        where=_describe_import_path(data, path),
+        reason=ve.message[:200],
+    )
+
+
 class Step:
     def __init__(self, name):
         self.name, self.t = name, time.perf_counter()
@@ -2005,9 +2069,7 @@ async def import_structure(
                     schema = json.load(f)
                 Draft202012Validator(schema).validate(data)
             except schema_exceptions.ValidationError as ve:
-                raise HTTPException(
-                    status_code=400, detail=f"JSON no cumple el esquema: {ve.message}"
-                )
+                raise HTTPException(status_code=400, detail=_import_schema_error(ve, data))
             except FileNotFoundError:
                 print("[IMPORT][WARN] Schema JSON no encontrado en:", schema_path)
 
