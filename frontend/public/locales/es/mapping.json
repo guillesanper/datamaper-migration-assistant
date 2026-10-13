@@ -263,8 +263,14 @@
       "noFile": "Por favor selecciona un archivo"
     },
     "example": {
-      "excelHint": "Formato Excel con columnas: table_name | type | column_name | data_type",
-      "label": "Ejemplo de Formato"
+      "excelHint": "Excel (.xlsx / .xls): primera hoja, con las cabeceras en la fila 1. Cada fila describe una columna de una tabla.",
+      "hint": {
+        "both": "Origen y destino: cada tabla indica su lado en type (\"origin\" o \"destination\"), así que puedes mezclarlas en el mismo archivo.",
+        "destination": "Solo destino: todas las tablas del archivo deben tener type = \"destination\".",
+        "origin": "Solo origen: todas las tablas del archivo deben tener type = \"origin\"."
+      },
+      "label": "Ejemplo de Formato",
+      "required": "Todos los campos y cabeceras mostrados son obligatorios."
     },
     "file": {
       "dropHint": "Máximo 15MB • Formatos: JSON, CSV, Excel",
@@ -283,7 +289,7 @@
     },
     "importing": "Importando...",
     "info": {
-      "direction": "Asegúrate de especificar correctamente si es tabla de origen o destino",
+      "direction": "El campo type de cada tabla (origin o destination) decide en qué lado se importa",
       "duplicates": "Las tablas y columnas duplicadas serán ignoradas",
       "duplicatesReplace": "Las tablas duplicadas se eliminarán y recrearán con los datos del archivo. Sus mappings asociados también se eliminarán.",
       "title": "Información importante:",
@@ -304,9 +310,10 @@
     "success": "Importación exitosa: {{details}}",
     "title": "Importar Estructura de Tablas",
     "type": {
-      "both": "Ambos",
+      "both": "Origen y destino",
       "destOnly": "Solo Destino",
-      "label": "Tipo de Importación",
+      "hint": "Selecciona qué contiene tu archivo para ver el ejemplo adecuado. El lado de cada tabla se lee del propio archivo.",
+      "label": "Contenido del Archivo",
       "originOnly": "Solo Origen"
     }
   },
