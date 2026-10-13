@@ -243,3 +243,23 @@ los de P5 y son la línea base vigente: `17 failed, 1737 passed, 1 skipped, 31 e
 Resumen de la deuda de autenticación (P0–P6): `1576 passed` al empezar → `1737 passed` al terminar
 (+161 tests nuevos), con los mismos 48 fallos/errores ajenos (17 failed + 31 errors) y 0 tests que pasaban
 y dejan de pasar en ninguna fase.
+
+## Avisos de TRUSTED_PROXY_HOPS y variables de `.env.example` (R1 de la mitigación de riesgos abiertos)
+
+`baseline_after.xml`, `baseline_after_passed.txt` y `baseline_after_summary.txt` se regeneraron con la
+misma suite y arnés sobre el código en el que `get_client_ip` avisa (una vez por proceso, con IPs
+enmascaradas y sin cambiar la IP devuelta) cuando llega `X-Forwarded-For` con `TRUSTED_PROXY_HOPS=0`
+fuera de desarrollo, y `validate_security_config` avisa al arrancar con `RENDER=true` y 0 saltos o con
+`FORWARDED_ALLOW_IPS=*`. `.env.example` y la documentación no afectan a la suite.
+
+Resultado: `17 failed, 1778 passed, 1 skipped, 31 errors` (1827 tests). Frente a la línea base anterior (1737 pasados):
+
+- **0 tests que pasaban y fallan ahora** (`comm -23` de las listas de pasados: vacío).
+- **+41 pasados**, todos nuevos y de `test_security.py`: `TestProxyHeaderTripwire` (16: una vez por
+  proceso, IPs enmascaradas y sin la cabecera completa, ni con saltos de confianza, ni sin cabecera, ni
+  en desarrollo, y el valor devuelto no cambia), `TestMaskIp` (11) y `TestProxyStartupWarnings` (14).
+- `TestTrustedProxyHops`, `TestClientIPDetection` y `TestSmtpStartupWarning` pasan sin haberse tocado.
+- Los mismos 48 fallos/errores ajenos, uno a uno y con el mismo mensaje (el resumen solo cambia en la cabecera).
+
+El generador se validó antes de usarlo: sobre el `baseline_after.xml` anterior reproduce
+`baseline_after_passed.txt` y `baseline_after_summary.txt` byte a byte.

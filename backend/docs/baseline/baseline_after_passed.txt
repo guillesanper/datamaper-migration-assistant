@@ -1507,6 +1507,17 @@ test.unit.test_security.TestInputSanitization::test_sanitize_username_basic
 test.unit.test_security.TestInputSanitization::test_sanitize_username_empty
 test.unit.test_security.TestInputSanitization::test_sanitize_username_remove_special_chars
 test.unit.test_security.TestInputSanitization::test_sanitize_username_truncate
+test.unit.test_security.TestMaskIp::test_anything_else_is_fully_masked[1.2.3.4:8080]
+test.unit.test_security.TestMaskIp::test_anything_else_is_fully_masked[1.2.3]
+test.unit.test_security.TestMaskIp::test_anything_else_is_fully_masked[999.1.1.1]
+test.unit.test_security.TestMaskIp::test_anything_else_is_fully_masked[<script>1.2.3.4</script>]
+test.unit.test_security.TestMaskIp::test_anything_else_is_fully_masked[]
+test.unit.test_security.TestMaskIp::test_anything_else_is_fully_masked[unknown]
+test.unit.test_security.TestMaskIp::test_masks_valid_addresses[10.1.2.3-10.1.2.x]
+test.unit.test_security.TestMaskIp::test_masks_valid_addresses[2001:0db8:0000:0000:0000:0000:0000:0001-2001:db8::x]
+test.unit.test_security.TestMaskIp::test_masks_valid_addresses[2001:db8:85a3::8a2e:370:7334-2001:db8::x]
+test.unit.test_security.TestMaskIp::test_masks_valid_addresses[203.0.113.9-203.0.113.x]
+test.unit.test_security.TestMaskIp::test_masks_valid_addresses[::1-0:0::x]
 test.unit.test_security.TestPasswordStrengthValidation::test_validate_password_strength_common_pattern
 test.unit.test_security.TestPasswordStrengthValidation::test_validate_password_strength_long_password
 test.unit.test_security.TestPasswordStrengthValidation::test_validate_password_strength_no_digit
@@ -1515,6 +1526,36 @@ test.unit.test_security.TestPasswordStrengthValidation::test_validate_password_s
 test.unit.test_security.TestPasswordStrengthValidation::test_validate_password_strength_strong
 test.unit.test_security.TestPasswordStrengthValidation::test_validate_password_strength_too_short
 test.unit.test_security.TestPasswordStrengthValidation::test_validate_password_strength_with_special_chars
+test.unit.test_security.TestProxyHeaderTripwire::test_garbage_entries_are_not_logged
+test.unit.test_security.TestProxyHeaderTripwire::test_message_masks_ips_and_omits_the_header
+test.unit.test_security.TestProxyHeaderTripwire::test_no_warning_in_development
+test.unit.test_security.TestProxyHeaderTripwire::test_no_warning_with_empty_header[   ]
+test.unit.test_security.TestProxyHeaderTripwire::test_no_warning_with_empty_header[ , ,]
+test.unit.test_security.TestProxyHeaderTripwire::test_no_warning_with_empty_header[]
+test.unit.test_security.TestProxyHeaderTripwire::test_no_warning_with_trusted_hops[1]
+test.unit.test_security.TestProxyHeaderTripwire::test_no_warning_with_trusted_hops[2]
+test.unit.test_security.TestProxyHeaderTripwire::test_no_warning_without_header
+test.unit.test_security.TestProxyHeaderTripwire::test_process_flag_is_set_after_warning
+test.unit.test_security.TestProxyHeaderTripwire::test_returned_ip_is_unchanged_by_the_warning[0-9.9.9.9, 10.1.2.3-192.168.1.1]
+test.unit.test_security.TestProxyHeaderTripwire::test_returned_ip_is_unchanged_by_the_warning[0-None-192.168.1.1]
+test.unit.test_security.TestProxyHeaderTripwire::test_returned_ip_is_unchanged_by_the_warning[1-6.6.6.6, 203.0.113.9-203.0.113.9]
+test.unit.test_security.TestProxyHeaderTripwire::test_returned_ip_is_unchanged_by_the_warning[2-203.0.113.9-192.168.1.1]
+test.unit.test_security.TestProxyHeaderTripwire::test_single_entry_is_reported
+test.unit.test_security.TestProxyHeaderTripwire::test_warns_once_per_process
+test.unit.test_security.TestProxyStartupWarnings::test_no_warning_outside_render[0]
+test.unit.test_security.TestProxyStartupWarnings::test_no_warning_outside_render[None]
+test.unit.test_security.TestProxyStartupWarnings::test_no_warning_outside_render[]
+test.unit.test_security.TestProxyStartupWarnings::test_no_warning_outside_render[false]
+test.unit.test_security.TestProxyStartupWarnings::test_no_warning_with_hops_set
+test.unit.test_security.TestProxyStartupWarnings::test_no_warnings_in_development
+test.unit.test_security.TestProxyStartupWarnings::test_no_wildcard_warning_with_specific_ips[10.0.0.5, 10.0.0.6]
+test.unit.test_security.TestProxyStartupWarnings::test_no_wildcard_warning_with_specific_ips[127.0.0.1]
+test.unit.test_security.TestProxyStartupWarnings::test_no_wildcard_warning_with_specific_ips[]
+test.unit.test_security.TestProxyStartupWarnings::test_warns_on_render_with_zero_hops[ True ]
+test.unit.test_security.TestProxyStartupWarnings::test_warns_on_render_with_zero_hops[TRUE]
+test.unit.test_security.TestProxyStartupWarnings::test_warns_on_render_with_zero_hops[true]
+test.unit.test_security.TestProxyStartupWarnings::test_warns_when_forwarded_allow_ips_is_wildcard[ * ]
+test.unit.test_security.TestProxyStartupWarnings::test_warns_when_forwarded_allow_ips_is_wildcard[*]
 test.unit.test_security.TestSensitiveDataMasking::test_mask_sensitive_data_basic
 test.unit.test_security.TestSensitiveDataMasking::test_mask_sensitive_data_custom_mask_char
 test.unit.test_security.TestSensitiveDataMasking::test_mask_sensitive_data_custom_visible

@@ -634,7 +634,28 @@ Límites por defecto (`POST /api/auth/...`; cada ruta tiene su propio contador p
 - `0` (por defecto): la IP es la del socket y la cabecera se ignora.
 - `N > 0`: la IP es la entrada N-ésima **desde la derecha** de `X-Forwarded-For` (la que añadió el primer proxy de confianza; lo que hay a su izquierda lo escribe el cliente). Con menos entradas que `N`, o sin cabecera, se usa la IP del socket.
 
-> ⚠️ **Antes de desplegar.** `backend/render.yaml` **no** lo define. Con `0` detrás del proxy de Render todos los usuarios comparten IP, y los límites por IP pasan a ser del sitio entero: 5 logins en 15 minutos para todos. Pasos: (1) registrar la cabecera `X-Forwarded-For` de una petición real en staging; (2) contar cuántas entradas añaden proxies **de confianza** (un solo balanceador → `1`; con Cloudflare delante puede ser `2`: no comprobado); (3) fijarlo en el Dashboard (o en `render.yaml`); (4) comprobar que gunicorn/uvicorn no reescribe ya `request.client` a partir de `FORWARDED_ALLOW_IPS` (no revisado): si lo hiciera, el cálculo se aplicaría dos veces.
+> ⚠️ **Antes de desplegar.** `backend/render.yaml` **no** lo define y el valor correcto **no se ha medido**: todavía no hay despliegue en Render y Render no documenta la estructura de `X-Forwarded-For` que recibe la aplicación. Con `0` detrás del proxy de Render todos los usuarios comparten IP y los límites por IP pasan a ser del sitio entero (5 logins en 15 minutos para todos). El valor no se adivina: se calibra en el primer despliegue (procedimiento abajo) y, mientras tanto, la aplicación avisa de la configuración peligrosa.
+
+**Avisos de la aplicación** (solo fuera de desarrollo; ninguno cambia la IP que se usa ni el comportamiento):
+
+- **Al arrancar**: `TRUSTED_PROXY_HOPS=0 en Render: …` si `RENDER=true` y el valor es `0`, y `FORWARDED_ALLOW_IPS=*: …` si esa variable vale `*`. Render fija `RENDER=true` en todos sus servicios ([variables de entorno de Render](https://render.com/docs/environment-variables); no comprobado en un despliegue propio); fuera de Render el primer aviso no sale.
+- **En ejecución**: una línea de log de nivel `WARNING` que empieza por `TRUSTED_PROXY_HOPS=0 pero llegan peticiones con X-Forwarded-For` y sigue con `entradas=<n>`, `últimas=[<ip>, <ip>]` (las dos últimas entradas, enmascaradas: `203.0.113.x`, o `***` si no son una IP) y `socket=<ip>` (enmascarada). Sale **una vez por proceso**: con varios workers de gunicorn, una línea por worker. Nunca registra la cabecera completa ni IPs completas. Es a la vez la herramienta de calibración y un guardarraíl permanente (úsala como cadena de alerta de log).
+
+**Calibración en el primer despliegue** (procedimiento previsto; no se ha ejecutado):
+
+1. Despliega un servicio de staging con el mismo blueprint **sin** `TRUSTED_PROXY_HOPS`. Para que los límites por IP no bloqueen las pruebas mientras mides, sube temporalmente `RATE_LIMIT_LOGIN_ATTEMPTS`, `RATE_LIMIT_REGISTER_ATTEMPTS`, `RATE_LIMIT_VERIFY_ATTEMPTS`, `RATE_LIMIT_RESEND_ATTEMPTS`, `RATE_LIMIT_RESET_ATTEMPTS` y `RATE_LIMIT_FORGOT_ATTEMPTS` (solo en staging; se revierten en el paso 5).
+2. Con el servicio recién arrancado, haz **una** petición de autenticación desde una IP pública que conozcas, sin cabecera `X-Forwarded-For` propia (por ejemplo, un intento de login con credenciales falsas desde el frontend de staging) y lee la línea del log. Si la IP que aparece no es la tuya, la línea corresponde a otra petición (una comprobación de salud, por ejemplo): reinicia el servicio y repite. Si no aparece ninguna línea, la petición no llegó a `get_client_ip` (por ejemplo, rechazada antes por CSRF): repítela desde el frontend.
+3. Deduce el valor. Cada proxy de confianza añade una entrada con la IP del par que le habló, así que, con una petición sin cabecera propia, `entradas` es el número de proxies de confianza y tu IP es la entrada N-ésima desde la derecha. La línea solo muestra las dos últimas: con `entradas` mayor que 2 tu IP no aparece y hay que decidir con `entradas` y con lo que el proveedor documente. Las IPs a la derecha de la tuya son proxies del proveedor, no usuarios.
+4. Comprueba la deducción con una segunda IP distinta (otra red o el móvil): al fijar el valor, deben aparecer dos filas distintas en `security_rate_limits` (consulta del [Troubleshooting](#problema-429-rate_limitexceeded-en-el-login-de-varios-usuarios-a-la-vez-producción)) y no la IP de un proxy.
+5. Fija `TRUSTED_PROXY_HOPS` en el Dashboard y, después, en `render.yaml` con un comentario con la evidencia y la fecha; revierte los límites temporales del paso 1 y revisa `FORWARDED_ALLOW_IPS`.
+
+**Dirección peligrosa del valor.** Un valor **menor** que los saltos reales de confianza degrada a límites compartidos (molesto, no peligroso: `entries[-1]` es la IP de un proxy del proveedor, común a muchos usuarios). Un valor **mayor** hace que `entries[-N]` caiga en una entrada que escribe el cliente y es **suplantable**: con un solo proxy real y `TRUSTED_PROXY_HOPS=2`, el cliente envía `1.2.3.4`, el proxy añade la IP del cliente y `entries[-2]` es `1.2.3.4`. Regla: **ante la duda, quédate corto.**
+
+**`FORWARDED_ALLOW_IPS` y lo no medido.**
+
+- Leído en el código de uvicorn 0.35 (contenedor del backend), **no probado en Render**: `UvicornWorker` pasa a uvicorn el `forwarded_allow_ips` de gunicorn (por defecto `127.0.0.1`); si el par inmediato no está en esa lista, uvicorn no reescribe `request.client` a partir de `X-Forwarded-For`. Con `FORWARDED_ALLOW_IPS=*` se confiaría en cualquier cliente y `request.client` pasaría a ser la primera entrada de la cabecera, que escribe el cliente: no lo uses. `render.yaml` no define esta variable.
+- Si se listaran IPs concretas y uvicorn reescribiera `request.client`, la aplicación vería la IP real con `TRUSTED_PROXY_HOPS=0` y el aviso de ejecución podría salir igualmente (la cabecera sigue llegando): no medido, y las IPs de los proxies de Render no están documentadas.
+- No medido: la estructura de `X-Forwarded-For` en Render. Hilos de su comunidad sugieren que puede haber un CDN delante con cabeceras propias (`cf-connecting-ip`, `true-client-ip`), que esta aplicación **no** lee: si fuese el caso, solo cuenta `X-Forwarded-For`.
 
 #### Intentos por código (OTP)
 
@@ -780,7 +801,7 @@ docker-compose exec backend env | grep -E "^(SMTP_SERVER|SMTP_PORT|SMTP_USER|SMT
 
 **Síntomas**: usuarios distintos reciben `429` en `login`, `register` o `verify-code` casi a la vez, con `Retry-After` de minutos.
 
-**Causa habitual**: `TRUSTED_PROXY_HOPS` sin fijar (`0`) detrás del proxy: todos los usuarios llegan con la IP del proxy y comparten el contador por IP (ver [Autenticación](#autenticación-límites-intentos-y-respuestas)).
+**Causa habitual**: `TRUSTED_PROXY_HOPS` sin fijar (`0`) detrás del proxy: todos los usuarios llegan con la IP del proxy y comparten el contador por IP (ver [Autenticación](#autenticación-límites-intentos-y-respuestas)). El log lo avisa con la línea `TRUSTED_PROXY_HOPS=0 pero llegan peticiones con X-Forwarded-For` (ver el problema siguiente).
 
 **Diagnóstico**:
 ```sql
@@ -792,7 +813,15 @@ WHERE identifier NOT LIKE 'acct:%'
 ORDER BY request_count DESC LIMIT 10;
 ```
 
-**Solución**: fija `TRUSTED_PROXY_HOPS` según la cadena real de `X-Forwarded-For`. Si el 429 es de verdad de una sola IP (campus, oficina), sube `RATE_LIMIT_LOGIN_ATTEMPTS`: el límite de login cuenta todas las peticiones, no solo los fallos.
+**Solución**: calibra `TRUSTED_PROXY_HOPS` con el procedimiento de [`TRUSTED_PROXY_HOPS`](#trusted_proxy_hops). Si el 429 es de verdad de una sola IP (campus, oficina), sube `RATE_LIMIT_LOGIN_ATTEMPTS`: el límite de login cuenta todas las peticiones, no solo los fallos.
+
+### Problema: aviso `TRUSTED_PROXY_HOPS=0 pero llegan peticiones con X-Forwarded-For` en el log
+
+**Síntomas**: una línea `WARNING` como `TRUSTED_PROXY_HOPS=0 pero llegan peticiones con X-Forwarded-For: entradas=2, últimas=[198.51.100.x, 203.0.113.x], socket=10.0.0.x. …` (valores de ejemplo; una por worker de gunicorn), y/o al arrancar `TRUSTED_PROXY_HOPS=0 en Render: …` o `FORWARDED_ALLOW_IPS=*: …`.
+
+**Causa**: hay un proxy delante de la aplicación y `TRUSTED_PROXY_HOPS` no está fijado: la aplicación ignora la cabecera y usa la IP del socket, que es la del proxy; todos los usuarios comparten los contadores por IP (ver el problema anterior). En desarrollo (`ENV=development`) el aviso no sale.
+
+**Qué hacer**: calibra el valor con el procedimiento de [`TRUSTED_PROXY_HOPS`](#trusted_proxy_hops) (cuenta las entradas que añaden proxies **de confianza**; ante la duda, un valor menor). Para `FORWARDED_ALLOW_IPS=*`, sustituye el comodín por las IPs de los proxies de confianza o quita la variable.
 
 ### Problema: `verify-code` o `reset` responden siempre «Código inválido o expirado»
 

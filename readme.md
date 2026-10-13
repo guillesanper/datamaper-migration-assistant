@@ -301,7 +301,7 @@ Valores por defecto del código (todas opcionales; la tabla completa, la lectura
 | `TRUSTED_PROXY_HOPS` | `0` | Proxies de confianza delante de la app: IP del cliente = entrada N-ésima desde la derecha de `X-Forwarded-For` (con `0`, la IP del socket) |
 | `RATE_LIMIT_<RUTA>_ATTEMPTS` / `_WINDOW` (s) | `LOGIN` 5/900, `REGISTER` 3/3600, `VERIFY` 10/3600, `RESEND` 3/600, `RESET` 5/3600, `FORGOT` 3/3600 | Límite por IP y por ruta; `resend-code` y `forgot` cuentan además por email |
 
-> ⚠️ **Despliegue**: `TRUSTED_PROXY_HOPS` no está en `backend/render.yaml`. Con `0` detrás de un proxy todos los usuarios comparten IP y los límites por IP bloquean el sitio entero tras unos pocos logins: fíjalo tras comprobar `X-Forwarded-For` en staging.
+> ⚠️ **Despliegue**: `TRUSTED_PROXY_HOPS` no está en `backend/render.yaml` y su valor correcto **no se ha medido** (aún no hay despliegue). Con `0` detrás de un proxy todos los usuarios comparten IP y los límites por IP bloquean el sitio entero tras unos pocos logins. La aplicación lo avisa (al arrancar en Render con `0` y con una línea de log `TRUSTED_PROXY_HOPS=0 pero llegan peticiones con X-Forwarded-For`, enmascarada y una vez por worker) y esa línea sirve para calibrarlo: el procedimiento está en la [guía](backend/docs/DEPLOYMENT_GUIDE.md#trusted_proxy_hops). Ante la duda, un valor menor es lo seguro: uno mayor que los proxies reales permite suplantar la IP.
 
 Respuestas: `verify-code` y `reset` devuelven siempre `400 «Código inválido o expirado»`, y `resend-code` / `forgot` un `200` idéntico exista o no la cuenta (el motivo real queda en `security_logs`). Riesgo residual: el `409` de `register` sigue permitiendo comprobar si un email está registrado; solo lo frena el límite de `register` (3 por hora y por IP).
 

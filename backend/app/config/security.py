@@ -282,6 +282,23 @@ def validate_security_config():
             "SMTP_SERVER/EMAIL_FROM no configurados: los códigos de verificación no se entregarán"
         )
 
+    # Detrás del proxy de Render (que fija RENDER=true) con 0 saltos todos los usuarios comparten
+    # la IP del proxy: los límites por IP serían globales
+    on_render = os.getenv("RENDER", "").strip().lower() == "true"
+    if on_render and security_settings.TRUSTED_PROXY_HOPS == 0:
+        warnings.append(
+            "TRUSTED_PROXY_HOPS=0 en Render: todos los usuarios comparten IP y los límites por IP "
+            "serán globales (fija TRUSTED_PROXY_HOPS; ver backend/docs/DEPLOYMENT_GUIDE.md)"
+        )
+
+    # Con "*" uvicorn confía en cualquier cliente y reescribe request.client con la primera
+    # entrada de X-Forwarded-For, que escribe el cliente
+    if os.getenv("FORWARDED_ALLOW_IPS", "").strip() == "*":
+        warnings.append(
+            "FORWARDED_ALLOW_IPS=*: uvicorn confiaría en cualquier cliente y request.client "
+            "pasaría a ser suplantable (lista solo las IPs de los proxies de confianza)"
+        )
+
     # Validaciones de cifrado
     if security_settings.ENCRYPTION_ENABLED:
         # Validar Argon2id memory cost (mínimo 16 MiB, recomendado 64 MiB)
