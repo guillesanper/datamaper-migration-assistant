@@ -68,7 +68,7 @@ pytest==8.4.1
 pytest-asyncio==0.21.1
 pytest-cov==4.1.0
 pytest-xdist==3.6.1
-iniconfig==2.1.0
+iniconfig==2.3.1
 pluggy==1.6.0
 httpx==0.28.1
 fakeredis==2.32.1
