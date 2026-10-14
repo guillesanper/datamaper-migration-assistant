@@ -31,7 +31,7 @@
     "i18next": "^26.0.8",
     "i18next-browser-languagedetector": "^8.2.1",
     "i18next-http-backend": "^3.0.6",
-    "lucide-react": "^0.545.0",
+    "lucide-react": "^1.55.0",
     "motion": "^12.23.24",
     "papaparse": "^5.5.3",
     "react": "^19.1.1",
