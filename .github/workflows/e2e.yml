@@ -34,7 +34,7 @@ jobs:
           docker-compose -f docker-compose.test.yml exec -T redis redis-cli ping || true
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: 'pip'
