@@ -4,11 +4,15 @@ Robustez del limitador de base de datos (riesgo 6 de los riesgos abiertos, fase 
 - La E/S de BD del limitador (comprobar, contar, anotar fallos) corre en el threadpool:
   la sesión se abre, se usa y se cierra en el mismo hilo y el event loop no se bloquea
   mientras la BD tarda.
+- Si la BD falla, el limitador sigue permitiendo la petición (fail-open) pero deja un
+  logger.error con traza y una cadena estable (rate_limit_backend_unavailable), sin
+  el identificador entero y sin imprimir en stdout.
 
 Los tests de este fichero parchean el CRUD y la sesión: no escriben en la BD.
 """
 
 import asyncio
+import logging
 import threading
 import time
 import uuid
@@ -170,3 +174,114 @@ def test_event_loop_stays_responsive_while_the_database_is_slow(operation, fake_
     assert max(gaps) < 0.25
     # El latido se ha ejercido de verdad (la prueba no es vacía)
     assert len(gaps) > 10
+
+
+# ============================================================================
+# El fail-open deja rastro: logger.error con traza y nada en stdout
+# ============================================================================
+
+LOGGER_NAME = "app.middleware.rate_limiting"
+STABLE_MARK = "rate_limit_backend_unavailable"
+
+
+@pytest.fixture
+def limiter_log(caplog, monkeypatch):
+    """
+    Captura el logger del limitador a nivel ERROR
+
+    El conftest ejecuta `alembic upgrade head` en el proceso y fileConfig deja deshabilitados
+    los loggers ya creados: sin reactivarlo, los tests de ausencia pasarían en vacío.
+    """
+    logger = logging.getLogger(LOGGER_NAME)
+    monkeypatch.setattr(logger, "disabled", False)
+    caplog.set_level(logging.ERROR, logger=LOGGER_NAME)
+    return caplog
+
+
+@pytest.fixture
+def database_down():
+    with patch(
+        "app.middleware.rate_limiting.get_db_session",
+        side_effect=RuntimeError("conexion rechazada"),
+    ):
+        yield
+
+
+def _errors(caplog) -> list:
+    return [r for r in caplog.records if r.name == LOGGER_NAME and r.levelno == logging.ERROR]
+
+
+@pytest.mark.parametrize("operation", sorted(OPERATIONS))
+def test_database_failure_is_logged_at_error_level_with_the_traceback(
+    operation, limiter_log, database_down
+):
+    _crud_name, invoke = OPERATIONS[operation]
+
+    result = asyncio.run(invoke(_request()))
+
+    assert result["is_allowed"] is True  # fail-open: se conserva (disponibilidad)
+    records = _errors(limiter_log)
+    assert len(records) == 1
+    assert STABLE_MARK in records[0].getMessage()
+    # La traza viaja con el registro: sin ella, la causa no se puede diagnosticar
+    assert records[0].exc_info is not None
+    assert "conexion rechazada" in limiter_log.text
+
+
+@pytest.mark.parametrize("operation", sorted(OPERATIONS))
+def test_the_log_line_carries_the_operation_but_not_the_identifier(
+    operation, limiter_log, database_down
+):
+    from app.middleware.rate_limiting import _counter_target
+
+    _crud_name, invoke = OPERATIONS[operation]
+    request = _request("/api/auth/login")
+    identifier = _counter_target(request, None, RULE)[0]
+
+    asyncio.run(invoke(request))
+
+    message = _errors(limiter_log)[0].getMessage()
+    assert f"operation={operation}" in message
+    assert "/api/auth/login" in message
+    # El identificador es un hash de la IP: no se registra entero
+    assert identifier not in limiter_log.text
+    assert identifier[:12] not in limiter_log.text
+
+
+@pytest.mark.parametrize("operation", sorted(OPERATIONS))
+def test_database_failure_prints_nothing(operation, limiter_log, database_down, capsys):
+    _crud_name, invoke = OPERATIONS[operation]
+
+    asyncio.run(invoke(_request()))
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""
+
+
+def test_every_failed_request_leaves_one_error_line(limiter_log, database_down):
+    request = _request()
+
+    for _ in range(3):
+        asyncio.run(DatabaseRateLimiter.count_request(request, rule=RULE))
+
+    assert len(_errors(limiter_log)) == 3
+
+
+def test_a_crud_failure_is_logged_too(limiter_log, fake_session):
+    """El fallo puede venir del CRUD (no solo de la conexión): misma línea, misma traza"""
+    with patch("app.crud.rate_limit_crud.check_limit_orm", side_effect=RuntimeError("SQL roto")):
+        result = asyncio.run(DatabaseRateLimiter.count_request(_request(), rule=RULE))
+
+    assert result["is_allowed"] is True
+    records = _errors(limiter_log)
+    assert len(records) == 1
+    assert STABLE_MARK in records[0].getMessage()
+    assert "SQL roto" in limiter_log.text
+
+
+def test_a_healthy_request_logs_no_error(limiter_log, fake_session):
+    with patch("app.crud.rate_limit_crud.check_limit_orm", return_value=dict(ALLOWED)):
+        asyncio.run(DatabaseRateLimiter.count_request(_request(), rule=RULE))
+
+    assert _errors(limiter_log) == []

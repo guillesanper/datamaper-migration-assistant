@@ -6,6 +6,7 @@ Implementa control de límites de requests por IP y endpoint usando base de dato
 import asyncio
 import functools
 import hashlib
+import logging
 import math
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, Optional, Tuple
@@ -20,6 +21,8 @@ from app.utils.security import SecurityUtils
 
 get_db = get_db_session  # Alias para backward compatibility con tests
 from app.crud import rate_limit_crud
+
+logger = logging.getLogger(__name__)
 
 
 def _account_identifier(account: str) -> str:
@@ -76,6 +79,25 @@ def _in_session(operation: Callable[..., Any], **kwargs: Any) -> Dict[str, Any]:
         db.close()
 
 
+def _fail_open(operation: str, endpoint: str) -> Dict[str, Any]:
+    """
+    Resultado «permitido» cuando la BD del limitador falla, dejando rastro
+
+    Se conserva el fail-open (disponibilidad: una BD caída no debe bloquear el tráfico
+    legítimo), pero no en silencio: una línea ERROR con la traza y una cadena estable
+    (rate_limit_backend_unavailable) sobre la que alertar. Sin el identificador, que es un
+    hash de la IP o de la cuenta. Hay que llamarla dentro de un `except`.
+    """
+    logger.error(
+        "rate_limit_backend_unavailable operation=%s endpoint=%s: "
+        "la BD del limitador falla y se permite la petición (fail-open)",
+        operation,
+        endpoint,
+        exc_info=True,
+    )
+    return {"is_allowed": True, "is_blocked": False, "blocked_until": None}
+
+
 class DatabaseRateLimiter:
     """Rate limiter que usa base de datos para persistencia"""
 
@@ -121,10 +143,9 @@ class DatabaseRateLimiter:
                 block_duration_minutes=block_duration_minutes,
             )
 
-        except Exception as e:
-            print(f"Error en rate limiting: {e}")
+        except Exception:
             # Fail-open: permitir request si DB falla (evita bloquear tráfico legítimo)
-            return {"is_allowed": True, "is_blocked": False, "blocked_until": None}
+            return _fail_open("count", endpoint)
 
     @staticmethod
     async def check_rate_limit(
@@ -176,10 +197,9 @@ class DatabaseRateLimiter:
                 endpoint=endpoint,
             )
 
-        except Exception as e:
-            print(f"Error en rate limiting: {e}")
+        except Exception:
             # Fail-open: igual que count_request
-            return {"is_allowed": True, "is_blocked": False, "blocked_until": None}
+            return _fail_open("peek", endpoint)
 
     @staticmethod
     async def count_failure(
@@ -218,9 +238,8 @@ class DatabaseRateLimiter:
                 block_duration_minutes=block_minutes,
             )
 
-        except Exception as e:
-            print(f"Error en rate limiting: {e}")
-            return {"is_allowed": True, "is_blocked": False, "blocked_until": None}
+        except Exception:
+            return _fail_open("failure", endpoint)
 
     @staticmethod
     async def get_rate_limit_info(
