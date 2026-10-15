@@ -15,6 +15,181 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 
 
+def _bump_counter(
+    db,
+    identifier: str,
+    endpoint: str,
+    now: datetime,
+    window_minutes: int,
+    max_count: int,
+    block_until: datetime,
+    block_on_reach: bool,
+):
+    """
+    Suma uno al contador con un único UPDATE atómico (UPDATE ... RETURNING).
+
+    En la misma sentencia: reinicia la ventana si venció (contador a 1 y window_start = now),
+    suma si no y fija el bloqueo si el contador lo exige. Un bloqueo vigente deja la fila
+    fuera del WHERE: un identificador bloqueado no suma. Postgres retiene la fila hasta el
+    commit y reevalúa el WHERE con su última versión, así que las peticiones simultáneas no
+    pierden incrementos ni reinician la ventana a la vez (como verify_otp_orm).
+
+    Args:
+        db: SQLAlchemy Session
+        identifier: Identificador único (IP hasheada, cuenta)
+        endpoint: Endpoint solicitado
+        now: Instante de la petición
+        window_minutes: Duración de la ventana en minutos
+        max_count: Máximo de peticiones (o de fallos) de la ventana
+        block_until: Fin del bloqueo si este request lo fija
+        block_on_reach: True bloquea al llegar al máximo (`>=`, record_failure_orm, también
+            con la ventana reiniciada); False al superarlo (`>`, check_limit_orm: un reinicio
+            nunca bloquea)
+
+    Returns:
+        (request_count, window_start, blocked_until) de la fila tras el UPDATE, o None si no
+        hay fila o está bloqueada.
+    """
+    from sqlalchemy import and_, case, not_, or_, update
+
+    from app.models.orm import SecurityRateLimit
+
+    expired = SecurityRateLimit.window_start < now - timedelta(minutes=window_minutes)
+    new_count = case((expired, 1), else_=SecurityRateLimit.request_count + 1)
+    if block_on_reach:
+        over_max = new_count >= max_count
+    else:
+        over_max = and_(not_(expired), new_count > max_count)
+
+    return db.execute(
+        update(SecurityRateLimit)
+        .where(
+            SecurityRateLimit.identifier == identifier,
+            SecurityRateLimit.endpoint == endpoint,
+            or_(SecurityRateLimit.blocked_until.is_(None), SecurityRateLimit.blocked_until <= now),
+        )
+        .values(
+            request_count=new_count,
+            attempt_count=case((expired, 1), else_=SecurityRateLimit.attempt_count + 1),
+            window_start=case((expired, now), else_=SecurityRateLimit.window_start),
+            last_attempt=now,
+            updated_at=now,
+            blocked_until=case((over_max, block_until), else_=SecurityRateLimit.blocked_until),
+        )
+        .returning(
+            SecurityRateLimit.request_count,
+            SecurityRateLimit.window_start,
+            SecurityRateLimit.blocked_until,
+        )
+        .execution_options(synchronize_session=False)
+    ).first()
+
+
+def _count_atomically(
+    db,
+    identifier: str,
+    ip_address: str,
+    endpoint: str,
+    now: datetime,
+    window_minutes: int,
+    max_count: int,
+    block_duration_minutes: int,
+    block_on_reach: bool,
+) -> Dict[str, Any]:
+    """
+    Cuenta un request (o un fallo) sin perder incrementos ni la carrera de la primera petición.
+
+    Primero intenta el UPDATE atómico (_bump_counter). Si no actualiza ninguna fila, distingue
+    «bloqueado» (se devuelve sin sumar) de «no existe» (INSERT ... ON CONFLICT DO NOTHING: si
+    otra petición la creó a la vez, esta pierde el INSERT y vuelve al UPDATE). Confirma con
+    commit en los caminos que escriben.
+
+    Returns:
+        Dict con request_count, window_start (None si ya estaba bloqueado), blocked_until,
+        is_blocked y was_blocked (estaba bloqueado antes: no se sumó).
+
+    Raises:
+        RuntimeError: Si la fila no se puede actualizar ni crear (p. ej. otro identificador
+        ocupa el mismo (ip_address, endpoint))
+    """
+    from sqlalchemy import select
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    from app.models.orm import SecurityRateLimit
+
+    block_until = now + timedelta(minutes=block_duration_minutes)
+
+    # UPDATE -> (INSERT) -> UPDATE: la última vuelta cubre que otra petición cree la fila
+    for _attempt in range(3):
+        bumped = _bump_counter(
+            db, identifier, endpoint, now, window_minutes, max_count, block_until, block_on_reach
+        )
+        if bumped is not None:
+            request_count, window_start, blocked_until = bumped
+            if block_on_reach:
+                is_blocked = request_count >= max_count
+            else:
+                # la petición que reinicia la ventana (window_start == now) nunca bloquea
+                is_blocked = request_count > max_count and window_start != now
+            db.commit()
+            return {
+                "request_count": request_count,
+                "window_start": window_start,
+                "blocked_until": blocked_until if is_blocked else None,
+                "is_blocked": is_blocked,
+                "was_blocked": False,
+            }
+
+        state = db.execute(
+            select(SecurityRateLimit.request_count, SecurityRateLimit.blocked_until).where(
+                SecurityRateLimit.identifier == identifier, SecurityRateLimit.endpoint == endpoint
+            )
+        ).first()
+
+        if state is None:
+            # La primera petición de un identificador: con `>=` y máximo 1 ya bloquea
+            first_blocks = block_on_reach and 1 >= max_count
+            created = db.execute(
+                pg_insert(SecurityRateLimit)
+                .values(
+                    identifier=identifier,
+                    ip_address=ip_address,
+                    endpoint=endpoint,
+                    request_count=1,
+                    attempt_count=1,
+                    window_start=now,
+                    last_attempt=now,
+                    blocked_until=block_until if first_blocks else None,
+                    created_at=now,
+                    updated_at=now,
+                )
+                .on_conflict_do_nothing()
+                .returning(SecurityRateLimit.id)
+            ).scalar_one_or_none()
+            if created is not None:
+                db.commit()
+                return {
+                    "request_count": 1,
+                    "window_start": now,
+                    "blocked_until": block_until if first_blocks else None,
+                    "is_blocked": first_blocks,
+                    "was_blocked": False,
+                }
+            # Otra petición creó la fila a la vez: se cuenta por el UPDATE en la vuelta siguiente
+        elif state.blocked_until is not None and state.blocked_until > now:
+            return {
+                "request_count": state.request_count,
+                "window_start": None,
+                "blocked_until": state.blocked_until,
+                "is_blocked": True,
+                "was_blocked": True,
+            }
+        # Fila sin bloqueo vigente que el UPDATE no vio (se creó o venció el bloqueo entre
+        # medias): se vuelve a intentar por el UPDATE
+
+    raise RuntimeError("No se pudo contar en el limitador: la fila no se puede crear ni actualizar")
+
+
 def check_limit_orm(
     db,
     identifier: str,
@@ -49,116 +224,48 @@ def check_limit_orm(
     Raises:
         Exception: Si hay error al verificar el límite
     """
-    from sqlalchemy.exc import IntegrityError
-
-    from app.models.orm import SecurityRateLimit
-
     try:
         now = datetime.now(timezone.utc)
 
-        # Buscar registro existente
-        rate_limit = (
-            db.query(SecurityRateLimit)
-            .filter(
-                SecurityRateLimit.identifier == identifier, SecurityRateLimit.endpoint == endpoint
-            )
-            .first()
+        counted = _count_atomically(
+            db,
+            identifier=identifier,
+            ip_address=ip_address,
+            endpoint=endpoint,
+            now=now,
+            window_minutes=window_minutes,
+            max_count=max_requests,
+            block_duration_minutes=block_duration_minutes,
+            block_on_reach=False,
         )
 
-        # Si no existe, crear uno nuevo
-        if not rate_limit:
-            rate_limit = SecurityRateLimit(
-                identifier=identifier,
-                ip_address=ip_address,
-                endpoint=endpoint,
-                request_count=1,
-                attempt_count=1,
-                window_start=now,
-                last_attempt=now,
-                created_at=now,
-                updated_at=now,
-            )
-            db.add(rate_limit)
-            db.commit()
-            db.refresh(rate_limit)
-
-            return {
-                "is_allowed": True,
-                "is_blocked": False,
-                "remaining": max_requests - 1,
-                "reset_at": now + timedelta(minutes=window_minutes),
-                "blocked_until": None,
-                "request_count": 1,
-            }
-
-        # Verificar si está bloqueado
-        if rate_limit.blocked_until and rate_limit.blocked_until > now:
+        if counted["was_blocked"]:
             logger.warning(
-                f"Identificador bloqueado: {identifier} hasta {rate_limit.blocked_until}"
+                f"Identificador bloqueado: {identifier} hasta {counted['blocked_until']}"
             )
+        elif counted["is_blocked"]:
+            logger.warning(
+                f"Límite excedido para {identifier} en {endpoint}. "
+                f"Bloqueado hasta {counted['blocked_until']}"
+            )
+
+        if counted["is_blocked"]:
             return {
                 "is_allowed": False,
                 "is_blocked": True,
                 "remaining": 0,
-                "reset_at": rate_limit.blocked_until,
-                "blocked_until": rate_limit.blocked_until,
-                "request_count": rate_limit.request_count,
+                "reset_at": counted["blocked_until"],
+                "blocked_until": counted["blocked_until"],
+                "request_count": counted["request_count"],
             }
-
-        # Verificar si la ventana expiró
-        window_end = rate_limit.window_start + timedelta(minutes=window_minutes)
-        if now > window_end:
-            # Resetear ventana
-            rate_limit.window_start = now
-            rate_limit.request_count = 1
-            rate_limit.attempt_count = 1
-            rate_limit.last_attempt = now
-            rate_limit.updated_at = now
-            db.commit()
-
-            return {
-                "is_allowed": True,
-                "is_blocked": False,
-                "remaining": max_requests - 1,
-                "reset_at": now + timedelta(minutes=window_minutes),
-                "blocked_until": None,
-                "request_count": 1,
-            }
-
-        # Incrementar contador
-        rate_limit.request_count += 1
-        rate_limit.attempt_count += 1
-        rate_limit.last_attempt = now
-        rate_limit.updated_at = now
-
-        # Verificar si se excedió el límite
-        if rate_limit.request_count > max_requests:
-            # Bloquear identificador
-            rate_limit.blocked_until = now + timedelta(minutes=block_duration_minutes)
-            db.commit()
-
-            logger.warning(
-                f"Límite excedido para {identifier} en {endpoint}. Bloqueado hasta {rate_limit.blocked_until}"
-            )
-
-            return {
-                "is_allowed": False,
-                "is_blocked": True,
-                "remaining": 0,
-                "reset_at": rate_limit.blocked_until,
-                "blocked_until": rate_limit.blocked_until,
-                "request_count": rate_limit.request_count,
-            }
-
-        db.commit()
 
         return {
             "is_allowed": True,
             "is_blocked": False,
-            "remaining": max_requests - rate_limit.request_count,
-            "reset_at": window_end,
+            "remaining": max_requests - counted["request_count"],
+            "reset_at": counted["window_start"] + timedelta(minutes=window_minutes),
             "blocked_until": None,
-            "request_count": rate_limit.request_count,
+            "request_count": counted["request_count"],
         }
 
     except Exception as e:
@@ -258,77 +365,45 @@ def record_failure_orm(
     Raises:
         Exception: Si hay error al anotar el fallo
     """
-    from app.models.orm import SecurityRateLimit
-
     try:
         now = datetime.now(timezone.utc)
 
-        rate_limit = (
-            db.query(SecurityRateLimit)
-            .filter(
-                SecurityRateLimit.identifier == identifier, SecurityRateLimit.endpoint == endpoint
-            )
-            .first()
+        counted = _count_atomically(
+            db,
+            identifier=identifier,
+            ip_address=ip_address,
+            endpoint=endpoint,
+            now=now,
+            window_minutes=window_minutes,
+            max_count=max_failures,
+            block_duration_minutes=block_duration_minutes,
+            block_on_reach=True,
         )
 
-        if rate_limit is None:
-            rate_limit = SecurityRateLimit(
-                identifier=identifier,
-                ip_address=ip_address,
-                endpoint=endpoint,
-                request_count=1,
-                attempt_count=1,
-                window_start=now,
-                last_attempt=now,
-                created_at=now,
-                updated_at=now,
+        if counted["is_blocked"] and not counted["was_blocked"]:
+            logger.warning(
+                f"Límite de fallos alcanzado para {identifier} en {endpoint}. "
+                f"Bloqueado hasta {counted['blocked_until']}"
             )
-            db.add(rate_limit)
-        elif rate_limit.blocked_until and rate_limit.blocked_until > now:
-            # Otra petición lo bloqueó entre la comprobación y este fallo: no suma
+
+        if counted["is_blocked"]:
+            # Ya bloqueado por otra petición (no suma) o bloqueado por este fallo
             return {
                 "is_allowed": False,
                 "is_blocked": True,
                 "remaining": 0,
-                "reset_at": rate_limit.blocked_until,
-                "blocked_until": rate_limit.blocked_until,
-                "request_count": rate_limit.request_count,
+                "reset_at": counted["blocked_until"],
+                "blocked_until": counted["blocked_until"],
+                "request_count": counted["request_count"],
             }
-        elif now > rate_limit.window_start + timedelta(minutes=window_minutes):
-            # Ventana vencida: el fallo abre una nueva
-            rate_limit.window_start = now
-            rate_limit.request_count = 1
-            rate_limit.attempt_count = 1
-        else:
-            rate_limit.request_count += 1
-            rate_limit.attempt_count += 1
-
-        rate_limit.last_attempt = now
-        rate_limit.updated_at = now
-
-        is_blocked = rate_limit.request_count >= max_failures
-        if is_blocked:
-            rate_limit.blocked_until = now + timedelta(minutes=block_duration_minutes)
-
-        db.commit()
-
-        if is_blocked:
-            logger.warning(
-                f"Límite de fallos alcanzado para {identifier} en {endpoint}. "
-                f"Bloqueado hasta {rate_limit.blocked_until}"
-            )
 
         return {
-            "is_allowed": not is_blocked,
-            "is_blocked": is_blocked,
-            "remaining": max(0, max_failures - rate_limit.request_count),
-            "reset_at": (
-                rate_limit.blocked_until
-                if is_blocked
-                else rate_limit.window_start + timedelta(minutes=window_minutes)
-            ),
-            "blocked_until": rate_limit.blocked_until if is_blocked else None,
-            "request_count": rate_limit.request_count,
+            "is_allowed": True,
+            "is_blocked": False,
+            "remaining": max(0, max_failures - counted["request_count"]),
+            "reset_at": counted["window_start"] + timedelta(minutes=window_minutes),
+            "blocked_until": None,
+            "request_count": counted["request_count"],
         }
 
     except Exception as e:
