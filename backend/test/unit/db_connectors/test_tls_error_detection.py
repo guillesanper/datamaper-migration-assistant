@@ -18,7 +18,6 @@ from app.utils.db_adapters.tls import is_tls_error
         "SSL error: certificate verify failed",
         "connection to server failed: server does not support SSL, but SSL was required",
         'root certificate file "/tmp/datamap-ca-x.pem" does not exist',
-        "SSL SYSCALL error: EOF detected",
         "(2026, 'TLS/SSL error: Hostname mismatch, certificate is not valid for host')",
         "[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: self-signed certificate",
         "SSL Provider: [error:0A000086:SSL routines::certificate verify failed:unable to get local "
@@ -42,6 +41,7 @@ def test_detecta_errores_tls(mensaje):
         "Login failed for user 'sa'. (18456)",
         'FATAL: no pg_hba.conf entry for host "10.0.0.1", user "u", database "d", SSL encryption',
         "Unknown database 'app'",
+        "SSL SYSCALL error: EOF detected",  # corte tras un handshake aceptado: no es el certificado
         "",
     ],
 )

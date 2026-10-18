@@ -10,7 +10,6 @@ TLS de MySQLAdapter (PyMySQL 1.1.0).
 
 import socket
 import ssl
-import struct
 import threading
 from unittest.mock import MagicMock, patch
 
@@ -106,7 +105,7 @@ class TestSinDegradarATextoPlano:
 
         base.assert_called_once()
 
-    def test_servidor_real_sin_tls_no_recibe_credenciales(self):
+    def test_servidor_real_sin_tls_no_recibe_credenciales(self, tls_certs):
         """Un servidor sin TLS (o un MITM que lo oculte) no ve ni la autenticación."""
         recibido = {}
         servidor = socket.socket()
@@ -118,7 +117,7 @@ class TestSinDegradarATextoPlano:
         def atender():
             conexion, _ = servidor.accept()
             conexion.settimeout(10)
-            conexion.sendall(_saludo(capacidades=0x0200 | 0x8000 | 0x80000))
+            conexion.sendall(tls_certs.mysql_greeting(tls_certs.MYSQL_CAPABILITIES_WITHOUT_TLS))
             recibido["datos"] = conexion.recv(4096)
             conexion.close()
 
@@ -133,28 +132,6 @@ class TestSinDegradarATextoPlano:
             servidor.close()
 
         assert recibido["datos"] == b""  # el cliente cerró sin enviar nada
-
-
-def _saludo(capacidades: int) -> bytes:
-    """Paquete Handshake v10 de MySQL con las capacidades indicadas."""
-    sal1 = b"abcdefgh"
-    sal2 = b"ijklmnopqrst\x00"
-    payload = (
-        b"\x0a"
-        + b"5.7.0-fake\x00"
-        + struct.pack("<I", 1)
-        + sal1
-        + b"\x00"
-        + struct.pack("<H", capacidades & 0xFFFF)
-        + b"\x21"
-        + struct.pack("<H", 2)
-        + struct.pack("<H", capacidades >> 16)
-        + bytes([21])
-        + b"\x00" * 10
-        + sal2
-        + b"mysql_native_password\x00"
-    )
-    return struct.pack("<I", len(payload))[:3] + b"\x00" + payload
 
 
 class TestErrores:

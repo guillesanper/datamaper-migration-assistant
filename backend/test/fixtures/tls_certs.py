@@ -11,6 +11,7 @@ import ipaddress
 import os
 import socket
 import ssl
+import struct
 import tempfile
 import threading
 from typing import Optional, Sequence, Tuple
@@ -122,7 +123,9 @@ class FakeTLSServer:
       servidor lo da por completado antes de que el cliente valide el certificado, así que
       un handshake_ok True no implica que el cliente lo aceptara
 
-    `preamble` permite negociar antes del TLS, como el SSLRequest de PostgreSQL.
+    `preamble(connection)` permite negociar antes del TLS (el SSLRequest de PostgreSQL, el
+    saludo de MySQL). Si devuelve False el servidor cierra sin hacer TLS, como uno que no lo
+    soporta.
     """
 
     def __init__(self, cert_pem: str, key_pem: str, preamble=None):
@@ -153,8 +156,9 @@ class FakeTLSServer:
             return
         connection.settimeout(5)
         try:
-            if self._preamble is not None:
-                self._preamble(connection)
+            if self._preamble is not None and self._preamble(connection) is False:
+                connection.close()
+                return
             tls = self._context.wrap_socket(connection, server_side=True)
         except (ssl.SSLError, OSError) as error:
             self.handshake_ok = False
@@ -177,3 +181,58 @@ class FakeTLSServer:
         self._socket.close()
         self._thread.join(timeout=10)
         self._directory.cleanup()
+
+
+def postgres_ssl_preamble(accept: bool = True):
+    """
+    Preámbulo de PostgreSQL: el cliente envía un SSLRequest de 8 bytes y el servidor
+    responde 'S' (continúa con TLS) o 'N' (no admite TLS).
+    """
+
+    def preamble(connection) -> bool:
+        connection.recv(8)
+        connection.sendall(b"S" if accept else b"N")
+        return accept
+
+    return preamble
+
+
+def mysql_greeting(capabilities: int) -> bytes:
+    """Paquete Handshake v10 de MySQL con las capacidades indicadas."""
+    salt_1 = b"abcdefgh"
+    salt_2 = b"ijklmnopqrst\x00"
+    payload = (
+        b"\x0a"
+        + b"5.7.0-fake\x00"
+        + struct.pack("<I", 1)
+        + salt_1
+        + b"\x00"
+        + struct.pack("<H", capabilities & 0xFFFF)
+        + b"\x21"
+        + struct.pack("<H", 2)
+        + struct.pack("<H", capabilities >> 16)
+        + bytes([21])
+        + b"\x00" * 10
+        + salt_2
+        + b"mysql_native_password\x00"
+    )
+    return struct.pack("<I", len(payload))[:3] + b"\x00" + payload
+
+
+# PROTOCOL_41 | SECURE_CONNECTION | PLUGIN_AUTH, con y sin CLIENT.SSL (0x0800)
+MYSQL_CAPABILITIES_WITHOUT_TLS = 0x0200 | 0x8000 | 0x80000
+MYSQL_CAPABILITIES_WITH_TLS = MYSQL_CAPABILITIES_WITHOUT_TLS | 0x0800
+
+
+def mysql_ssl_preamble():
+    """
+    Preámbulo de MySQL: el servidor saluda anunciando TLS y el cliente responde con un
+    SSLRequest (cabecera de 4 bytes + 32) antes de iniciar el handshake TLS.
+    """
+
+    def preamble(connection) -> bool:
+        connection.sendall(mysql_greeting(MYSQL_CAPABILITIES_WITH_TLS))
+        connection.recv(36)
+        return True
+
+    return preamble

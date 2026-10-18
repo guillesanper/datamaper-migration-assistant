@@ -68,7 +68,7 @@ class TLSOptions:
 
 # Textos con los que los drivers (libpq, PyMySQL, ODBC, oracledb) informan de un fallo TLS
 _TLS_ERROR_PATTERN = re.compile(
-    r"certificate|ssl error|ssl handshake|ssl connection|ssl syscall|ssl provider"
+    r"certificate|ssl error|ssl handshake|ssl connection|ssl provider"
     r"|does not support ssl|ssl is required|\btls\b|sslv3|hostname mismatch",
     re.IGNORECASE,
 )
@@ -78,7 +78,8 @@ def is_tls_error(message: str) -> bool:
     """
     True si el mensaje de un driver describe un fallo de TLS (certificado, hostname, handshake).
 
-    Los rechazos de pg_hba.conf mencionan SSL pero son de autorización, no de verificación.
+    No cuentan: los rechazos de pg_hba.conf (mencionan SSL pero son de autorización) ni un
+    corte de la conexión tras un handshake aceptado ("SSL SYSCALL error: EOF detected").
     """
     if "pg_hba" in message:
         return False
