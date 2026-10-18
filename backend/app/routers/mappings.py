@@ -26,7 +26,6 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from starlette.concurrency import run_in_threadpool
 
-from app.models.db_connection import DBConnectionConfig
 from app.routers.dependencies import get_current_user
 from app.routers.realtime import realtime_broadcast
 from app.services.db_connection_service import (
@@ -41,13 +40,7 @@ from app.services.migration_script_service import (
     MigrationScriptService,
     MigrationScriptServiceError,
 )
-from app.utils.db_adapters import (
-    DBConnectionError,
-    MySQLAdapter,
-    OracleAdapter,
-    PostgreSQLAdapter,
-    SQLServerAdapter,
-)
+from app.utils.db_adapters import DBConnectionError
 from app.utils.db_adapters.type_mappers import TypeMapper
 from app.utils.error_codes import ErrorCode, make_error
 from app.utils.i18n import DEFAULT_LOCALE
@@ -2620,33 +2613,6 @@ async def import_structure(
 # =============================================================================
 
 
-def _create_adapter_from_config(config: DBConnectionConfig):
-    """
-    Crea un adapter de BD a partir de configuración descifrada.
-
-    Args:
-        config: Configuración de conexión con credenciales descifradas
-
-    Returns:
-        Instancia del adapter apropiado (PostgreSQLAdapter, MySQLAdapter, etc.)
-
-    Raises:
-        ValueError: Si el dialecto no está soportado
-    """
-    adapter_config = config.to_adapter_config()
-
-    if config.dialect == "postgresql":
-        return PostgreSQLAdapter(adapter_config)
-    elif config.dialect == "mysql":
-        return MySQLAdapter(adapter_config)
-    elif config.dialect == "sqlserver":
-        return SQLServerAdapter(adapter_config)
-    elif config.dialect == "oracle":
-        return OracleAdapter(adapter_config)
-    else:
-        raise ValueError(f"Unsupported dialect: {config.dialect}")
-
-
 @router.post("/projects/{project_id}/generate-migration-script")
 async def generate_migration_script(
     project_id: str,
@@ -2748,7 +2714,7 @@ async def generate_migration_script(
                 config = db_service.get_decrypted_config(session)
 
                 # Crear adapter
-                origin_adapter = _create_adapter_from_config(config)
+                origin_adapter = db_service._get_adapter(config)
 
                 # Conectar
                 origin_adapter.connect()
@@ -2786,7 +2752,7 @@ async def generate_migration_script(
                 config = db_service.get_decrypted_config(session)
 
                 # Crear adapter
-                dest_adapter = _create_adapter_from_config(config)
+                dest_adapter = db_service._get_adapter(config)
 
                 # Conectar
                 dest_adapter.connect()

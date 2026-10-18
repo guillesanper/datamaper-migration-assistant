@@ -41,7 +41,6 @@ from app.services.db_connection_service import (
     SessionExpiredError,
     SessionNotFoundError,
 )
-from app.utils.db_adapters import MySQLAdapter, PostgreSQLAdapter
 
 router = APIRouter(prefix="/api/db-connections", tags=["Database Connections"])
 
