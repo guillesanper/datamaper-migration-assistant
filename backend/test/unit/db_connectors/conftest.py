@@ -36,3 +36,9 @@ def ca_pem(tls_certs) -> str:
 def ca_key_pem(tls_certs) -> str:
     """Clave privada PEM de una CA de prueba (nunca debe aceptarse como CA)."""
     return tls_certs.make_ca()[1]
+
+
+@pytest.fixture(scope="session")
+def tls_ca(tls_certs):
+    """CA de prueba como (certificado PEM, clave PEM), para firmar certificados de servidor."""
+    return tls_certs.make_ca("Datamap Server CA")

@@ -40,7 +40,9 @@ from .exceptions import (
     DBPermissionError,
     DBQueryExecutionError,
     DBTimeoutError,
+    DBTLSError,
 )
+from .tls import build_ssl_context, is_tls_error
 from .type_mappers import OracleTypeMapper
 from .validators import validate_schema_name, validate_table_name
 
@@ -75,19 +77,20 @@ class OracleAdapter(BaseDBAdapter):
     def connect(self) -> None:
         """Establece conexión con Oracle Database"""
         try:
-            # Build DSN (Data Source Name)
             host = self.connection_config["host"]
             port = self.connection_config.get("port", 1521)
             service_name = self.connection_config.get("service_name")
             sid = self.connection_config.get("sid")
 
+            # Host, puerto e identificador van como parámetros (no en un descriptor de texto):
+            # makedsn solo genera PROTOCOL=TCP y un valor con paréntesis alteraría el descriptor
             if service_name:
-                dsn = oracledb.makedsn(host, port, service_name=service_name)
+                target = {"service_name": service_name}
             elif sid:
-                dsn = oracledb.makedsn(host, port, sid=sid)
+                target = {"sid": sid}
             else:
-                # Default to database name as service name
-                dsn = oracledb.makedsn(host, port, service_name=self.connection_config["database"])
+                # Por defecto, el nombre de la base de datos como service name
+                target = {"service_name": self.connection_config["database"]}
 
             username = self.connection_config["user"]
             password = self.connection_config["password"]
@@ -95,8 +98,13 @@ class OracleAdapter(BaseDBAdapter):
             self.connection = oracledb.connect(
                 user=username,
                 password=password,
-                dsn=dsn,
-                encoding="UTF-8",
+                host=host,
+                port=port,
+                protocol="tcps",
+                ssl_context=build_ssl_context(self.tls),
+                ssl_server_dn_match=self.tls.verify,
+                tcp_connect_timeout=self.timeout,
+                **target,
             )
 
             self._is_connected = True
@@ -110,6 +118,10 @@ class OracleAdapter(BaseDBAdapter):
             # ORA-01045: user lacks CREATE SESSION privilege
             if error_code in (1017, 1045):
                 raise DBAuthenticationError(f"Invalid credentials for Oracle: {error_obj.message}")
+
+            # Los fallos de certificado en modo thin llegan como DPY-6005, sin código ORA
+            if is_tls_error(str(error_obj.message)):
+                raise DBTLSError(f"TLS error connecting to Oracle: {error_obj.message}")
 
             # ORA-12541: TNS:no listener
             # ORA-12154: TNS:could not resolve the connect identifier
