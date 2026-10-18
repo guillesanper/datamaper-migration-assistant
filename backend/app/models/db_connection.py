@@ -18,17 +18,11 @@ from cryptography.hazmat.primitives import serialization
 from pydantic import BaseModel, Field, StrictBool, field_validator, model_validator
 
 from app.utils.db_adapters.exceptions import DBValidationError
-from app.utils.db_adapters.validators import validate_host
+from app.utils.db_adapters.validators import normalize_hostname, validate_host
 
 # Límites de la CA propia que se sube por conexión
 MAX_CA_PEM_LENGTH = 65_536
 MAX_CA_CERTIFICATES = 10
-
-
-def _normalize_hostname(value: str) -> str:
-    """Compara hostnames sin distinguir mayúsculas, espacios ni el punto final."""
-    value = value.strip().lower()
-    return value[:-1] if value.endswith(".") else value
 
 
 class DBConnectionConfig(BaseModel):
@@ -128,7 +122,7 @@ class DBConnectionConfig(BaseModel):
         if not self.tls_verify:
             if self.tls_ca_pem:
                 raise ValueError("tls_ca_pem cannot be combined with tls_verify=false")
-            if _normalize_hostname(self.confirm_hostname or "") != _normalize_hostname(self.host):
+            if normalize_hostname(self.confirm_hostname or "") != normalize_hostname(self.host):
                 raise ValueError("confirm_hostname must match host when tls_verify is false")
         return self
 

@@ -289,6 +289,12 @@ def validate_host(host: str) -> str:
     return host
 
 
+def normalize_hostname(value: str) -> str:
+    """Normaliza un hostname para compararlo: sin mayúsculas, espacios ni punto final."""
+    value = value.strip().lower()
+    return value[:-1] if value.endswith(".") else value
+
+
 def _is_ip_address(value: str) -> bool:
     """True si value es una IPv4/IPv6 literal (sin zone id)."""
     if "%" in value:
