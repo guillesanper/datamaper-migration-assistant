@@ -12,6 +12,7 @@ Requiere:
 """
 
 import logging
+import re
 from typing import Any, Dict, List, Optional
 
 import pyodbc
@@ -46,6 +47,21 @@ from .type_mappers import SQLServerTypeMapper
 from .validators import validate_schema_name, validate_table_name
 
 logger = logging.getLogger(__name__)
+
+# Valores que no necesitan llaves en una cadena de conexión ODBC
+_ODBC_PLAIN_VALUE = re.compile(r"[A-Za-z0-9_.\-]+")
+
+
+def _odbc_value(value: str) -> str:
+    """
+    Escapa un valor para una cadena de conexión ODBC.
+
+    Los valores con caracteres especiales (';', '=', '{', '}', espacios...) van entre llaves
+    y '}' se duplica, de modo que no puedan añadir ni sobrescribir atributos del driver.
+    """
+    if _ODBC_PLAIN_VALUE.fullmatch(value):
+        return value
+    return "{" + value.replace("}", "}}") + "}"
 
 
 class SQLServerAdapter(BaseDBAdapter):
@@ -83,12 +99,13 @@ class SQLServerAdapter(BaseDBAdapter):
             username = self.connection_config["user"]
             password = self.connection_config["password"]
 
+            # server ya viene validado como hostname/IP (validate_host); el resto se escapa
             connection_string = (
                 f"DRIVER={driver};"
                 f"SERVER={server},{port};"
-                f"DATABASE={database};"
-                f"UID={username};"
-                f"PWD={password};"
+                f"DATABASE={_odbc_value(database)};"
+                f"UID={_odbc_value(username)};"
+                f"PWD={_odbc_value(password)};"
                 f"TrustServerCertificate=yes;"
                 f"Connection Timeout={self.timeout};"
             )

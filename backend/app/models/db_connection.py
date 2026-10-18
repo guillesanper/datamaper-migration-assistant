@@ -15,6 +15,9 @@ from typing import Any, Dict, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.utils.db_adapters.exceptions import DBValidationError
+from app.utils.db_adapters.validators import validate_host
+
 
 class DBConnectionConfig(BaseModel):
     """
@@ -47,6 +50,15 @@ class DBConnectionConfig(BaseModel):
     def username(self) -> str:
         """Alias for user - used by tests"""
         return self.user
+
+    @field_validator("host")
+    @classmethod
+    def validate_host_format(cls, v: str) -> str:
+        """El host se interpola en cadenas de conexión: solo hostname o IP"""
+        try:
+            return validate_host(v)
+        except DBValidationError as e:
+            raise ValueError(str(e))
 
     @field_validator("dialect")
     @classmethod
