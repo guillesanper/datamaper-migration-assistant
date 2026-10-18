@@ -68,7 +68,9 @@ class TestValoresEscapados:
         conn_str = _connection_string(password="x;Encrypt=no")
 
         assert "PWD={x;Encrypt=no};" in conn_str
-        assert _attributes(conn_str).count("encrypt") == 0
+        # Solo el Encrypt=yes de la política TLS: el inyectado queda dentro de las llaves
+        assert _attributes(conn_str).count("encrypt") == 1
+        assert "Encrypt=yes;" in conn_str
 
     def test_usuario_con_punto_y_coma_no_inyecta_atributos(self):
         conn_str = _connection_string(user="sa;TrustServerCertificate=yes")
