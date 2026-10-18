@@ -36,6 +36,12 @@ class DBConnectionConfig(BaseModel):
     user: str = Field(..., min_length=1, max_length=128, description="Usuario de la base de datos")
     password: str = Field(..., min_length=1, description="Contraseña de la base de datos")
     timeout: int = Field(default=30, ge=5, le=600, description="Timeout de conexión en segundos")
+    service_name: Optional[str] = Field(
+        default=None, min_length=1, max_length=128, description="Service name (solo Oracle)"
+    )
+    sid: Optional[str] = Field(
+        default=None, min_length=1, max_length=128, description="SID (solo Oracle)"
+    )
 
     @property
     def username(self) -> str:
@@ -58,7 +64,7 @@ class DBConnectionConfig(BaseModel):
         Returns:
             Dict con configuración para BaseDBAdapter
         """
-        return {
+        adapter_config: Dict[str, Any] = {
             "host": self.host,
             "port": self.port,
             "database": self.database,
@@ -66,6 +72,12 @@ class DBConnectionConfig(BaseModel):
             "password": self.password,
             "timeout": self.timeout,
         }
+        # Identificadores de Oracle: solo se emiten si vienen informados
+        if self.service_name:
+            adapter_config["service_name"] = self.service_name
+        if self.sid:
+            adapter_config["sid"] = self.sid
+        return adapter_config
 
     class Config:
         json_schema_extra = {
