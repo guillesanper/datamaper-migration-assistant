@@ -6,6 +6,14 @@
 export const MAX_CA_PEM_LENGTH = 65_536;
 
 /**
+ * Forma válida de un host: hostname DNS o IP (v4/v6), sin los caracteres que cambiarían una
+ * cadena de conexión (; { } ( ) = , espacios, comillas). El backend aplica validate_host.
+ */
+export function isValidHostFormat(host: string): boolean {
+  return /^[A-Za-z0-9_.:-]+$/.test(host.trim()) && !host.trim().startsWith('-');
+}
+
+/**
  * Normaliza un hostname para compararlo: sin espacios, en minúsculas y sin el punto final.
  * Debe coincidir con normalize_hostname del backend (validators.py).
  */

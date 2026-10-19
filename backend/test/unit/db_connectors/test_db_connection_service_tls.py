@@ -258,6 +258,12 @@ class TestResultadoDelTest:
 
         assert resultado.error_type == "connection"
 
+    def test_el_mensaje_tls_conserva_el_prefijo_que_reconoce_el_frontend(self, service):
+        """DatabaseConnectionModal.tsx detecta este prefijo en el detail de un 400."""
+        resultado = self._con_adaptador(service, _config(), side_effect=DBTLSError(DRIVER_DETAIL))
+
+        assert resultado.error_message.startswith("TLS verification failed")
+
     def test_create_session_propaga_el_mensaje_saneado(self, service):
         adapter = MagicMock()
         adapter.test_connection.side_effect = DBTLSError(DRIVER_DETAIL)

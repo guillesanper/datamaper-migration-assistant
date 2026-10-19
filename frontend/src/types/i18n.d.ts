@@ -973,6 +973,7 @@ declare module 'i18next' {
             dbMax: string;
             dbRequired: string;
             formErrors: string;
+            hostFormat: string;
             hostMax: string;
             hostRequired: string;
             noDialect: string;

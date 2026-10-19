@@ -132,6 +132,7 @@
       "dbMax": "Database name cannot exceed 128 characters",
       "dbRequired": "Database name is required",
       "formErrors": "Please fix the errors in the form",
+      "hostFormat": "Host must be a hostname or an IP address (no spaces or characters such as ; { } = , quotes)",
       "hostMax": "Host cannot exceed 255 characters",
       "hostRequired": "Host is required",
       "noDialect": "You must select a database type",
