@@ -1,5 +1,7 @@
 # 🚀 PLAN FASE 2: Sistema de Conexión Local con Bases de Datos
 
+> **Documento histórico.** Lo que dice sobre SSL/TLS está **obsoleto**: `ssl_enabled`, el diccionario `ssl={'ssl': {'ca': ...}}` de MySQL y `TrustServerCertificate=yes` (justificado aquí «para conexiones sin SSL validado») ya no existen. Ahora toda conexión usa TLS con verificación por defecto; ver [`app/utils/db_adapters/README.md`](../app/utils/db_adapters/README.md#-tls-y-verificación-del-certificado).
+
 ## 📋 Tabla de Contenidos
 
 1. [Visión General](#visión-general)

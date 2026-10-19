@@ -189,6 +189,16 @@
 
 ---
 
+### Conexiones a bases de datos externas
+
+#### TLS con verificación de certificado
+**Tipo:** 🔐 Política de seguridad
+**Dónde:** [`app/utils/db_adapters/README.md`](../../app/utils/db_adapters/README.md#-tls-y-verificación-del-certificado) y [`DEPLOYMENT_GUIDE.md`](../DEPLOYMENT_GUIDE.md#tls-de-las-conexiones-a-bd-externas)
+
+**Descripción:** los conectores a PostgreSQL, MySQL, SQL Server y Oracle cifran siempre con TLS y verifican certificado y hostname. Desactivar la verificación es un opt-out por conexión que exige confirmar el hostname en el backend, queda marcado (`tls_verified=false`, badge) durante la sesión y se registra en el log. Hay un test guardián que falla si un adaptador vuelve a conectar sin verificar.
+
+---
+
 ### Roadmaps y Integración
 
 #### 11. [ROADMAP.md](./ROADMAP.md)

@@ -88,6 +88,8 @@ Cosas a tener en cuenta:
     └──────────┘   └──────────┘
 ```
 
+Los conectores a bases de datos externas (PostgreSQL, MySQL, SQL Server, Oracle) exigen TLS y verifican el certificado del servidor por defecto; se puede subir una CA propia por conexión, y desactivar la verificación es un opt-out que exige confirmar el hostname y deja la conexión marcada como «Sin verificar». Ver [`backend/app/utils/db_adapters/README.md`](backend/app/utils/db_adapters/README.md#-tls-y-verificación-del-certificado).
+
 En desarrollo con Docker Compose, el backend también envía los correos (códigos de verificación) a Mailpit (SMTP `:1025`, interfaz web `:8025`).
 
 ## 🧪 Testing
