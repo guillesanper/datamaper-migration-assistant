@@ -216,15 +216,22 @@ class DBConnectionService {
   }
 
   /**
+   * Obtener una sesión activa (con su tls_verified), o undefined si ya no existe
+   */
+  async getActiveSession(sessionId: string): Promise<DBConnectionSessionResponse | undefined> {
+    try {
+      const sessions = await this.listSessions();
+      return sessions.find(session => session.session_id === sessionId);
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
    * Verificar si una sesión sigue activa
    */
   async isSessionActive(sessionId: string): Promise<boolean> {
-    try {
-      const sessions = await this.listSessions();
-      return sessions.some(session => session.session_id === sessionId);
-    } catch {
-      return false;
-    }
+    return (await this.getActiveSession(sessionId)) !== undefined;
   }
 
   /**

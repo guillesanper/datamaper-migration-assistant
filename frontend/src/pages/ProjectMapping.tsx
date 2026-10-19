@@ -6,6 +6,7 @@ import { mappingService } from "../services/mapping_service";
 import { projectService } from "../services/project_service";
 import { encryptionService } from "../services/encryption.service";
 import { dbConnectionService } from "../services/db_connection.service";
+import { TlsUnverifiedBadge } from "../components/mapping/TlsUnverifiedBadge";
 import type { ConnectorTable } from "../types/db_connection_types";
 import { useEncryption } from "../providers/EncryptionProvider";
 import { EncryptionUnlockModal } from "../components/encryption/EncryptionUnlockModal";
@@ -75,6 +76,8 @@ export const ProjectMapping: React.FC = () => {
   const [dbConnectionTargetType, setDbConnectionTargetType] = useState<'origin' | 'destination' | null>(null);
   const [isMigrationModalOpen, setIsMigrationModalOpen] = useState(false);
   const [activeDBSessions, setActiveDBSessions] = useState<{origin?: string, destination?: string}>({});
+  // Sesiones creadas sin verificar el certificado (tls_verified=false): las marca el backend
+  const [unverifiedSessionIds, setUnverifiedSessionIds] = useState<Set<string>>(new Set());
   const [connectorTables, setConnectorTables] = useState<ConnectorTable[]>([]);
   const { isFullscreen, toggleFullscreen } = useFullscreen();
 
@@ -173,16 +176,18 @@ export const ProjectMapping: React.FC = () => {
       const savedSessions = loadConnectorSessions(projectId);
       const restoredConnectorTables: ConnectorTable[] = [];
       const validSessions: {origin?: string, destination?: string} = {};
+      const unverified = new Set<string>();
 
       for (const type of ['origin', 'destination'] as const) {
         const sessionId = savedSessions[type];
         if (!sessionId) continue;
 
-        const isActive = await dbConnectionService.isSessionActive(sessionId);
-        if (!isActive) {
+        const activeSession = await dbConnectionService.getActiveSession(sessionId);
+        if (!activeSession) {
           clearConnectorSession(projectId, type);
           continue;
         }
+        if (!activeSession.tls_verified) unverified.add(sessionId);
 
         try {
           const tables = await dbConnectionService.getConnectorTables(sessionId, type);
@@ -197,6 +202,7 @@ export const ProjectMapping: React.FC = () => {
       if (restoredConnectorTables.length > 0) {
         setConnectorTables(restoredConnectorTables);
         setActiveDBSessions(validSessions);
+        setUnverifiedSessionIds(unverified);
       }
     } catch (error) {
       console.error("Error loading project data:", error);
@@ -220,8 +226,20 @@ export const ProjectMapping: React.FC = () => {
   };
 
   // Handle successful database connection
-  const handleDBConnectionSuccess = async (sessionId: string, tableType: 'origin' | 'destination') => {
+  const handleDBConnectionSuccess = async (
+    sessionId: string,
+    tableType: 'origin' | 'destination',
+    tlsVerified: boolean
+  ) => {
     console.log(`[ProjectMapping] DB connection successful: ${sessionId} (${tableType})`);
+
+    // Recordar si la sesión no verifica el certificado, para mostrarlo mientras dure
+    setUnverifiedSessionIds(prev => {
+      const next = new Set(prev);
+      if (tlsVerified) next.delete(sessionId);
+      else next.add(sessionId);
+      return next;
+    });
 
     // Actualizar indicador de sesión activa
     const newSessions = { ...activeDBSessions, [tableType]: sessionId };
@@ -350,12 +368,14 @@ export const ProjectMapping: React.FC = () => {
                   <div className="flex items-center gap-1 px-2 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded text-xs">
                     <Database className="w-3 h-3" />
                     <span>Origen</span>
+                    {unverifiedSessionIds.has(activeDBSessions.origin) && <TlsUnverifiedBadge />}
                   </div>
                 )}
                 {activeDBSessions.destination && (
                   <div className="flex items-center gap-1 px-2 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded text-xs">
                     <Database className="w-3 h-3" />
                     <span>Destino</span>
+                    {unverifiedSessionIds.has(activeDBSessions.destination) && <TlsUnverifiedBadge />}
                   </div>
                 )}
               </div>
@@ -563,6 +583,9 @@ export const ProjectMapping: React.FC = () => {
           onClose={() => setIsMigrationModalOpen(false)}
           projectId={projectId || ''}
           destConnectionSessionId={activeDBSessions.destination ?? null}
+          destConnectionUnverified={
+            !!activeDBSessions.destination && unverifiedSessionIds.has(activeDBSessions.destination)
+          }
           destinationDb={project?.destination_db}
         />
       </Suspense>
