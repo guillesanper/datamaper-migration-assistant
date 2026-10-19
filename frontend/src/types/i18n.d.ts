@@ -932,6 +932,34 @@ declare module 'i18next' {
           test: { error: string; success: string };
           timeout: { label: string };
           title: string;
+          tls: {
+            caClear: string;
+            caFileLabel: string;
+            caHelp: string;
+            caInvalid: string;
+            caLoaded: string;
+            caPick: string;
+            caSqlServer: string;
+            confirm: {
+              cancel: string;
+              confirmButton: string;
+              description: string;
+              hostLabel: string;
+              mismatch: string;
+              placeholder: string;
+              title: string;
+              warning: string;
+            };
+            encryptedNote: string;
+            oracleHostHint: string;
+            sectionTitle: string;
+            skipActive: string;
+            skipLabel: string;
+            skipUndo: string;
+            unverifiedBadge: string;
+            unverifiedTooltip: string;
+            verificationFailed: string;
+          };
           toast: {
             connected: string;
             connectError: string;

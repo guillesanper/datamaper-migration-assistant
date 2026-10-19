@@ -88,6 +88,34 @@
       "label": "Timeout (seconds)"
     },
     "title": "Connect to Database",
+    "tls": {
+      "caClear": "Remove",
+      "caFileLabel": "Custom CA (optional)",
+      "caHelp": "Upload the PEM certificate of the authority that signed the server's certificate. Certificates only, never private keys.",
+      "caInvalid": "The file is not a valid PEM certificate (no private keys, max. 64 KB)",
+      "caLoaded": "CA loaded: {{name}}",
+      "caPick": "Choose file…",
+      "caSqlServer": "SQL Server uses the system certificate store: install the CA there or turn verification off.",
+      "confirm": {
+        "cancel": "Cancel",
+        "confirmButton": "Turn verification off",
+        "description": "Traffic will still be encrypted, but the server's identity won't be checked: someone on the network could impersonate it and see your credentials and data. The connection will be marked \"Unverified\" for the whole session.",
+        "hostLabel": "To confirm, type the host:",
+        "mismatch": "What you typed doesn't match the connection's host",
+        "placeholder": "connection host",
+        "title": "Turn off certificate verification",
+        "warning": "The server's identity will not be verified."
+      },
+      "encryptedNote": "The connection is always encrypted with TLS. This option only controls whether the server's certificate is verified.",
+      "oracleHostHint": "Oracle checks the server name: with verification on, use the certificate's hostname, not the IP.",
+      "sectionTitle": "TLS security",
+      "skipActive": "Verification turned off for {{host}}",
+      "skipLabel": "Don't verify the server certificate (not recommended)",
+      "skipUndo": "Verify again",
+      "unverifiedBadge": "Unverified",
+      "unverifiedTooltip": "This connection doesn't verify the server's certificate: traffic is encrypted, but there is no guarantee it is the right server.",
+      "verificationFailed": "The server's TLS certificate could not be verified. Check the CA or the hostname, or turn verification off (not recommended)."
+    },
     "toast": {
       "connected": "Successfully connected to {{name}}",
       "connectError": "Error connecting to the database",
