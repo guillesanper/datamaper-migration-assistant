@@ -39,6 +39,7 @@ class DBConnectionService {
           database: config.database,
           error_message: e.response.data.detail || e.response.data.message || 'Error al probar la conexión',
           error_type: e.response.data.error_type || 'connection_error',
+          tls_verified: config.tls_verify !== false,
         };
       }
 

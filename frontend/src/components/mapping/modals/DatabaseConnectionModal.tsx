@@ -157,6 +157,7 @@ export const DatabaseConnectionModal: React.FC<DatabaseConnectionModalProps> = (
         database: config.database!,
         error_message: error instanceof Error ? error.message : t('db.toast.unknownError'),
         error_type: 'unknown_error',
+        tls_verified: config.tls_verify !== false,
       });
       toast.error(t('db.toast.testError'));
     } finally {
