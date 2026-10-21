@@ -579,3 +579,137 @@ class TestDependencyGraph:
         cursor.execute("DELETE FROM projects WHERE id = %s", (project_id,))
         db.commit()
         cursor.close()
+
+
+# =============================================
+# TEST: Role-based access (viewers can't write to the destination DB)
+# =============================================
+
+
+@pytest.fixture
+def member_client(client, db, worker_id, test_project):
+    """Factory: test client authenticated as a project member with the given role"""
+    from conftest import get_unique_user_data
+
+    from app.routers.dependencies import get_current_user
+
+    created_users = []
+
+    def make(role: str):
+        username, email = get_unique_user_data(
+            worker_id, f"migration_{role}_user", f"migration_{role}@test.com"
+        )
+        cursor = db.cursor()
+        cursor.execute(
+            """
+            INSERT INTO users (id, username, email, password_hash, is_verified, is_deleted, failed_login_attempts)
+            VALUES (%s, %s, %s, %s, true, false, 0)
+            ON CONFLICT (email) DO UPDATE SET username = EXCLUDED.username
+            RETURNING id, username, email
+        """,
+            (str(uuid.uuid4()), username, email, "test_password_hash"),
+        )
+        user = cursor.fetchone()
+        cursor.execute(
+            """
+            INSERT INTO project_members (id, project_id, user_id, role, created_at)
+            VALUES (%s, %s, %s, %s, NOW())
+            ON CONFLICT (project_id, user_id) DO UPDATE SET role = EXCLUDED.role
+        """,
+            (str(uuid.uuid4()), test_project, user[0], role),
+        )
+        db.commit()
+        cursor.close()
+        created_users.append(user[0])
+
+        member = {"id": user[0], "username": user[1], "email": user[2]}
+        app.dependency_overrides[get_current_user] = lambda: member
+        return client
+
+    yield make
+
+    app.dependency_overrides.clear()
+    cursor = db.cursor()
+    for user_id in created_users:
+        cursor.execute("DELETE FROM project_members WHERE user_id = %s", (user_id,))
+    db.commit()
+    cursor.close()
+
+
+class TestMigrationRoleAccess:
+    def test_viewer_cannot_generate_script(self, member_client, test_project):
+        client = member_client("viewer")
+
+        response = client.post(
+            f"/api/projects/{test_project}/migration/generate-script",
+            json={"dialect": "postgresql"},
+        )
+
+        assert response.status_code == 403
+
+    @patch("app.routers.migration.ExecutionService")
+    def test_viewer_cannot_execute_migration(
+        self, mock_execution_service, member_client, test_project, mock_db_connection_service
+    ):
+        client = member_client("viewer")
+
+        response = client.post(
+            f"/api/projects/{test_project}/migration/execute",
+            json={"dry_run": True, "dest_connection_session_id": str(uuid.uuid4())},
+        )
+
+        assert response.status_code == 403
+        mock_execution_service.assert_not_called()
+        mock_db_connection_service._get_adapter.assert_not_called()
+
+    def test_viewer_can_read_dependency_graph(self, member_client, test_project):
+        client = member_client("viewer")
+
+        response = client.get(f"/api/projects/{test_project}/migration/dependency-graph")
+
+        assert response.status_code == 200
+
+    def test_editor_can_generate_script(self, member_client, test_project):
+        client = member_client("editor")
+
+        response = client.post(
+            f"/api/projects/{test_project}/migration/generate-script",
+            json={"dialect": "postgresql"},
+        )
+
+        assert response.status_code == 200
+
+
+class TestExecuteMigrationConnectionHandling:
+    @patch("app.routers.migration.ExecutionService")
+    def test_destination_adapter_is_disconnected_and_dialect_used(
+        self, mock_execution_service, client_with_auth, test_project, mock_db_connection_service
+    ):
+        mock_db_connection_service.get_decrypted_config.return_value.dialect = "mysql"
+        mock_execution_service.return_value.execute_migration.return_value = {
+            "execution_id": str(uuid.uuid4()),
+            "status": "dry_run_complete",
+            "rows_affected": 0,
+        }
+
+        response = client_with_auth.post(
+            f"/api/projects/{test_project}/migration/execute",
+            json={"dry_run": True, "dest_connection_session_id": str(uuid.uuid4())},
+        )
+
+        assert response.status_code == 200
+        adapter = mock_db_connection_service._get_adapter.return_value
+        adapter.disconnect.assert_called_once()
+        script = mock_execution_service.return_value.execute_migration.call_args.kwargs["script"]
+        assert "START TRANSACTION;" in script  # generated for the destination's dialect
+
+
+def test_blocking_endpoints_run_in_threadpool():
+    """Endpoints that talk to external DBs must be sync so they don't block the event loop"""
+    import inspect
+
+    from app.routers import db_connections, migration
+
+    for module in (db_connections, migration):
+        for route in module.router.routes:
+            assert not inspect.iscoroutinefunction(route.endpoint), route.path

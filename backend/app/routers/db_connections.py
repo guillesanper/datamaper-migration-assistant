@@ -8,6 +8,8 @@ API endpoints para gestión de conexiones a bases de datos externas:
 - Listado de tablas y columnas
 
 SEGURIDAD:
+- Los endpoints son síncronos (def): los drivers de BD son bloqueantes y FastAPI
+  los ejecuta en el threadpool, de modo que una BD lenta no congela el event loop
 - Requiere autenticación (CurrentUser)
 - Credenciales cifradas con AES-256-GCM
 - Sesiones con TTL en Redis
@@ -76,7 +78,7 @@ def get_db_connection_service(
     return DBConnectionService(redis_client, encryption_key)
 
 
-async def get_user_session(
+def get_user_session(
     session_id: str,
     service: DBConnectionService = Depends(get_db_connection_service),
     current_user: dict = Depends(CurrentUser()),
@@ -130,7 +132,7 @@ async def get_user_session(
     summary="Test database connection",
     description="Validates database credentials without creating a session",
 )
-async def test_connection(
+def test_connection(
     config: DBConnectionConfig,
     service: DBConnectionService = Depends(get_db_connection_service),
     current_user: dict = Depends(CurrentUser()),
@@ -167,7 +169,7 @@ async def test_connection(
     summary="Create connection session",
     description="Creates a new session with encrypted credentials stored in Redis",
 )
-async def create_session(
+def create_session(
     request: DBConnectionRequest,
     service: DBConnectionService = Depends(get_db_connection_service),
     current_user: dict = Depends(CurrentUser()),
@@ -208,7 +210,7 @@ async def create_session(
     summary="List user sessions",
     description="Lists all active sessions for the current user",
 )
-async def list_sessions(
+def list_sessions(
     service: DBConnectionService = Depends(get_db_connection_service),
     current_user: dict = Depends(CurrentUser()),
 ) -> List[DBConnectionSessionResponse]:
@@ -238,7 +240,7 @@ async def list_sessions(
     summary="Delete session",
     description="Deletes a connection session and removes credentials from Redis",
 )
-async def delete_session(
+def delete_session(
     session_id: str,
     service: DBConnectionService = Depends(get_db_connection_service),
     current_user: dict = Depends(CurrentUser()),
@@ -264,7 +266,7 @@ async def delete_session(
     summary="Refresh session TTL",
     description="Extends the TTL of an active session",
 )
-async def refresh_session(
+def refresh_session(
     session_id: str,
     ttl_hours: int = 3,
     service: DBConnectionService = Depends(get_db_connection_service),
@@ -277,7 +279,7 @@ async def refresh_session(
     """
     try:
         # Validar ownership
-        await get_user_session(session_id, service, current_user)
+        get_user_session(session_id, service, current_user)
 
         # Refresh
         new_expires_at = service.refresh_session(current_user["id"], session_id, ttl_hours)
@@ -308,7 +310,7 @@ async def refresh_session(
     summary="List schemas/databases",
     description="Lists all schemas (PostgreSQL) or databases (MySQL)",
 )
-async def list_schemas(
+def list_schemas(
     session_id: str,
     session: DBConnectionSession = Depends(get_user_session),
     service: DBConnectionService = Depends(get_db_connection_service),
@@ -345,7 +347,7 @@ async def list_schemas(
     summary="List tables in schema",
     description="Lists all tables and views in a schema",
 )
-async def list_tables(
+def list_tables(
     session_id: str,
     schema_name: str,
     session: DBConnectionSession = Depends(get_user_session),
@@ -382,7 +384,7 @@ async def list_tables(
     summary="List table columns",
     description="Lists all columns with metadata (type, nullable, PK, FK, etc.)",
 )
-async def list_columns(
+def list_columns(
     session_id: str,
     schema_name: str,
     table_name: str,
@@ -420,7 +422,7 @@ async def list_columns(
     summary="Get full schema metadata",
     description="Gets complete metadata for a schema (tables, columns, constraints, indexes)",
 )
-async def get_schema_metadata(
+def get_schema_metadata(
     session_id: str,
     schema_name: str,
     session: DBConnectionSession = Depends(get_user_session),
@@ -468,7 +470,7 @@ async def get_schema_metadata(
         "The structure is NOT saved locally. Hashes are used to identify tables/columns in mappings."
     ),
 )
-async def get_connector_tables(
+def get_connector_tables(
     session_id: str,
     schema: Optional[str] = None,
     session: DBConnectionSession = Depends(get_user_session),

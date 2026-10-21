@@ -42,7 +42,10 @@ from app.services.db_connection_service import (
 )
 from app.services.dependency_graph_service import DependencyGraphService
 from app.services.execution_service import ExecutionService
-from app.services.migration_script_service import MigrationScriptService
+from app.services.migration_script_service import (
+    MigrationScriptService,
+    MigrationScriptServiceError,
+)
 from app.utils.redis_client import get_redis_client
 
 logger = logging.getLogger(__name__)
@@ -82,7 +85,13 @@ class ExecutionRequest(BaseModel):
 # =============================================================================
 
 
-def validate_project_access(db, project_id: str, current_user: dict) -> dict:
+# Roles que pueden generar y ejecutar migraciones (escriben en la BD destino)
+MIGRATION_WRITE_ROLES = {"owner", "editor"}
+
+
+def validate_project_access(
+    db, project_id: str, current_user: dict, require_write: bool = False
+) -> dict:
     """
     Valida que el usuario tenga acceso al proyecto usando CRUD ORM.
 
@@ -90,6 +99,7 @@ def validate_project_access(db, project_id: str, current_user: dict) -> dict:
         db: Database session
         project_id: UUID del proyecto
         current_user: Usuario autenticado
+        require_write: Si True, exige ser owner o editor (los viewers solo leen)
 
     Returns:
         dict con información del proyecto
@@ -109,6 +119,14 @@ def validate_project_access(db, project_id: str, current_user: dict) -> dict:
     if not has_access:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="You don't have access to this project"
+        )
+
+    if require_write and not (
+        has_access.get("is_owner") or has_access.get("role") in MIGRATION_WRITE_ROLES
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only project owners and editors can generate or execute migrations",
         )
 
     return project
@@ -162,6 +180,62 @@ def build_schema_metadata_from_mappings(mappings: List[Dict]) -> SchemaMetadata:
     return SchemaMetadata(name="public", tables=tables, foreign_keys=foreign_keys)
 
 
+def load_or_generate_script(
+    db, project_id: str, project: dict, script_id: Optional[str], dialect: str
+) -> str:
+    """
+    Carga el script guardado (verificando que sea del mismo dialecto que el destino)
+    o genera uno nuevo a partir de los mappings del proyecto.
+
+    Raises:
+        HTTPException: Si el script no existe, es de otro dialecto o los mappings son inválidos
+    """
+    if script_id:
+        # Cargar script guardado usando CRUD ORM
+        script_row = migration_script_crud.get_migration_script_by_id_orm(db, script_id, project_id)
+
+        if not script_row or str(script_row.get("project_id")) != str(project_id):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Script not found")
+
+        script = script_row["script_content"]
+        script_dialect = script_row.get("dialect") or dialect
+        if script_dialect != dialect:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"Script was generated for '{script_dialect}' but the destination "
+                    f"connection is '{dialect}'"
+                ),
+            )
+        logger.info(f"Loaded saved script: {script_id}")
+    else:
+        # Generar nuevo script on-the-fly
+        mappings = get_project_mappings(db, project_id)
+
+        if not mappings:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No mappings found for this project",
+            )
+
+        try:
+            script = MigrationScriptService.generate_insert_script(
+                mappings=[dict(m) for m in mappings],
+                origin_adapter=None,
+                dest_adapter=None,
+                project_name=project["name"],
+                dialect=dialect,
+            )
+        except (MigrationScriptServiceError, ValueError) as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid mappings for migration script: {str(e)}",
+            )
+        logger.info("Generated new script on-the-fly")
+
+    return script
+
+
 def get_db_connection_service() -> DBConnectionService:
     """Dependency para obtener DBConnectionService"""
     redis_client = get_redis_client()
@@ -186,7 +260,7 @@ def get_db_connection_service() -> DBConnectionService:
     summary="Generate migration script",
     description="Genera script SQL de migración optimizado con análisis de dependencias",
 )
-async def generate_migration_script(
+def generate_migration_script(
     project_id: str,
     options: MigrationScriptOptions,
     db=Depends(get_db_session),
@@ -210,8 +284,8 @@ async def generate_migration_script(
         }
     """
     try:
-        # PASO 1: Validar acceso al proyecto
-        project = validate_project_access(db, project_id, current_user)
+        # PASO 1: Validar acceso al proyecto (owner/editor)
+        project = validate_project_access(db, project_id, current_user, require_write=True)
         logger.info(f"Generating migration script for project {project_id} ({project['name']})")
 
         # PASO 2: Obtener mappings del proyecto
@@ -298,6 +372,13 @@ async def generate_migration_script(
 
     except HTTPException:
         raise
+    except (MigrationScriptServiceError, ValueError) as e:
+        # Mappings inválidos o inseguros (p.ej. transformación con ';', tipo inválido)
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid mappings for migration script: {str(e)}",
+        )
     except Exception as e:
         logger.error(f"Error generating migration script: {str(e)}")
         db.rollback()
@@ -312,7 +393,7 @@ async def generate_migration_script(
     summary="Execute migration",
     description="Ejecuta script de migración contra la base de datos destino",
 )
-async def execute_migration(
+def execute_migration(
     project_id: str,
     request: ExecutionRequest,
     db=Depends(get_db_session),
@@ -333,43 +414,11 @@ async def execute_migration(
         }
     """
     try:
-        # PASO 1: Validar acceso al proyecto
-        project = validate_project_access(db, project_id, current_user)
+        # PASO 1: Validar acceso al proyecto (owner/editor: escribe en la BD destino)
+        project = validate_project_access(db, project_id, current_user, require_write=True)
         logger.info(f"Executing migration for project {project_id}")
 
-        # PASO 2: Obtener o generar script
-        if request.script_id:
-            # Cargar script guardado usando CRUD ORM
-            script_row = migration_script_crud.get_migration_script_by_id_orm(
-                db, request.script_id, project_id
-            )
-
-            if not script_row or str(script_row.get("project_id")) != str(project_id):
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND, detail="Script not found"
-                )
-
-            script = script_row["script_content"]
-            logger.info(f"Loaded saved script: {request.script_id}")
-        else:
-            # Generar nuevo script on-the-fly
-            mappings = get_project_mappings(db, project_id)
-
-            if not mappings:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="No mappings found for this project",
-                )
-
-            script = MigrationScriptService.generate_insert_script(
-                mappings=[dict(m) for m in mappings],
-                origin_adapter=None,
-                dest_adapter=None,
-                project_name=project["name"],
-            )
-            logger.info("Generated new script on-the-fly")
-
-        # PASO 3: Obtener adapter de conexión destino
+        # PASO 2: Obtener sesión de conexión destino (define el dialecto del script)
         db_service = get_db_connection_service()
 
         try:
@@ -384,25 +433,30 @@ async def execute_migration(
                 status_code=status.HTTP_410_GONE, detail="Destination connection session expired"
             )
 
-        # Descifrar config y obtener adapter
         config = db_service.get_decrypted_config(session)
-        dest_adapter = db_service._get_adapter(config)
 
-        # Conectar adapter
+        # PASO 3: Obtener o generar script para el dialecto destino
+        script = load_or_generate_script(db, project_id, project, request.script_id, config.dialect)
+
+        # PASO 4: Conectar a la BD destino (sin límite de lectura: los INSERT pueden tardar)
+        dest_adapter = db_service._get_adapter(config, long_running=True)
         dest_adapter.connect()
         logger.info(f"Connected to destination database: {config.dialect}")
 
-        # PASO 4: Ejecutar migración usando ExecutionService
+        # PASO 5: Ejecutar migración usando ExecutionService
         execution_service = ExecutionService()
 
-        result = execution_service.execute_migration(
-            db_connection=db,
-            project_id=project_id,
-            script=script,
-            dest_adapter=dest_adapter,
-            dry_run=request.dry_run,
-            user_id=current_user["id"],
-        )
+        try:
+            result = execution_service.execute_migration(
+                db_connection=db,
+                project_id=project_id,
+                script=script,
+                dest_adapter=dest_adapter,
+                dry_run=request.dry_run,
+                user_id=current_user["id"],
+            )
+        finally:
+            dest_adapter.disconnect()
 
         logger.info(f"Migration execution completed: {result['status']}")
 
@@ -461,7 +515,7 @@ async def execute_migration(
     summary="Get execution status",
     description="Consulta el estado y progreso de una ejecución de migración",
 )
-async def get_execution_status(
+def get_execution_status(
     project_id: str,
     execution_id: str,
     db=Depends(get_db_session),
@@ -569,7 +623,7 @@ async def get_execution_status(
     summary="List executions",
     description="Lista todas las ejecuciones de migración del proyecto",
 )
-async def list_executions(
+def list_executions(
     project_id: str,
     status_filter: Optional[str] = None,
     limit: int = 10,
@@ -645,7 +699,7 @@ async def list_executions(
     summary="Get dependency graph",
     description="Obtiene el grafo de dependencias entre tablas para visualización",
 )
-async def get_dependency_graph(
+def get_dependency_graph(
     project_id: str,
     dest_connection_session_id: Optional[str] = None,
     db=Depends(get_db_session),
@@ -758,7 +812,7 @@ async def get_dependency_graph(
     summary="Recent migrations",
     description="Returns the latest migration executions across all accessible projects",
 )
-async def get_recent_migrations(
+def get_recent_migrations(
     limit: int = 5,
     db=Depends(get_db_session),
     current_user=Depends(get_current_user),

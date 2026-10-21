@@ -135,12 +135,15 @@ class DBConnectionService:
         """
         return f"{self.REDIS_KEY_PREFIX}:{user_id}:{session_id}"
 
-    def _get_adapter(self, config: DBConnectionConfig):
+    def _get_adapter(self, config: DBConnectionConfig, long_running: bool = False):
         """
         Obtiene el adapter apropiado según el dialecto.
 
         Args:
             config: Configuración de conexión
+            long_running: Si True, no se limita el tiempo de espera de respuesta de las
+                queries (ejecución de migraciones). Por defecto las lecturas usan el
+                mismo timeout que la conexión (introspección de metadata).
 
         Returns:
             Instancia del adapter (PostgreSQLAdapter, MySQLAdapter, etc.)
@@ -149,6 +152,8 @@ class DBConnectionService:
             DBConnectionServiceError: Si el dialecto no está soportado
         """
         adapter_config = config.to_adapter_config()
+        if long_running:
+            adapter_config["read_timeout"] = None
 
         if config.dialect == "postgresql":
             return PostgreSQLAdapter(adapter_config)

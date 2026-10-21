@@ -307,6 +307,48 @@ def test_execute_script_adapter_not_connected(execution_service, sample_script):
 
 
 # =============================================================================
+# TEST 7: TRANSACTION CONTROL IN SCRIPT IS NEVER EXECUTED
+# =============================================================================
+
+
+def _executed_sql(adapter):
+    cursor = adapter.connection.cursor.return_value
+    return [c.args[0] for c in cursor.execute.call_args_list]
+
+
+def test_dry_run_skips_script_commit(execution_service, mock_dest_adapter, sample_script):
+    """El COMMIT del script no debe ejecutarse: un dry-run no puede persistir cambios"""
+
+    execution_service._execute_script(adapter=mock_dest_adapter, script=sample_script, dry_run=True)
+
+    executed = _executed_sql(mock_dest_adapter)
+    assert executed, "Expected data statements to be executed"
+    assert not any(sql.strip().upper() in ("BEGIN", "COMMIT") for sql in executed)
+    mock_dest_adapter.connection.rollback.assert_called_once()
+    mock_dest_adapter.connection.commit.assert_not_called()
+
+
+def test_execute_script_disables_autocommit(execution_service, mock_dest_adapter, sample_script):
+    """La conexión destino se usa en modo transaccional"""
+    mock_dest_adapter.connection = Mock()
+    mock_dest_adapter.connection.autocommit = True
+    mock_dest_adapter.connection.cursor = Mock(return_value=Mock(rowcount=1))
+
+    execution_service._execute_script(adapter=mock_dest_adapter, script=sample_script, dry_run=True)
+
+    assert mock_dest_adapter.connection.autocommit is False
+
+
+def test_script_parsing_keeps_literals_intact(execution_service):
+    """Un ';' o '--' dentro de un literal no parte la sentencia"""
+    script = "INSERT INTO t (a) SELECT 'x;y -- z' FROM s;\nSELECT 1;"
+
+    statements = execution_service._parse_sql_script(script)
+
+    assert statements == ["INSERT INTO t (a) SELECT 'x;y -- z' FROM s", "SELECT 1"]
+
+
+# =============================================================================
 # SUMMARY
 # =============================================================================
 

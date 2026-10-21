@@ -63,6 +63,9 @@ class MySQLAdapter(BaseDBAdapter):
 
     def connect(self) -> None:
         """Establece conexión con MySQL"""
+        # connect_timeout solo cubre el TCP connect; sin read/write timeout un servidor
+        # que acepta la conexión pero no responde bloquea el hilo indefinidamente
+        read_timeout = self.connection_config.get("read_timeout", self.timeout)
         try:
             self.connection = pymysql.connect(
                 host=self.connection_config["host"],
@@ -71,6 +74,8 @@ class MySQLAdapter(BaseDBAdapter):
                 user=self.connection_config["user"],
                 password=self.connection_config["password"],
                 connect_timeout=self.timeout,
+                read_timeout=read_timeout,
+                write_timeout=self.timeout,
                 # Usar DictCursor para retornar rows como dicts
                 cursorclass=pymysql.cursors.DictCursor,
                 charset="utf8mb4",

@@ -24,6 +24,7 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 
 from app.utils.db_adapters.base_adapter import BaseDBAdapter
+from app.utils.sql_safety import is_transaction_control, split_sql_statements
 from utilities.migrations.validators import BackupManager
 
 logger = logging.getLogger(__name__)
@@ -312,16 +313,19 @@ class ExecutionService:
 
         connection = adapter.connection
         assert connection is not None, "Adapter connection is None"
+
+        # La transacción la controla este servicio (COMMIT/ROLLBACK al final), nunca
+        # el script: sin esto un dry-run podría persistir cambios
+        self._disable_autocommit(connection)
         cursor = connection.cursor()
 
         try:
             # Parsear script en statements individuales
-            statements = self._parse_sql_script(script)
+            statements = self._parse_sql_script(script, dialect=self._adapter_dialect(adapter))
 
-            # Filtrar statements ejecutables (no vacíos ni solo comentarios)
-            executable_statements = [
-                s for s in statements if s.strip() and not s.strip().startswith("--")
-            ]
+            # Filtrar statements ejecutables: el control de transacciones del script
+            # (BEGIN/COMMIT/ROLLBACK/...) se ignora para no romper el dry-run
+            executable_statements = [s for s in statements if not is_transaction_control(s)]
             total_statements = len(executable_statements)
 
             logger.info(
@@ -341,8 +345,8 @@ class ExecutionService:
             for idx, stmt in enumerate(statements, start=1):
                 stmt_start = time.time()
 
-                # Ignorar statements vacíos o solo comentarios
-                if not stmt.strip() or stmt.strip().startswith("--"):
+                if is_transaction_control(stmt):
+                    logger.info(f"Skipping transaction control statement {idx}: {stmt[:50]}")
                     continue
 
                 try:
@@ -412,90 +416,36 @@ class ExecutionService:
         finally:
             cursor.close()
 
-    def _parse_sql_script(self, script: str) -> List[str]:
+    def _parse_sql_script(self, script: str, dialect: str = "postgresql") -> List[str]:
         """
         Parsea script SQL en statements individuales.
 
+        Respeta literales, identificadores citados, comentarios, bloques DO $$ de
+        PostgreSQL y bloques PL/SQL de Oracle (ver sql_safety.split_sql_statements).
+
         Args:
             script: Script SQL completo
+            dialect: Dialecto SQL del script
 
         Returns:
-            Lista de statements SQL (sin comentarios de línea)
-
-        Note:
-            Este es un parser simple. Para scripts complejos con
-            bloques PL/pgSQL (DO $$...), puede necesitar mejoras.
+            Lista de statements SQL (sin comentarios)
         """
-        # Remover comentarios de línea (-- ...)
-        lines = script.split("\n")
-        cleaned_lines = []
+        return split_sql_statements(script, dialect)
 
-        for line in lines:
-            # Remover comentarios inline
-            if "--" in line:
-                # Solo remover si el -- no está dentro de una string
-                line = line.split("--")[0]
+    @staticmethod
+    def _adapter_dialect(adapter: BaseDBAdapter) -> str:
+        dialect = getattr(adapter, "dialect", None)
+        return dialect if isinstance(dialect, str) else "postgresql"
 
-            cleaned_lines.append(line)
-
-        cleaned_script = "\n".join(cleaned_lines)
-
-        # Dividir por ';' (excepto dentro de bloques DO $$)
-        # Para simplificar, detectamos bloques DO $$ ... END $$;
-        statements = []
-        current_stmt = []
-        in_do_block = False
-
-        for line in cleaned_lines:
-            line_stripped = line.strip()
-
-            # Detectar inicio de bloque DO
-            if line_stripped.upper().startswith("DO $$") or line_stripped.upper().startswith(
-                "DO $"
-            ):
-                in_do_block = True
-                current_stmt.append(line)
-                continue
-
-            # Detectar fin de bloque DO
-            if in_do_block and ("END $$;" in line_stripped or "END $;" in line_stripped):
-                in_do_block = False
-                current_stmt.append(line)
-                statements.append("\n".join(current_stmt))
-                current_stmt = []
-                continue
-
-            # Si estamos en bloque DO, agregar toda la línea
-            if in_do_block:
-                current_stmt.append(line)
-                continue
-
-            # Si no estamos en bloque, dividir por ';'
-            if ";" in line:
-                parts = line.split(";")
-                for i, part in enumerate(parts):
-                    if i == len(parts) - 1 and not part.strip():
-                        # Última parte vacía, terminar statement
-                        if current_stmt or part.strip():
-                            current_stmt.append(part)
-                            statements.append("\n".join(current_stmt))
-                            current_stmt = []
-                    else:
-                        current_stmt.append(part)
-                        if i < len(parts) - 1:  # No es la última parte
-                            statements.append("\n".join(current_stmt))
-                            current_stmt = []
-            else:
-                current_stmt.append(line)
-
-        # Agregar último statement si quedó algo
-        if current_stmt:
-            statements.append("\n".join(current_stmt))
-
-        # Filtrar statements vacíos
-        statements = [s.strip() for s in statements if s.strip()]
-
-        return statements
+    @staticmethod
+    def _disable_autocommit(connection) -> None:
+        """Desactiva autocommit en la conexión destino (psycopg2, pyodbc, pymysql, oracledb)."""
+        autocommit = getattr(connection, "autocommit", None)
+        if callable(autocommit):
+            # pymysql expone autocommit como método
+            autocommit(False)
+        else:
+            connection.autocommit = False
 
     def _extract_table_name(self, statement: str) -> Optional[str]:
         """

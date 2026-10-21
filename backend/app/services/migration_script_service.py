@@ -16,6 +16,14 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.utils.db_adapters.base_adapter import BaseDBAdapter
+from app.utils.sql_safety import (
+    quote_identifier,
+    quote_literal,
+    safe_routine_suffix,
+    sanitize_comment,
+    validate_sql_expression,
+    validate_sql_type,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -137,7 +145,7 @@ class MigrationScriptService:
         ]
 
         if project_name:
-            lines.append(f"-- Project: {project_name}")
+            lines.append(f"-- Project: {sanitize_comment(project_name)}")
 
         lines.append(f"-- Total mappings: {len(mappings)}")
         lines.append(f"-- Total tables: {len(all_tables)}")
@@ -179,7 +187,7 @@ class MigrationScriptService:
         for table_idx, dest_table in enumerate(all_tables, start=1):
             table_mapping_list = table_mappings[dest_table]
 
-            lines.append(f"-- Table {table_idx}/{len(all_tables)}: {dest_table}")
+            lines.append(f"-- Table {table_idx}/{len(all_tables)}: {sanitize_comment(dest_table)}")
 
             try:
                 # Preparar columnas y valores para el INSERT
@@ -227,7 +235,10 @@ class MigrationScriptService:
                 )
 
                 # Construir SELECT clause
-                select_clause = f"SELECT {', '.join(select_expressions)} FROM {origin_table}"
+                select_clause = (
+                    f"SELECT {', '.join(select_expressions)} "
+                    f"FROM {quote_identifier(origin_table, dialect)}"
+                )
 
                 # Obtener row count real del adapter si está disponible
                 estimated_rows = None
@@ -256,7 +267,11 @@ class MigrationScriptService:
                     lines.append(batched_insert)
                 else:
                     # INSERT simple sin batching
-                    lines.append(f"INSERT INTO {dest_table} ({', '.join(dest_columns)})")
+                    quoted_columns = [quote_identifier(c, dialect) for c in dest_columns]
+                    lines.append(
+                        f"INSERT INTO {quote_identifier(dest_table, dialect)} "
+                        f"({', '.join(quoted_columns)})"
+                    )
                     lines.append(select_clause + ";")
 
                 table_stats[dest_table] = len(table_mapping_list)
@@ -264,7 +279,7 @@ class MigrationScriptService:
 
             except HashNotFoundError as e:
                 logger.error(f"Hash not found for table {dest_table}: {str(e)}")
-                lines.append(f"-- ERROR: {str(e)}")
+                lines.append(f"-- ERROR: {sanitize_comment(str(e))}")
                 lines.append("")
 
         # ============================================================================
@@ -288,7 +303,8 @@ class MigrationScriptService:
             for table_name in all_tables:
                 columns_count = table_stats.get(table_name, 0)
                 lines.append(
-                    f"SELECT '{table_name}' AS table_name, COUNT(*) AS row_count FROM {table_name};"
+                    f"SELECT {quote_literal(table_name, dialect)} AS table_name, "
+                    f"COUNT(*) AS row_count FROM {quote_identifier(table_name, dialect)};"
                 )
             lines.append("")
 
@@ -450,7 +466,11 @@ class MigrationScriptService:
             PostgreSQL: ('BEGIN;', 'COMMIT;')
             MySQL: ('START TRANSACTION;', 'COMMIT;')
             SQL Server: ('BEGIN TRANSACTION;', 'COMMIT TRANSACTION;')
-            Oracle: ('BEGIN', 'COMMIT;')
+            Oracle: ('SET TRANSACTION READ WRITE;', 'COMMIT;')
+
+        Note:
+            Oracle inicia la transacción implícitamente; un "BEGIN" suelto es un
+            bloque PL/SQL incompleto, por eso se usa SET TRANSACTION.
         """
         dialect_lower = dialect.lower()
 
@@ -461,7 +481,7 @@ class MigrationScriptService:
         elif dialect_lower == "sqlserver":
             return ("BEGIN TRANSACTION;", "COMMIT TRANSACTION;")
         elif dialect_lower == "oracle":
-            return ("BEGIN", "COMMIT;")
+            return ("SET TRANSACTION READ WRITE;", "COMMIT;")
         else:
             # Default to PostgreSQL syntax
             logger.warning(f"Unknown dialect '{dialect}', using PostgreSQL syntax")
@@ -491,7 +511,9 @@ class MigrationScriptService:
         if dialect_lower == "postgresql":
             lines.append("-- Disable triggers and constraints")
             for table in tables:
-                lines.append(f"ALTER TABLE {table} DISABLE TRIGGER ALL;")
+                lines.append(
+                    f"ALTER TABLE {quote_identifier(table, dialect_lower)} DISABLE TRIGGER ALL;"
+                )
         elif dialect_lower == "mysql":
             lines.append("-- Disable foreign key checks")
             lines.append("SET FOREIGN_KEY_CHECKS=0;")
@@ -499,11 +521,15 @@ class MigrationScriptService:
         elif dialect_lower == "sqlserver":
             lines.append("-- Disable constraints")
             for table in tables:
-                lines.append(f"ALTER TABLE {table} NOCHECK CONSTRAINT ALL;")
+                lines.append(
+                    f"ALTER TABLE {quote_identifier(table, dialect_lower)} NOCHECK CONSTRAINT ALL;"
+                )
         elif dialect_lower == "oracle":
             lines.append("-- Disable triggers")
             for table in tables:
-                lines.append(f"ALTER TABLE {table} DISABLE ALL TRIGGERS;")
+                lines.append(
+                    f"ALTER TABLE {quote_identifier(table, dialect_lower)} DISABLE ALL TRIGGERS;"
+                )
         else:
             logger.warning(f"Unknown dialect '{dialect}', skipping constraint disabling")
 
@@ -533,18 +559,24 @@ class MigrationScriptService:
         if dialect_lower == "postgresql":
             lines.append("-- Enable triggers and constraints")
             for table in tables:
-                lines.append(f"ALTER TABLE {table} ENABLE TRIGGER ALL;")
+                lines.append(
+                    f"ALTER TABLE {quote_identifier(table, dialect_lower)} ENABLE TRIGGER ALL;"
+                )
         elif dialect_lower == "mysql":
             lines.append("-- Enable foreign key checks")
             lines.append("SET FOREIGN_KEY_CHECKS=1;")
         elif dialect_lower == "sqlserver":
             lines.append("-- Enable constraints")
             for table in tables:
-                lines.append(f"ALTER TABLE {table} CHECK CONSTRAINT ALL;")
+                lines.append(
+                    f"ALTER TABLE {quote_identifier(table, dialect_lower)} CHECK CONSTRAINT ALL;"
+                )
         elif dialect_lower == "oracle":
             lines.append("-- Enable triggers")
             for table in tables:
-                lines.append(f"ALTER TABLE {table} ENABLE ALL TRIGGERS;")
+                lines.append(
+                    f"ALTER TABLE {quote_identifier(table, dialect_lower)} ENABLE ALL TRIGGERS;"
+                )
         else:
             logger.warning(f"Unknown dialect '{dialect}', skipping constraint enabling")
 
@@ -577,7 +609,13 @@ class MigrationScriptService:
             Sin transformación y tipos compatibles: "email"
         """
         # Si hay transformación customizada, aplicarla
+        column_name = quote_identifier(column_name, dialect)
+
         if transformation_logic:
+            # La transformación es una expresión SQL por diseño: se exige que sea
+            # una única expresión (sin ';' ni comentarios) para que no pueda
+            # inyectar sentencias adicionales en el script
+            validate_sql_expression(transformation_logic)
             # Reemplazar placeholder {column} por el nombre real
             return transformation_logic.replace("{column}", column_name)
 
@@ -611,6 +649,7 @@ class MigrationScriptService:
             DATE -> TIMESTAMP: "column_name::TIMESTAMP" (PostgreSQL)
             INTEGER -> VARCHAR: "CAST(column_name AS VARCHAR(50))"
         """
+        dest_type = validate_sql_type(dest_type)
         origin_upper = origin_type.upper()
         dest_upper = dest_type.upper()
         dialect_lower = dialect.lower()
@@ -692,7 +731,9 @@ class MigrationScriptService:
             END $$;
         """
         dialect_lower = dialect.lower()
-        columns_str = ", ".join(columns)
+        columns_str = ", ".join(quote_identifier(c, dialect_lower) for c in columns)
+        routine_suffix = safe_routine_suffix(table_name)
+        table_name = quote_identifier(table_name, dialect_lower)
         total_rows_str = str(total_rows) if total_rows else "NULL"
 
         if dialect_lower == "postgresql":
@@ -716,7 +757,7 @@ END $$;"""
             # MySQL no tiene DO blocks, usar procedimiento temporal
             return f"""-- Batched insert for MySQL
 DELIMITER $$
-CREATE PROCEDURE batch_insert_{table_name}()
+CREATE PROCEDURE batch_insert_{routine_suffix}()
 BEGIN
     DECLARE batch_size INT DEFAULT {batch_size};
     DECLARE offset_val INT DEFAULT 0;
@@ -733,8 +774,8 @@ BEGIN
 END$$
 DELIMITER ;
 
-CALL batch_insert_{table_name}();
-DROP PROCEDURE batch_insert_{table_name};"""
+CALL batch_insert_{routine_suffix}();
+DROP PROCEDURE batch_insert_{routine_suffix};"""
 
         elif dialect_lower == "sqlserver":
             return f"""-- Batched insert for SQL Server
@@ -768,7 +809,6 @@ BEGIN
 
         offset_val := offset_val + batch_size;
         DBMS_OUTPUT.PUT_LINE('Progress: ' || offset_val || ' / ' || total_rows);
-        COMMIT;
     END LOOP;
 END;
 /"""
