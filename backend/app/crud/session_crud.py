@@ -8,6 +8,8 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
+from config import SESSION_LIFETIME_HOURS
+
 logger = logging.getLogger(__name__)
 
 
@@ -23,7 +25,7 @@ def create_session_orm(
     ip_address: Optional[str] = None,
     user_agent: Optional[str] = None,
     device_fingerprint: Optional[str] = None,
-    expires_in_hours: int = 24,
+    expires_in_hours: int = SESSION_LIFETIME_HOURS,
     refresh_token: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
@@ -36,7 +38,7 @@ def create_session_orm(
         ip_address: Dirección IP del cliente
         user_agent: User agent del navegador
         device_fingerprint: Fingerprint del dispositivo
-        expires_in_hours: Horas hasta expiración (default 24)
+        expires_in_hours: Horas hasta expiración (default SESSION_LIFETIME_HOURS, 24)
         refresh_token: Token de refresh opcional
 
     Returns:

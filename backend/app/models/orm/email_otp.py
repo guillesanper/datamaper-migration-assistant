@@ -10,7 +10,7 @@ Características:
 - PK es user_id (un OTP activo por usuario)
 """
 
-from sqlalchemy import Column, DateTime, ForeignKey, Index, Text
+from sqlalchemy import Column, DateTime, ForeignKey, Index, Integer, Text, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
@@ -28,6 +28,7 @@ class EmailOTP(Base):
     - user_id: Usuario al que pertenece el OTP (PK y FK)
     - otp_code: Código OTP hasheado
     - expires_at: Timestamp de expiración
+    - failed_attempts: Comprobaciones erróneas del código (se invalida al llegar a OTP_MAX_ATTEMPTS)
     """
 
     __tablename__ = "email_otps"
@@ -42,6 +43,9 @@ class EmailOTP(Base):
 
     # Expiración
     expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
+
+    # Intentos fallidos de este código (lo incrementa verify_otp_orm; create_otp_orm lo reinicia)
+    failed_attempts = Column(Integer, nullable=False, server_default=text("0"))
 
     # Relationship
     user = relationship("User", backref="email_otp")

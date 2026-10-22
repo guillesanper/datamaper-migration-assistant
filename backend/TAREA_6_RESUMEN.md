@@ -1,5 +1,7 @@
 # TAREA 6: Actualización Endpoint POST /mappings - Resumen de Cambios
 
+> Documento histórico: el SQL citado está archivado en `backend/docs/legacy_sql/`; el esquema sale de Alembic.
+
 **Fecha:** 2025-12-09
 **Estado:** ✅ COMPLETADA
 **Archivo modificado:** [backend/app/routers/mappings.py](backend/app/routers/mappings.py)
@@ -383,7 +385,7 @@ Ver sección **TAREA 7** en [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) par
 ## 📚 Referencias
 
 - [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) - Plan completo del proyecto
-- [backend/utilities/migrations/005_mapping_source_types.sql](backend/utilities/migrations/005_mapping_source_types.sql) - Migración SQL
+- [backend/docs/legacy_sql/migrations/005_mapping_source_types.sql](docs/legacy_sql/migrations/005_mapping_source_types.sql) - Migración SQL
 - [backend/app/crud/mappings_crud.py](backend/app/crud/mappings_crud.py) - CRUD actualizado (líneas 13-295)
 - [backend/app/services/db_connection_service.py](backend/app/services/db_connection_service.py) - Servicio de sesiones Redis
 
@@ -392,7 +394,7 @@ Ver sección **TAREA 7** en [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) par
 ## ⚠️ Notas Importantes
 
 1. **ANTES de usar modo connector**, el usuario DEBE:
-   - ✅ Ejecutar migración 005: `python backend/utilities/migrations/run_migration_005.py`
+   - ✅ Aplicar el esquema con `alembic upgrade head` (la migración 005 original, `run_migration_005.py`, se eliminó)
    - ✅ Crear una sesión de conexión con `POST /api/db-connections/test-and-create-session`
 
 2. **Las sesiones tienen TTL**:

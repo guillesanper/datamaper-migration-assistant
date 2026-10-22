@@ -10,6 +10,7 @@ import psycopg2
 import pytest
 from dotenv import load_dotenv
 from fastapi.testclient import TestClient
+from passlib.context import CryptContext
 
 from alembic import command
 from alembic.config import Config
@@ -118,6 +119,25 @@ def get_unique_user_data(worker_id, base_username="testuser", base_email="test@e
 # Variable global para cachear el estado de la DB
 _db_setup_checked = False
 
+BACKEND_DIR = Path(__file__).resolve().parent.parent
+
+ALEMBIC_INI = "alembic.ini"
+
+
+def build_alembic_config(db_url: str) -> Config:
+    """Config de Alembic apuntando a la BD indicada (único punto de construcción para los tests)."""
+    cfg = Config(str(BACKEND_DIR / ALEMBIC_INI))
+    cfg.set_main_option("script_location", str(BACKEND_DIR / "alembic"))
+    # "%" se escapa porque configparser lo interpreta como interpolación
+    cfg.set_main_option("sqlalchemy.url", db_url.replace("%", "%%"))
+    return cfg
+
+
+@pytest.fixture(scope="session")
+def alembic_config_factory():
+    """Devuelve build_alembic_config, para que los tests no dependan de qué ini está activo."""
+    return build_alembic_config
+
 
 def create_worker_database(worker_id: str, config: dict) -> bool:
     """
@@ -191,32 +211,17 @@ def create_worker_database(worker_id: str, config: dict) -> bool:
         cursor.close()
         worker_conn.close()
 
-        # Aplicar schema usando SQLAlchemy ORM models
+        # Aplicar schema con las migraciones de Alembic (misma ruta que producción)
         try:
             from urllib.parse import quote_plus
 
-            from sqlalchemy import create_engine
-
-            from app.database.base import Base
-
-            # Importar todos los modelos para que se registren en Base.metadata
-            from app.models import orm  # Esto importa todos los modelos ORM
-
-            # Crear engine para esta base de datos con URL-encoding
             db_user = quote_plus(config["user"])
             db_password = quote_plus(config["password"])
             db_url = f"postgresql://{db_user}:{db_password}@{config['host']}:{config.get('port', '5432')}/{db_name}"
-            engine = create_engine(
-                db_url, echo=False, client_encoding="utf8", connect_args={"client_encoding": "utf8"}
-            )
 
-            # Crear todas las tablas desde los modelos ORM (con tipos UUID)
-            Base.metadata.create_all(bind=engine)
+            command.upgrade(build_alembic_config(db_url), "head")
 
-            # Cerrar engine
-            engine.dispose()
-
-            print(f"✓ Base de datos {db_name} creada exitosamente con modelos ORM (UUID)")
+            print(f"✓ Base de datos {db_name} creada exitosamente con migraciones Alembic")
             return True
 
         except Exception as e:
@@ -570,7 +575,6 @@ def client(test_db_connection, setup_worker_databases):
     from fastapi import Response
 
     from app.database import session as session_module
-    from app.database.database import get_db
     from app.database.session import get_db_session
 
     # Rollback cualquier transacción fallida antes de empezar
@@ -594,15 +598,6 @@ def client(test_db_connection, setup_worker_databases):
     def mock_get_db():
         return ConnectionWrapper(test_db_connection)
 
-    # Override del dependency para FastAPI
-    def override_get_db():
-        try:
-            yield test_db_connection
-        finally:
-            pass
-
-    app.dependency_overrides[get_db] = override_get_db
-
     # Override de get_db_session para SQLAlchemy Session
     def override_get_db_session():
         session = session_module.SessionLocal()
@@ -623,7 +618,6 @@ def client(test_db_connection, setup_worker_databases):
 
     # Parchear get_db y Redis globalmente usando unittest.mock
     with (
-        patch("app.database.database.get_db", mock_get_db),
         patch("app.utils.security_logger.get_db", mock_get_db),
         patch("app.middleware.rate_limiting.get_db", mock_get_db),
         patch("app.middleware.csrf_protection.get_db", mock_get_db),
@@ -641,6 +635,13 @@ def client(test_db_connection, setup_worker_databases):
     app.dependency_overrides.clear()
 
 
+TEST_USER_PASSWORD = "Test123!@#"
+# bcrypt cuesta ~0,25 s: se calcula una vez por proceso y no en cada test
+TEST_USER_PASSWORD_HASH = CryptContext(schemes=["bcrypt"], deprecated="auto").hash(
+    TEST_USER_PASSWORD
+)
+
+
 @pytest.fixture
 def test_user(db_session, worker_id):
     """Usuario de prueba verificado - único por worker para pytest-xdist"""
@@ -656,15 +657,19 @@ def test_user(db_session, worker_id):
 
     email = f"test{suffix}@example.com"
     username = f"testuser{suffix}"
-    password = "Test123!@#"
+    password = TEST_USER_PASSWORD
 
     try:
         # Intentar obtener usuario existente primero usando SQLAlchemy
         existing_user = db_session.query(User).filter(User.email == email).first()
 
         if existing_user:
-            # Si el usuario ya existe, solo asegurarse de que está verificado
+            # El usuario se comparte entre tests: otros tests cambian su contraseña o
+            # provocan bloqueos por intentos fallidos, así que se restaura el estado conocido
+            existing_user.password_hash = TEST_USER_PASSWORD_HASH
             existing_user.is_verified = True
+            existing_user.failed_login_attempts = 0
+            existing_user.locked_until = None
             db_session.commit()
 
             return {

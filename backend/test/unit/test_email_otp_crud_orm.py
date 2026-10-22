@@ -287,3 +287,185 @@ def test_delete_otp_orm_after_create(clean_db_session: Session):
     # Verificar que ya no existe
     otp_db_after = clean_db_session.query(EmailOTP).filter(EmailOTP.user_id == user_id).first()
     assert otp_db_after is None
+
+
+# ============================================================================
+# Tests de intentos fallidos por OTP (hallazgo 3 de la deuda de autenticación)
+# ============================================================================
+#
+# Cada código admite OTP_MAX_ATTEMPTS comprobaciones erróneas: al llegar a ese número el OTP
+# se borra y ni siquiera el código correcto vuelve a valer (hay que pedir otro). Un reenvío
+# da otra tanda de intentos.
+
+
+def _failed_attempts(session: Session, user_id) -> int:
+    """Contador de intentos fallidos del OTP, leído directamente de la tabla"""
+    from sqlalchemy import text
+
+    return session.execute(
+        text("SELECT failed_attempts FROM email_otps WHERE user_id = :user_id"),
+        {"user_id": str(user_id)},
+    ).scalar()
+
+
+def _otp_exists(session: Session, user_id) -> bool:
+    from sqlalchemy import text
+
+    session.rollback()  # lectura fresca: sin snapshot de una transacción anterior
+    return (
+        session.execute(
+            text("SELECT 1 FROM email_otps WHERE user_id = :user_id"), {"user_id": str(user_id)}
+        ).first()
+        is not None
+    )
+
+
+def _max_attempts() -> int:
+    from app.config.security import security_settings
+
+    return security_settings.OTP_MAX_ATTEMPTS
+
+
+def test_otp_max_attempts_default_is_five():
+    """El plan fija 5 intentos por código (configurable con OTP_MAX_ATTEMPTS)"""
+    import os
+
+    if os.getenv("OTP_MAX_ATTEMPTS"):
+        pytest.skip("OTP_MAX_ATTEMPTS definido en el entorno")
+
+    assert _max_attempts() == 5
+
+
+def test_new_otp_starts_with_zero_failed_attempts(clean_db_session: Session):
+    user_id = create_test_user(clean_db_session)
+
+    email_otp_crud.create_otp_orm(clean_db_session, user_id, "12345678")
+
+    assert _failed_attempts(clean_db_session, user_id) == 0
+
+
+def test_wrong_code_increments_failed_attempts(clean_db_session: Session):
+    user_id = create_test_user(clean_db_session)
+    email_otp_crud.create_otp_orm(clean_db_session, user_id, "12345678")
+
+    assert email_otp_crud.verify_otp_orm(clean_db_session, user_id, "00000000") is False
+    assert _failed_attempts(clean_db_session, user_id) == 1
+
+    assert email_otp_crud.verify_otp_orm(clean_db_session, user_id, "00000001") is False
+    assert _failed_attempts(clean_db_session, user_id) == 2
+
+
+def test_otp_is_invalidated_after_max_failed_attempts(clean_db_session: Session):
+    """N fallos borran el OTP y el código correcto posterior falla"""
+    user_id = create_test_user(clean_db_session)
+    email_otp_crud.create_otp_orm(clean_db_session, user_id, "12345678")
+
+    for attempt in range(_max_attempts()):
+        assert (
+            email_otp_crud.verify_otp_orm(clean_db_session, user_id, f"0000000{attempt}") is False
+        )
+
+    assert _otp_exists(clean_db_session, user_id) is False
+    assert email_otp_crud.verify_otp_orm(clean_db_session, user_id, "12345678") is False
+
+
+def test_otp_survives_one_failure_below_the_limit(clean_db_session: Session):
+    user_id = create_test_user(clean_db_session)
+    email_otp_crud.create_otp_orm(clean_db_session, user_id, "12345678")
+
+    for attempt in range(_max_attempts() - 1):
+        assert (
+            email_otp_crud.verify_otp_orm(clean_db_session, user_id, f"0000000{attempt}") is False
+        )
+
+    assert _otp_exists(clean_db_session, user_id) is True
+
+
+def test_correct_code_still_works_after_failures_below_the_limit(clean_db_session: Session):
+    user_id = create_test_user(clean_db_session)
+    email_otp_crud.create_otp_orm(clean_db_session, user_id, "12345678")
+
+    for attempt in range(_max_attempts() - 1):
+        assert (
+            email_otp_crud.verify_otp_orm(clean_db_session, user_id, f"0000000{attempt}") is False
+        )
+
+    assert email_otp_crud.verify_otp_orm(clean_db_session, user_id, "12345678") is True
+    assert _otp_exists(clean_db_session, user_id) is False
+
+
+def test_resend_resets_failed_attempts(clean_db_session: Session):
+    """create_otp_orm (el reenvío) pone el contador a 0 y da otra tanda completa"""
+    user_id = create_test_user(clean_db_session)
+    email_otp_crud.create_otp_orm(clean_db_session, user_id, "12345678")
+    for attempt in range(_max_attempts() - 1):
+        email_otp_crud.verify_otp_orm(clean_db_session, user_id, f"0000000{attempt}")
+    assert _failed_attempts(clean_db_session, user_id) == _max_attempts() - 1
+
+    email_otp_crud.create_otp_orm(clean_db_session, user_id, "87654321")
+
+    assert _failed_attempts(clean_db_session, user_id) == 0
+    for attempt in range(_max_attempts() - 1):
+        assert (
+            email_otp_crud.verify_otp_orm(clean_db_session, user_id, f"1111111{attempt}") is False
+        )
+    assert email_otp_crud.verify_otp_orm(clean_db_session, user_id, "87654321") is True
+
+
+def test_failed_attempts_are_per_user(clean_db_session: Session):
+    user_a = create_test_user(clean_db_session)
+    user_b = create_test_user(clean_db_session)
+    email_otp_crud.create_otp_orm(clean_db_session, user_a, "12345678")
+    email_otp_crud.create_otp_orm(clean_db_session, user_b, "87654321")
+
+    for attempt in range(_max_attempts()):
+        email_otp_crud.verify_otp_orm(clean_db_session, user_a, f"0000000{attempt}")
+
+    assert _otp_exists(clean_db_session, user_a) is False
+    assert _otp_exists(clean_db_session, user_b) is True
+    assert _failed_attempts(clean_db_session, user_b) == 0
+    assert email_otp_crud.verify_otp_orm(clean_db_session, user_b, "87654321") is True
+
+
+def test_otp_limit_follows_the_setting(clean_db_session: Session, monkeypatch):
+    from app.config.security import security_settings
+
+    monkeypatch.setattr(security_settings, "OTP_MAX_ATTEMPTS", 2)
+    user_id = create_test_user(clean_db_session)
+    email_otp_crud.create_otp_orm(clean_db_session, user_id, "12345678")
+
+    assert email_otp_crud.verify_otp_orm(clean_db_session, user_id, "00000000") is False
+    assert email_otp_crud.verify_otp_orm(clean_db_session, user_id, "00000001") is False
+
+    assert _otp_exists(clean_db_session, user_id) is False
+    assert email_otp_crud.verify_otp_orm(clean_db_session, user_id, "12345678") is False
+
+
+def test_failed_attempts_increment_is_atomic(clean_db_session: Session):
+    """
+    El incremento se hace en SQL (failed_attempts = failed_attempts + 1), no leyendo y
+    escribiendo desde Python: un fallo registrado por otra sesión entre la lectura y la
+    escritura no se pierde (peticiones concurrentes no obtienen intentos de más).
+    """
+    from sqlalchemy import text
+
+    from app.database import session as session_module
+
+    user_id = create_test_user(clean_db_session)
+    email_otp_crud.create_otp_orm(clean_db_session, user_id, "12345678")
+    # La sesión del test ya conoce el OTP con 0 fallos (expire_on_commit=False)
+    clean_db_session.query(EmailOTP).filter(EmailOTP.user_id == user_id).first()
+
+    other = session_module.SessionLocal()
+    try:
+        other.execute(
+            text("UPDATE email_otps SET failed_attempts = 3 WHERE user_id = :user_id"),
+            {"user_id": str(user_id)},
+        )
+        other.commit()
+    finally:
+        other.close()
+
+    assert email_otp_crud.verify_otp_orm(clean_db_session, user_id, "00000000") is False
+
+    assert _failed_attempts(clean_db_session, user_id) == 4

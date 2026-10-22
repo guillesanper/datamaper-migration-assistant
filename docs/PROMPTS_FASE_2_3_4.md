@@ -1,5 +1,7 @@
 # Prompts Tareas Individuales - Fases 2, 3 y 4
 
+> Documento histórico: el SQL citado está archivado en `backend/docs/legacy_sql/`; el esquema sale de Alembic.
+
 **Continuación de**: `PROMPTS_TAREAS_INDIVIDUALES.md`
 
 ---

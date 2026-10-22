@@ -1,5 +1,7 @@
 # Plan de Implementación: Sistema de Mappings Híbrido (Import + Connector)
 
+> Documento histórico: el SQL citado está archivado en `backend/docs/legacy_sql/`; el esquema sale de Alembic. El script `run_migration_005.py` citado se eliminó.
+
 ## 📊 Estado de Implementación
 
 **Última actualización:** 2025-12-09 16:45
@@ -14,8 +16,8 @@
 | **TOTAL** | **9** | **4** | **5** | **44% Completado** |
 
 **Archivos creados:**
-- ✅ `backend/utilities/migrations/005_mapping_source_types.sql`
-- ✅ `backend/utilities/migrations/run_migration_005.py`
+- ✅ `backend/docs/legacy_sql/migrations/005_mapping_source_types.sql`
+- ✅ `backend/utilities/migrations/run_migration_005.py` (eliminado)
 
 **Archivos modificados:**
 - ✅ `backend/app/crud/mappings_crud.py` (TAREA 2 y 3 completadas)
@@ -158,8 +160,8 @@ CREATE TABLE mappings (
 ## ✅ TAREA 1: Migración SQL (Prioridad: CRÍTICA) - COMPLETADA
 
 **Estado:** ✅ COMPLETADA
-**Archivo creado:** `backend/utilities/migrations/005_mapping_source_types.sql`
-**Script de aplicación:** `backend/utilities/migrations/run_migration_005.py`
+**Archivo creado:** `backend/docs/legacy_sql/migrations/005_mapping_source_types.sql`
+**Script de aplicación:** `backend/utilities/migrations/run_migration_005.py` (eliminado)
 
 **Notas importantes:**
 - Se creó como migración 005 (no 004) porque ya existía 004_fix_encryption_nullable_fields.sql
@@ -177,7 +179,7 @@ CREATE TABLE mappings (
 - ✅ Migración automática de datos existentes a modo 'import'
 - ✅ Comentarios SQL en todas las columnas
 
-**Archivo original (referencia):** `backend/utilities/migrations/005_mapping_source_types.sql`
+**Archivo original (referencia):** `backend/docs/legacy_sql/migrations/005_mapping_source_types.sql`
 
 **Prompt para Claude:**
 ```
@@ -215,13 +217,13 @@ Usa `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` para que sea idempotente.
 ```
 
 **Archivos de referencia:**
-- `backend/utilities/migrations/003_encryption_infrastructure.sql` - Estilo y formato
-- `backend/utilities/schema.sql` (líneas 59-69) - Estructura actual de `mappings`
+- `backend/docs/legacy_sql/migrations/003_encryption_infrastructure.sql` - Estilo y formato
+- `backend/docs/legacy_sql/schema.sql` (líneas 59-69) - Estructura actual de `mappings`
 
 **Validación:**
 ```bash
 # Aplicar migración en BD de desarrollo
-psql -U postgres -d datamap_dev -f backend/utilities/migrations/004_mapping_source_types.sql
+psql -U postgres -d datamap_dev -f backend/docs/legacy_sql/migrations/005_mapping_source_types.sql
 
 # Verificar columnas creadas
 psql -U postgres -d datamap_dev -c "\d+ mappings"
@@ -793,8 +795,8 @@ Formato: Markdown con bloques de código JSON.
 
 ### Fase 1: Base de Datos (Día 1) - ✅ COMPLETADA
 1. ✅ **TAREA 1: Migración SQL** - **COMPLETADA** ✨
-   - Archivo: `backend/utilities/migrations/005_mapping_source_types.sql`
-   - Script: `backend/utilities/migrations/run_migration_005.py`
+   - Archivo: `backend/docs/legacy_sql/migrations/005_mapping_source_types.sql`
+   - Script: `backend/utilities/migrations/run_migration_005.py` (eliminado)
 2. ⏳ Verificar con `psql -c "\d+ mappings"` (Pendiente de ejecutar por el usuario)
 
 ### Fase 2: Backend Core (Día 1-2) - 🚧 EN PROGRESO (67% completado)
@@ -830,7 +832,7 @@ Formato: Markdown con bloques de código JSON.
 ### Aplicar migraciones
 ```bash
 cd backend
-psql -U postgres -d datamap_dev -f utilities/migrations/004_mapping_source_types.sql
+psql -U postgres -d datamap_dev -f docs/legacy_sql/migrations/005_mapping_source_types.sql
 ```
 
 ### Ejecutar tests
@@ -885,8 +887,8 @@ curl -X POST http://localhost:8000/api/projects/{project_id}/generate-migration-
 - `backend/app/services/db_connection_service.py` - Gestión sesiones
 
 ### Schema y Migraciones
-- `backend/utilities/schema.sql` - Schema inicial
-- `backend/utilities/migrations/003_encryption_infrastructure.sql` - Última migración
+- `backend/docs/legacy_sql/schema.sql` - Schema inicial
+- `backend/docs/legacy_sql/migrations/003_encryption_infrastructure.sql` - Última migración
 
 ### Tests
 - `backend/test/unit/db_connectors/test_postgres_adapter.py` - Ejemplo de tests

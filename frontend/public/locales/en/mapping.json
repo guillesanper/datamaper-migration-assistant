@@ -263,8 +263,14 @@
       "noFile": "Please select a file"
     },
     "example": {
-      "excelHint": "Excel format with columns: table_name | type | column_name | data_type",
-      "label": "Format Example"
+      "excelHint": "Excel (.xlsx / .xls): first sheet, with the headers in row 1. Each row describes one column of a table.",
+      "hint": {
+        "both": "Origin and destination: each table states its side in type (\"origin\" or \"destination\"), so both can be mixed in the same file.",
+        "destination": "Destination only: every table in the file must have type = \"destination\".",
+        "origin": "Origin only: every table in the file must have type = \"origin\"."
+      },
+      "label": "Format Example",
+      "required": "All the fields and headers shown are required."
     },
     "file": {
       "dropHint": "Maximum 15MB • Formats: JSON, CSV, Excel",
@@ -283,7 +289,7 @@
     },
     "importing": "Importing...",
     "info": {
-      "direction": "Make sure to correctly specify whether it is an origin or destination table",
+      "direction": "The type of each table (origin or destination) decides which side it is imported to",
       "duplicates": "Duplicate tables and columns will be ignored",
       "duplicatesReplace": "Duplicate tables will be deleted and recreated with the file data. Their associated mappings will also be deleted.",
       "title": "Important information:",
@@ -304,9 +310,10 @@
     "success": "Import successful: {{details}}",
     "title": "Import Table Structure",
     "type": {
-      "both": "Both",
+      "both": "Origin and destination",
       "destOnly": "Destination only",
-      "label": "Import Type",
+      "hint": "Select what your file contains to see the matching example. The side of each table is read from the file itself.",
+      "label": "File Contents",
       "originOnly": "Origin only"
     }
   },

@@ -27,6 +27,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    text,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import relationship
@@ -132,7 +133,7 @@ class MigrationExecution(Base):
     status = Column(String(20), nullable=False, default="pending", index=True)
 
     # Progreso
-    rows_migrated = Column(Integer, default=0, nullable=False)
+    rows_migrated = Column(Integer, default=0, server_default=text("0"), nullable=False)
 
     # Timestamps
     started_at = Column(DateTime(timezone=True), index=True)
@@ -201,7 +202,9 @@ class MigrationAuditLog(Base):
 
     __tablename__ = "migration_audit_log"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id = Column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, server_default=text("gen_random_uuid()")
+    )
 
     # Número de migración
     migration_number = Column(String(20), nullable=False, index=True)

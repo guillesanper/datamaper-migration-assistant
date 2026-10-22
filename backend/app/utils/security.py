@@ -5,6 +5,8 @@ Funciones para generación de tokens, sanitización, manejo de IPs, etc.
 
 import hashlib
 import hmac
+import ipaddress
+import logging
 import re
 import secrets
 import string
@@ -15,6 +17,55 @@ from fastapi import Request
 from user_agents import parse
 
 from app.config.security import security_settings
+
+logger = logging.getLogger(__name__)
+
+# El aviso de X-Forwarded-For sin TRUSTED_PROXY_HOPS sale una vez por proceso (con varios
+# workers de gunicorn, una vez por worker)
+_proxy_header_warned = False
+
+
+def _mask_ip(ip: str) -> str:
+    """
+    Enmascara una IP para el log: IPv4 sin el último octeto (203.0.113.x), IPv6 con sus dos
+    primeros grupos (2001:db8::x) y cualquier otra cosa como ***.
+    """
+    try:
+        address = ipaddress.ip_address(ip)
+    except ValueError:
+        return "***"
+    if address.version == 4:
+        return ".".join(str(address).split(".")[:3]) + ".x"
+    groups = address.exploded.split(":")[:2]
+    return ":".join(f"{int(group, 16):x}" for group in groups) + "::x"
+
+
+def _warn_proxy_header_ignored(forwarded_for: Any, socket_ip: str) -> None:
+    """
+    Avisa (una vez por proceso) de que llega X-Forwarded-For con TRUSTED_PROXY_HOPS=0.
+
+    Detrás de un proxy todos los usuarios llegarían con la IP del proxy y los límites por IP
+    serían globales. Solo registra cuántas entradas trae la cabecera y las dos últimas
+    enmascaradas, nunca la cabecera completa. No cambia la IP que devuelve get_client_ip.
+    """
+    global _proxy_header_warned
+
+    if not isinstance(forwarded_for, str):
+        return
+    entries = [entry.strip() for entry in forwarded_for.split(",") if entry.strip()]
+    if not entries:
+        return
+
+    _proxy_header_warned = True
+    logger.warning(
+        "TRUSTED_PROXY_HOPS=0 pero llegan peticiones con X-Forwarded-For: entradas=%d, "
+        "últimas=[%s], socket=%s. Los límites por IP usan la IP del socket (con un proxy "
+        "delante, la de todos los usuarios): fija TRUSTED_PROXY_HOPS al número de proxies de "
+        "confianza (ver backend/docs/DEPLOYMENT_GUIDE.md)",
+        len(entries),
+        ", ".join(_mask_ip(entry) for entry in entries[-2:]),
+        _mask_ip(socket_ip),
+    )
 
 
 class SecurityUtils:
@@ -136,7 +187,16 @@ class SecurityUtils:
     @staticmethod
     def get_client_ip(request: Request) -> str:
         """
-        Obtiene la IP real del cliente considerando proxies
+        Obtiene la IP del cliente considerando los proxies de confianza
+
+        X-Forwarded-For solo cuenta si hay proxies de confianza delante (TRUSTED_PROXY_HOPS > 0):
+        con N saltos, la IP es la entrada N-ésima desde la derecha, la que añadió el primer proxy
+        de confianza; las de su izquierda las puede escribir el cliente. Con 0 saltos (por
+        defecto) la cabecera se ignora y se usa la IP del socket. X-Real-IP y X-Forwarded no se
+        usan: no hay forma de saber quién las escribió.
+
+        Con 0 saltos, fuera de desarrollo, si llega X-Forwarded-For avisa una vez por proceso de
+        que probablemente falta fijar TRUSTED_PROXY_HOPS (el aviso no cambia la IP devuelta).
 
         Args:
             request: Request de FastAPI
@@ -144,22 +204,20 @@ class SecurityUtils:
         Returns:
             str: IP del cliente
         """
-        # Verificar headers de proxy en orden de prioridad
-        forwarded_for = request.headers.get("X-Forwarded-For")
+        socket_ip = str(request.client.host) if request.client else "unknown"
+
+        hops = security_settings.TRUSTED_PROXY_HOPS
+        forwarded_for = request.headers.get("X-Forwarded-For") if hops > 0 else None
         if forwarded_for:
-            # Tomar la primera IP (cliente original)
-            return str(forwarded_for.split(",")[0].strip())
+            entries = [entry.strip() for entry in forwarded_for.split(",") if entry.strip()]
+            # Con menos entradas que saltos la cadena no es la esperada: no se fía
+            if len(entries) >= hops:
+                return entries[-hops]
+        elif hops == 0 and not _proxy_header_warned and not security_settings.DEVELOPMENT_MODE:
+            # Solo avisa: el valor devuelto es el mismo con y sin cabecera
+            _warn_proxy_header_ignored(request.headers.get("X-Forwarded-For"), socket_ip)
 
-        real_ip = request.headers.get("X-Real-IP")
-        if real_ip:
-            return str(real_ip.strip())
-
-        forwarded = request.headers.get("X-Forwarded")
-        if forwarded:
-            return str(forwarded.strip())
-
-        # Fallback a la IP directa
-        return str(request.client.host) if request.client else "unknown"
+        return socket_ip
 
     @staticmethod
     def hash_ip_address(ip_address: str) -> str:

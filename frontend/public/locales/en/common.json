@@ -54,6 +54,10 @@
     },
     "mapping": {
       "filename_required": "Filename is required.",
+      "import_invalid_value": "Invalid value \"{{value}}\" for field '{{field}}' in {{where}}. Allowed values: {{allowed}}.",
+      "import_missing_field": "Required field '{{field}}' is missing in {{where}}.",
+      "import_schema_invalid": "The JSON file does not have the expected structure at {{where}}: {{reason}}",
+      "import_unknown_field": "Field '{{field}}' is not allowed in {{where}}.",
       "not_found": "Mapping not found.",
       "unsupported_format": "Unsupported format."
     },

@@ -1,5 +1,7 @@
 # Prompts de Tareas Individuales - Sistema Enterprise de Migración
 
+> Documento histórico: el SQL citado está archivado en `backend/docs/legacy_sql/`; el esquema sale de Alembic.
+
 **Fecha**: 2025-01-16
 **Propósito**: Prompts copy-paste para ejecutar cada tarea de forma independiente
 **Uso**: Copiar el prompt completo y pegarlo en un nuevo chat de Claude
@@ -122,7 +124,7 @@ Dependencias necesarias:
 
 Archivos relacionados:
 - Lectura: `backend/app/utils/db_adapters/base_adapter.py` (para entender interface)
-- Lectura: `backend/init-db/01_schema.sql` (ver estructura de tablas/constraints)
+- Lectura: `backend/docs/legacy_sql/schema.sql` (ver estructura de tablas/constraints)
 
 Test file a crear:
 `backend/test/unit/services/test_dependency_graph_service.py`
@@ -371,7 +373,7 @@ from typing import Dict, Any, Optional
 from sqlalchemy.orm import Session
 
 from app.utils.db_adapters.base_adapter import BaseDBAdapter
-from backend.utilities.migrations.rollback import BackupManager
+from backend.utilities.migrations.validators import BackupManager
 
 logger = logging.getLogger(__name__)
 
@@ -555,11 +557,11 @@ class ExecutionService:
 ```
 
 Dependencias:
-- `backend.utilities.migrations.rollback.BackupManager` (ya existe)
+- `backend.utilities.migrations.validators.BackupManager` (ya existe)
 - Tabla `migration_executions` (debe existir, ver tarea 1.6)
 
 Archivos relacionados:
-- Lectura: `backend/utilities/migrations/rollback.py` (BackupManager)
+- Lectura: `backend/utilities/migrations/validators.py` (BackupManager)
 - Lectura: `backend/app/utils/db_adapters/base_adapter.py` (para ejecutar SQL)
 
 Test file a crear:
@@ -1058,7 +1060,7 @@ Contexto:
 Soy desarrollador de DataMap. Necesito crear las nuevas tablas de base de datos para soportar ejecución de migraciones, con tracking de progreso y logs detallados.
 
 Archivo a crear:
-`backend/utilities/migrations/006_migration_execution_tables.sql`
+`backend/docs/legacy_sql/migrations/006_migration_execution_tables.sql`
 
 Tablas a crear:
 

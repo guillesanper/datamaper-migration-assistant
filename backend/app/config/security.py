@@ -4,13 +4,14 @@ Contiene todas las configuraciones relacionadas con seguridad, rate limiting, CS
 """
 
 import os
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 
 class SecuritySettings:
     """Configuraciones de seguridad centralizadas"""
 
     # === RATE LIMITING ===
+    # En login el máximo es de FALLOS por ventana: los logins correctos no cuentan
     RATE_LIMIT_LOGIN_ATTEMPTS = int(os.getenv("RATE_LIMIT_LOGIN_ATTEMPTS", "5"))
     RATE_LIMIT_LOGIN_WINDOW = int(os.getenv("RATE_LIMIT_LOGIN_WINDOW", "900"))  # 15 minutos
 
@@ -23,34 +24,15 @@ class SecuritySettings:
     RATE_LIMIT_VERIFY_ATTEMPTS = int(os.getenv("RATE_LIMIT_VERIFY_ATTEMPTS", "10"))
     RATE_LIMIT_VERIFY_WINDOW = int(os.getenv("RATE_LIMIT_VERIFY_WINDOW", "3600"))  # 1 hora
 
-    # Configuración de rate limits por endpoint
-    RATE_LIMITS: Dict[str, Dict[str, Any]] = {
-        "/login": {
-            "max_attempts": RATE_LIMIT_LOGIN_ATTEMPTS,
-            "window_seconds": RATE_LIMIT_LOGIN_WINDOW,
-            "block_duration": 300,  # 5 minutos de bloqueo (reducido)
-        },
-        "/register": {
-            "max_attempts": RATE_LIMIT_REGISTER_ATTEMPTS,
-            "window_seconds": RATE_LIMIT_REGISTER_WINDOW,
-            "block_duration": 600,  # 10 minutos de bloqueo (reducido)
-        },
-        "/forgot": {
-            "max_attempts": RATE_LIMIT_FORGOT_ATTEMPTS,
-            "window_seconds": RATE_LIMIT_FORGOT_WINDOW,
-            "block_duration": 600,  # 10 minutos de bloqueo (reducido)
-        },
-        "/verify-code": {
-            "max_attempts": RATE_LIMIT_VERIFY_ATTEMPTS,
-            "window_seconds": RATE_LIMIT_VERIFY_WINDOW,
-            "block_duration": 300,  # 5 minutos de bloqueo (reducido)
-        },
-        "/reset": {
-            "max_attempts": 5,
-            "window_seconds": 3600,
-            "block_duration": 600,  # 10 minutos de bloqueo (reducido)
-        },
-    }
+    RATE_LIMIT_RESEND_ATTEMPTS = int(os.getenv("RATE_LIMIT_RESEND_ATTEMPTS", "3"))
+    RATE_LIMIT_RESEND_WINDOW = int(os.getenv("RATE_LIMIT_RESEND_WINDOW", "600"))  # 10 minutos
+
+    RATE_LIMIT_RESET_ATTEMPTS = int(os.getenv("RATE_LIMIT_RESET_ATTEMPTS", "5"))
+    RATE_LIMIT_RESET_WINDOW = int(os.getenv("RATE_LIMIT_RESET_WINDOW", "3600"))  # 1 hora
+
+    # Saltos de proxy de confianza delante de la app: con N > 0 la IP del cliente es la entrada
+    # N-ésima (desde la derecha) de X-Forwarded-For; con 0, la IP del socket (cabecera ignorada)
+    TRUSTED_PROXY_HOPS = int(os.getenv("TRUSTED_PROXY_HOPS", "0"))
 
     # === CSRF PROTECTION ===
     CSRF_TOKEN_LENGTH = int(os.getenv("CSRF_TOKEN_LENGTH", "32"))
@@ -61,6 +43,8 @@ class SecuritySettings:
     OTP_LENGTH = int(os.getenv("OTP_LENGTH", "8"))  # Cambiado de 6 a 8
     OTP_EXPIRY_MINUTES = int(os.getenv("OTP_EXPIRY_MINUTES", "15"))
     OTP_CHARSET = os.getenv("OTP_CHARSET", "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")  # Alfanumérico
+    # Intentos fallidos permitidos por código: al llegar a este número el OTP se invalida
+    OTP_MAX_ATTEMPTS = int(os.getenv("OTP_MAX_ATTEMPTS", "5"))
 
     # === ACCOUNT LOCKOUT ===
     MAX_FAILED_LOGIN_ATTEMPTS = int(os.getenv("MAX_FAILED_LOGIN_ATTEMPTS", "5"))
@@ -185,11 +169,17 @@ class SecuritySettings:
     DEVELOPMENT_MODE = os.getenv("ENV", "production").lower() in ["development", "dev", "debug"]
     DISABLE_CSRF_IN_DEVELOPMENT = os.getenv("DISABLE_CSRF_IN_DEV", "true").lower() == "true"
 
-    @classmethod
-    def get_rate_limit_config(cls, endpoint: str) -> Dict[str, Any]:
-        """Obtiene la configuración de rate limiting para un endpoint específico"""
+    def get_rate_limit_config(
+        self, endpoint: str, rule: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Obtiene la configuración de rate limiting aplicable a un endpoint
+
+        La regla explícita (la del decorador de la ruta) manda sobre la de por defecto; en
+        desarrollo, la configuración permisiva manda sobre ambas.
+        """
         # En modo desarrollo, usar configuración muy permisiva
-        if cls.DEVELOPMENT_MODE:
+        if self.DEVELOPMENT_MODE:
             # Configuración súper permisiva para desarrollo
             dev_config = {
                 "max_attempts": 1000,  # Muchísimos intentos en desarrollo
@@ -198,6 +188,9 @@ class SecuritySettings:
             }
             return dev_config
 
+        if rule is not None:
+            return rule
+
         # Configuración para producción
         default_config = {
             "max_attempts": 20,  # Más intentos en producción
@@ -205,7 +198,7 @@ class SecuritySettings:
             "block_duration": 300,  # 5 minutos de bloqueo
         }
 
-        return cls.RATE_LIMITS.get(endpoint, default_config)
+        return default_config
 
     @classmethod
     def is_csrf_protected_endpoint(cls, path: str, method: str) -> bool:
@@ -283,6 +276,29 @@ def validate_security_config():
 
     if security_settings.OTP_LENGTH < 6:
         errors.append("OTP_LENGTH debe ser al menos 6 caracteres")
+
+    # Sin SMTP el código OTP no llega al usuario (fuera de desarrollo tampoco se imprime)
+    if not (os.getenv("SMTP_SERVER") and os.getenv("EMAIL_FROM")):
+        warnings.append(
+            "SMTP_SERVER/EMAIL_FROM no configurados: los códigos de verificación no se entregarán"
+        )
+
+    # Detrás del proxy de Render (que fija RENDER=true) con 0 saltos todos los usuarios comparten
+    # la IP del proxy: los límites por IP serían globales
+    on_render = os.getenv("RENDER", "").strip().lower() == "true"
+    if on_render and security_settings.TRUSTED_PROXY_HOPS == 0:
+        warnings.append(
+            "TRUSTED_PROXY_HOPS=0 en Render: todos los usuarios comparten IP y los límites por IP "
+            "serán globales (fija TRUSTED_PROXY_HOPS; ver backend/docs/DEPLOYMENT_GUIDE.md)"
+        )
+
+    # Con "*" uvicorn confía en cualquier cliente y reescribe request.client con la primera
+    # entrada de X-Forwarded-For, que escribe el cliente
+    if os.getenv("FORWARDED_ALLOW_IPS", "").strip() == "*":
+        warnings.append(
+            "FORWARDED_ALLOW_IPS=*: uvicorn confiaría en cualquier cliente y request.client "
+            "pasaría a ser suplantable (lista solo las IPs de los proxies de confianza)"
+        )
 
     # Validaciones de cifrado
     if security_settings.ENCRYPTION_ENABLED:

@@ -188,7 +188,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.database import get_db
+from app.database.session import get_db_session
 from app.models import User
 
 
@@ -198,7 +198,7 @@ router = APIRouter()
 @router.get("/users/{user_id}")
 async def get_user(
     user_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db_session)
 ) -> Optional[User]:
     """Retrieve a user by ID."""
     user = db.query(User).filter(User.id == user_id).first()

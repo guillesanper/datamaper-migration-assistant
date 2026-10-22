@@ -1,5 +1,7 @@
 # Sistema de Colaboración y Control de Versiones - Backend Completado
 
+> Documento histórico: el SQL citado está archivado en `backend/docs/legacy_sql/`; el esquema sale de Alembic.
+
 ## 📋 Resumen de Implementación
 
 **Fecha**: 2025-01-22
@@ -320,7 +322,7 @@ curl -X POST "http://localhost:8000/api/versions" \
 
 - **Frontend README**: `frontend/src/version_control_README.md`
 - **Collaboration README**: `COLLABORATION_SYSTEM_README.md`
-- **Migration SQL**: `backend/utilities/migration_001_collaboration_versioning.sql`
+- **Migration SQL**: `backend/docs/legacy_sql/migration_001_collaboration_versioning.sql`
 - **Components Docs**: `frontend/src/components/version_control/README.md`
 
 ---

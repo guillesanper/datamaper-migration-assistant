@@ -124,7 +124,7 @@ CSRF_TOKEN_EXPIRY=3600  # 1 hora
 CSRF_SECRET_KEY=<your-secret>
 
 # Rate Limiting General
-RATE_LIMIT_LOGIN_ATTEMPTS=5
+RATE_LIMIT_LOGIN_ATTEMPTS=5  # fallos de login por ventana (los aciertos no cuentan)
 RATE_LIMIT_LOGIN_WINDOW=900  # 15 minutos
 
 # Security Headers

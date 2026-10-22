@@ -177,6 +177,7 @@ class SecurityLogger:
         success: bool,
         user_id: Optional[str] = None,
         stage: str = "request",  # request, verify, reset
+        failure_reason: Optional[str] = None,
     ):
         """
         Registra un intento de reset de contraseña
@@ -187,6 +188,7 @@ class SecurityLogger:
             success: Si la operación fue exitosa
             user_id: ID del usuario (si se encontró)
             stage: Etapa del proceso (request, verify, reset)
+            failure_reason: Motivo real del fallo (solo al log: la respuesta es uniforme)
         """
         event_type = f"password_reset_{stage}_{'success' if success else 'failed'}"
         severity = "info" if success else "warning"
@@ -195,6 +197,9 @@ class SecurityLogger:
             "email_attempted": SecurityUtils.sanitize_email(email),
             "stage": stage,
         }
+
+        if not success and failure_reason:
+            details["failure_reason"] = failure_reason
 
         await SecurityLogger.log_event(
             event_type=event_type,

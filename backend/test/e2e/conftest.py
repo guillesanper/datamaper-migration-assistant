@@ -123,7 +123,6 @@ def test_environment_setup(test_db_connection, clean_redis):
 
     from fastapi import Response
 
-    from app.database.database import get_db
     from app.routers.db_connections import get_redis_client
     from main import app
 
@@ -152,23 +151,15 @@ def test_environment_setup(test_db_connection, clean_redis):
     def mock_get_db():
         return ConnectionWrapper(test_db_connection)
 
-    def override_get_db():
-        try:
-            yield ConnectionWrapper(test_db_connection)
-        finally:
-            pass
-
     # Mock para get_redis_client
     def mock_get_redis_client():
         return clean_redis
 
     # Override de dependencies de FastAPI
-    app.dependency_overrides[get_db] = override_get_db
     app.dependency_overrides[get_redis_client] = lambda: clean_redis
 
     # Parchear todas las referencias - el contexto se mantendrá durante TODO el test
     with (
-        patch("app.database.database.get_db", mock_get_db),
         patch("app.utils.security_logger.get_db", mock_get_db),
         patch("app.middleware.rate_limiting.get_db", mock_get_db),
         patch("app.middleware.csrf_protection.get_db", mock_get_db),
@@ -274,7 +265,6 @@ def authenticated_client_with_redis_old(test_db_connection, clean_redis, worker_
     from fastapi import Response
     from fastapi.testclient import TestClient
 
-    from app.database.database import get_db
     from app.routers.db_connections import get_redis_client
     from app.services.auth_service import AuthService
     from main import app
@@ -354,15 +344,7 @@ def authenticated_client_with_redis_old(test_db_connection, clean_redis, worker_
     def mock_get_db():
         return ConnectionWrapper(test_db_connection)
 
-    def override_get_db():
-        try:
-            # Usar ConnectionWrapper para la dependencia también
-            yield ConnectionWrapper(test_db_connection)
-        finally:
-            pass
-
     # Override de dependencies de FastAPI
-    app.dependency_overrides[get_db] = override_get_db
     app.dependency_overrides[get_redis_client] = lambda: clean_redis
 
     # Mock para get_redis_client que devuelve nuestro FakeRedis
@@ -371,7 +353,6 @@ def authenticated_client_with_redis_old(test_db_connection, clean_redis, worker_
 
     # Parchear todas las referencias a get_db y Redis (para middleware y otras partes no FastAPI)
     with (
-        patch("app.database.database.get_db", mock_get_db),
         patch("app.utils.security_logger.get_db", mock_get_db),
         patch("app.middleware.rate_limiting.get_db", mock_get_db),
         patch("app.middleware.csrf_protection.get_db", mock_get_db),
