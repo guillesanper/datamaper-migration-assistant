@@ -536,9 +536,8 @@ class TestImportStructure:
 class TestGenerateMigrationScript:
     @pytest.fixture(autouse=True)
     def _master_key(self, monkeypatch):
-        monkeypatch.setenv(
-            "ENCRYPTION_MASTER_KEY", "test-encryption-key-min-32-chars-long-for-security"
-        )
+        # base64 de 32 bytes (ENCRYPTION_MASTER_KEY estricta)
+        monkeypatch.setenv("ENCRYPTION_MASTER_KEY", "ZGF0YW1hcC10ZXN0LW1hc3Rlci1rZXktMzItYnl0ZXM=")
 
     def test_without_mappings_returns_404(self, authenticated_client, schema_project):
         r = authenticated_client.post(

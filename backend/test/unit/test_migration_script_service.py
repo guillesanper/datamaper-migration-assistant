@@ -40,7 +40,7 @@ class TestTransactionWrappers:
 
     def test_oracle_transaction(self):
         begin, commit = MigrationScriptService._generate_transaction_wrapper("oracle")
-        assert begin == "BEGIN"
+        assert begin == "SET TRANSACTION READ WRITE;"
         assert commit == "COMMIT;"
 
     def test_unknown_dialect_defaults_to_postgresql(self):
@@ -526,6 +526,106 @@ class TestHashResolution:
         )
 
         assert result == "email"
+
+
+class TestScriptInjectionHardening:
+    """Valores de mappings/proyecto no pueden inyectar sentencias en el script"""
+
+    @staticmethod
+    def _mapping(**overrides):
+        mapping = {
+            "origin_table": "src",
+            "origin_column": "a",
+            "destination_table": "dst",
+            "destination_column": "b",
+        }
+        mapping.update(overrides)
+        return mapping
+
+    def _statements(self, script, dialect="postgresql"):
+        from app.utils.sql_safety import split_sql_statements
+
+        return split_sql_statements(script, dialect)
+
+    def test_project_name_newline_stays_in_comment(self):
+        script = MigrationScriptService.generate_insert_script(
+            mappings=[self._mapping()], project_name="P\nDROP TABLE victims;"
+        )
+        assert not any("DROP TABLE" in stmt for stmt in self._statements(script))
+
+    def test_identifiers_are_quoted(self):
+        script = MigrationScriptService.generate_insert_script(
+            mappings=[self._mapping(destination_table='dst"; DROP TABLE t; --')],
+            include_constraints=False,
+        )
+        statements = self._statements(script)
+        assert not any(stmt.startswith("DROP") for stmt in statements)
+        assert 'INSERT INTO "dst""; DROP TABLE t; --" (b)' in script
+
+    def test_identifiers_quoted_per_dialect(self):
+        script = MigrationScriptService.generate_insert_script(
+            mappings=[self._mapping(destination_table="order-items")],
+            dialect="mysql",
+        )
+        assert "INSERT INTO `order-items` (b)" in script
+        assert "FROM `order-items`;" in script
+
+    def test_validation_query_escapes_literal(self):
+        script = MigrationScriptService.generate_insert_script(
+            mappings=[self._mapping(destination_table="o'x")], include_constraints=False
+        )
+        assert "SELECT 'o''x' AS table_name" in script
+
+    def test_transformation_with_statement_terminator_rejected(self):
+        from app.utils.sql_safety import UnsafeSQLError
+
+        with pytest.raises(UnsafeSQLError):
+            MigrationScriptService.generate_insert_script(
+                mappings=[self._mapping(transformation_logic="{column}); DROP TABLE users; --")]
+            )
+
+    def test_transformation_uses_quoted_column(self):
+        script = MigrationScriptService.generate_insert_script(
+            mappings=[
+                self._mapping(origin_column="first name", transformation_logic="UPPER({column})")
+            ]
+        )
+        assert 'SELECT UPPER("first name") FROM src' in script
+
+    def test_invalid_destination_type_rejected(self):
+        from app.utils.sql_safety import UnsafeSQLError
+
+        with pytest.raises(UnsafeSQLError):
+            MigrationScriptService.generate_insert_script(
+                mappings=[
+                    self._mapping(
+                        origin_data_type="VARCHAR", destination_data_type="INT); DROP TABLE t; --"
+                    )
+                ]
+            )
+
+    def test_batched_insert_quotes_names_and_sanitizes_routine(self):
+        result = MigrationScriptService._generate_batched_insert(
+            table_name="order-items",
+            columns=["first name"],
+            select_clause="SELECT a FROM s",
+            total_rows=10,
+            batch_size=5,
+            dialect="mysql",
+        )
+        assert "INSERT INTO `order-items` (`first name`)" in result
+        assert "PROCEDURE batch_insert_order_items()" in result
+
+    def test_oracle_batched_insert_does_not_commit(self):
+        result = MigrationScriptService._generate_batched_insert(
+            table_name="employees",
+            columns=["emp_id"],
+            select_clause="SELECT emp_id FROM source_emp",
+            total_rows=15000,
+            batch_size=3000,
+            dialect="oracle",
+        )
+        assert "COMMIT" not in result
 
 
 if __name__ == "__main__":

@@ -70,7 +70,6 @@ class TestExecutionRecords:
             execution_id=execution_id,
             status="success",
             rows_migrated=42,
-            backup_id="backup_20250101_000000",
             execution_log=[{"step": 1, "table": "customers", "status": "success"}],
         )
 
