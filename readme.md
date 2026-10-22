@@ -124,13 +124,6 @@ Se ejecuta diariamente a las 2 AM UTC:
 - ✅ Tests end-to-end con docker-compose
 - ✅ Validación de todas las integraciones
 
-### Dependabot
-Actualiza dependencias automáticamente cada lunes:
-- 📦 Backend (pip)
-- 📦 Frontend (npm)
-- 📦 Landing (npm)
-- 📦 GitHub Actions
-
 ## 📦 Deployment
 
 ### Render.com (Producción)
