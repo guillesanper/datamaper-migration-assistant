@@ -15,10 +15,11 @@ Autor: DataMap Testing Team
 """
 
 import asyncio
+import json
 from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
-from fastapi import HTTPException, Request
+from fastapi import Request
 from fastapi.responses import Response
 
 from app.middleware.csrf_protection import (
@@ -662,11 +663,11 @@ class TestCSRFMiddleware:
         mock_request.form = mock_form
 
         # Act & Assert
-        with pytest.raises(HTTPException) as exc_info:
-            await csrf_middleware(mock_request, mock_call_next)
+        # Devuelve la respuesta: una HTTPException en un middleware HTTP acaba en 500
+        response = await csrf_middleware(mock_request, mock_call_next)
 
-        assert exc_info.value.status_code == 403
-        assert "inválido o expirado" in exc_info.value.detail
+        assert response.status_code == 403
+        assert json.loads(response.body)["detail"]["code"] == "security.csrf_token_invalid"
 
     @pytest.mark.asyncio
     @patch("app.middleware.csrf_protection.CSRFProtection.validate_csrf_token")
@@ -688,10 +689,9 @@ class TestCSRFMiddleware:
         mock_validate.return_value = False  # Token inválido
 
         # Act & Assert
-        with pytest.raises(HTTPException) as exc_info:
-            await csrf_middleware(mock_request, mock_call_next)
+        response = await csrf_middleware(mock_request, mock_call_next)
 
-        assert exc_info.value.status_code == 403
+        assert response.status_code == 403
 
     @pytest.mark.asyncio
     @patch("app.middleware.csrf_protection.security_settings")
@@ -712,8 +712,9 @@ class TestCSRFMiddleware:
 
         # Act & Assert
         # Debe buscar en header como fallback
-        with pytest.raises(HTTPException):
-            await csrf_middleware(mock_request, mock_call_next)
+        response = await csrf_middleware(mock_request, mock_call_next)
+
+        assert response.status_code == 403
 
 
 # ============================================================================

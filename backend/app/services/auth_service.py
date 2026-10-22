@@ -18,6 +18,20 @@ from app.utils.security import SecurityUtils
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
+# Mensaje único para usuario inexistente, ya verificado o código incorrecto: distinguirlos
+# permitía saber qué emails tienen cuenta
+INVALID_CODE_MESSAGE = "Código inválido o expirado"
+
+_dummy_password_hash: Optional[str] = None
+
+
+def _verify_against_dummy_hash(password: str) -> None:
+    """Mismo coste bcrypt cuando el usuario no existe (evita enumerar por tiempo)."""
+    global _dummy_password_hash
+    if _dummy_password_hash is None:
+        _dummy_password_hash = pwd_context.hash("datamap-timing-equalizer")
+    pwd_context.verify(password, _dummy_password_hash)
+
 
 class DatabaseError(Exception):
     """Error personalizado para problemas de base de datos"""
@@ -226,6 +240,7 @@ class AuthService:
 
             # Verificar si existe
             if not user:
+                _verify_against_dummy_hash(password)
                 raise AuthenticationError("Credenciales inválidas")
 
             # Verificar bloqueo (locked_until es timestamptz: llega aware; se normaliza por si no)
@@ -315,7 +330,7 @@ class AuthService:
 
             # Verificar OTP usando CRUD ORM (usa bcrypt internamente)
             if not email_otp_crud.verify_otp_orm(self.db, str(user.id), code):
-                raise AuthenticationError("Código inválido o expirado")
+                raise AuthenticationError(INVALID_CODE_MESSAGE)
 
             # Marcar como verificado
             user.is_verified = True  # type: ignore[assignment]
@@ -336,7 +351,7 @@ class AuthService:
         Igual que verify_email_code, el texto de AuthenticationError es el motivo real (para el
         log de seguridad); el endpoint no lo expone.
         """
-        from app.crud import email_otp_crud, session_crud
+        from app.crud import email_otp_crud
         from app.models.orm import User
 
         # Validar nueva contraseña
@@ -355,7 +370,7 @@ class AuthService:
 
             # Verificar código OTP usando CRUD ORM
             if not email_otp_crud.verify_otp_orm(self.db, str(user.id), code):
-                raise AuthenticationError("Código inválido o expirado")
+                raise AuthenticationError(INVALID_CODE_MESSAGE)
 
             # Actualizar contraseña
             now = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -368,13 +383,55 @@ class AuthService:
 
             self.db.commit()
 
-            # Una contraseña nueva invalida las sesiones anteriores (cierra a quien la conociera)
-            session_crud.revoke_all_user_sessions_orm(
-                self.db, user_id=str(user.id), reason="password_reset"
-            )
-
         except AuthenticationError:
             raise
         except Exception as e:
             self.db.rollback()
             raise DatabaseError(f"Error al resetear contraseña: {str(e)}")
+
+        # Una contraseña nueva invalida las sesiones anteriores, también las de cifrado
+        # (cierra a quien la conociera, p. ej. quien robó la contraseña)
+        revoke_user_sessions(self.db, str(user.id), reason="password_reset")
+
+
+def revoke_user_sessions(
+    db: Session, user_id: str, reason: str, except_token: Optional[str] = None
+) -> int:
+    """
+    Revoca las sesiones de login del usuario y sus sesiones de cifrado (claves en Redis).
+
+    Raises:
+        DatabaseError: Si no se pudieron revocar (la contraseña ya está cambiada: mejor
+            avisar que dejar sesiones vivas en silencio)
+    """
+    import logging
+
+    from app.models.orm import UserSession
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    try:
+        query = db.query(UserSession).filter(
+            UserSession.user_id == user_id, UserSession.is_revoked == False  # noqa: E712
+        )
+        if except_token:
+            query = query.filter(UserSession.session_token != except_token)
+        revoked = query.update(
+            {"is_revoked": True, "revoked_at": now, "revoked_reason": reason},
+            synchronize_session=False,
+        )
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise DatabaseError(f"Error al revocar sesiones: {str(e)}")
+
+    if not except_token:
+        try:
+            from app.utils.redis_session_cache import get_encryption_session_cache
+
+            get_encryption_session_cache().invalidate_user_sessions(user_id)
+        except Exception as e:
+            logging.getLogger(__name__).warning(
+                f"Could not invalidate encryption sessions for user {user_id}: {e}"
+            )
+
+    return int(revoked)

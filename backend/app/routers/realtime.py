@@ -2,14 +2,14 @@
 import hashlib
 from typing import Dict, Set
 
-from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from starlette.websockets import WebSocketState
 
 from app.crud import session_crud
 
 # CRUDs ORM
 from app.crud.project_crud import ProjectCRUD
-from app.database.session import get_db_session
+from app.database import session as session_module
 from app.routers.dependencies import get_current_user
 from app.utils.cookies import verify_signed_cookie
 from app.utils.error_codes import ErrorCode, make_error
@@ -120,7 +120,10 @@ async def get_current_user_from_websocket(websocket: WebSocket, db) -> dict:
 
 
 @router.websocket("/ws/projects/{project_id}")
-async def project_ws(websocket: WebSocket, project_id: str, db=Depends(get_db_session)):
+async def project_ws(websocket: WebSocket, project_id: str):
+    # Sesión de BD solo para autenticar: con Depends(get_db_session) la conexión del pool
+    # quedaba ocupada mientras el WebSocket estuviera abierto (una por pestaña)
+    db = session_module.SessionLocal()
     try:
         # Autenticación manual desde cookies del WebSocket
         current_user = await get_current_user_from_websocket(websocket, db)
@@ -131,6 +134,8 @@ async def project_ws(websocket: WebSocket, project_id: str, db=Depends(get_db_se
         # Rechazar conexión si no está autenticado
         await websocket.close(code=1008, reason=str(e.detail))
         return
+    finally:
+        db.close()
 
     await manager.connect(project_id, websocket)
     # Enviar un hello con info mínima por si el cliente la usa
@@ -153,6 +158,9 @@ async def project_ws(websocket: WebSocket, project_id: str, db=Depends(get_db_se
 
             # Otros tipos de mensajes pueden ser ignorados o manejados aquí
     except WebSocketDisconnect:
+        pass
+    finally:
+        # También si el cliente manda algo que no es JSON: no dejar sockets muertos
         manager.disconnect(project_id, websocket)
 
 

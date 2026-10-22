@@ -5,17 +5,20 @@ Maneja la generación, validación y almacenamiento de tokens CSRF
 
 import asyncio
 import functools
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import HTTPException, Request
-from fastapi.responses import Response
+from fastapi import Request
+from fastapi.responses import JSONResponse, Response
 
 from app.config.security import security_settings
 from app.crud import csrf_crud
 from app.database.session import get_db_session
 from app.utils.error_codes import ErrorCode, make_error
 from app.utils.security import SecurityUtils
+
+logger = logging.getLogger(__name__)
 
 # Alias para backward compatibility con tests que patchean get_db
 get_db = get_db_session
@@ -168,59 +171,38 @@ async def csrf_middleware(request: Request, call_next):
     Returns:
         Response: Respuesta procesada
     """
-    # Verificar si el endpoint requiere protección CSRF
     path = request.url.path
     method = request.method
 
-    print(f"🔒 CSRF Middleware - Path: {path}, Method: {method}")
-
     if not security_settings.is_csrf_protected_endpoint(path, method):
-        # No requiere protección, continuar
-        print(f"✅ CSRF - Endpoint {path} no requiere protección")
-        response = await call_next(request)
-        return response
+        return await call_next(request)
 
     # Verificar token CSRF para métodos protegidos
     if method in security_settings.CSRF_PROTECTED_METHODS:
-        print(f"🔒 CSRF - Método {method} requiere protección CSRF")
         csrf_token = None
 
         # Intentar obtener token del formulario
         content_type = request.headers.get("content-type", "")
-        print(f"🔒 CSRF - Content-Type: {content_type}")
-
         if content_type.startswith("application/x-www-form-urlencoded"):
             try:
                 form_data = await request.form()
                 csrf_token = form_data.get("csrf_token")
-                print(
-                    f"🔒 CSRF - Token del formulario: {str(csrf_token)[:20] if csrf_token else 'None'}..."
-                )
             except Exception as e:
-                print(f"❌ CSRF - Error obteniendo formulario: {e}")
-                pass
+                logger.warning(f"CSRF: could not parse form body: {type(e).__name__}")
 
         # Intentar obtener token del header
         if not csrf_token:
             csrf_token = request.headers.get("X-CSRF-Token")
-            print(f"🔒 CSRF - Token del header: {csrf_token[:20] if csrf_token else 'None'}...")
 
-        # Validar token
-        if not csrf_token:
-            print("❌ CSRF - No se encontró token CSRF")
-            raise HTTPException(status_code=403, detail=make_error(ErrorCode.CSRF_TOKEN_INVALID))
+        # JSONResponse y no HTTPException: lanzada desde un middleware HTTP, Starlette
+        # la convierte en un 500 en lugar del 403. Sin registrar el token (ni fragmentos).
+        if not csrf_token or not await CSRFProtection.validate_csrf_token(request, str(csrf_token)):
+            logger.info(f"CSRF token missing or invalid: {method} {path}")
+            return JSONResponse(
+                status_code=403, content={"detail": make_error(ErrorCode.CSRF_TOKEN_INVALID)}
+            )
 
-        token_valid = await CSRFProtection.validate_csrf_token(request, str(csrf_token))
-        print(f"🔒 CSRF - Token válido: {token_valid}")
-
-        if not token_valid:
-            print("❌ CSRF - Token CSRF inválido")
-            raise HTTPException(status_code=403, detail=make_error(ErrorCode.CSRF_TOKEN_INVALID))
-
-    # Procesar request
-    response = await call_next(request)
-
-    return response
+    return await call_next(request)
 
 
 # Función auxiliar para templates
