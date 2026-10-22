@@ -496,7 +496,7 @@ def e2e_encryption_setup(test_environment_setup, db_session, worker_id):
 
 
 @pytest.fixture
-def postgres_connection_config():
+def postgres_connection_config(external_postgres):
     """PostgreSQL test database configuration"""
     return {
         "dialect": "postgresql",
@@ -511,7 +511,7 @@ def postgres_connection_config():
 
 
 @pytest.fixture
-def mysql_connection_config():
+def mysql_connection_config(external_mysql):
     """MySQL test database configuration"""
     return {
         "dialect": "mysql",
@@ -526,7 +526,7 @@ def mysql_connection_config():
 
 
 @pytest.fixture
-def postgres_invalid_config():
+def postgres_invalid_config(external_postgres):
     """Invalid PostgreSQL configuration (wrong password)"""
     return {
         "dialect": "postgresql",
@@ -541,7 +541,7 @@ def postgres_invalid_config():
 
 
 @pytest.fixture
-def mysql_invalid_config():
+def mysql_invalid_config(external_mysql):
     """Invalid MySQL configuration (wrong password)"""
     return {
         "dialect": "mysql",

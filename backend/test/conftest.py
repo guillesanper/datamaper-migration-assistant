@@ -1,5 +1,6 @@
 # tests/conftest.py
 import os
+import socket
 import subprocess
 import sys
 import uuid
@@ -113,6 +114,44 @@ def get_unique_user_data(worker_id, base_username="testuser", base_email="test@e
     unique_username = f"{base_username}_{worker_id}"
 
     return unique_username, unique_email
+
+
+# ============================================================================
+# BDs EXTERNAS (docker-compose.test.yml)
+# ============================================================================
+
+
+def require_external_test_db(name: str, host: str, port: int) -> None:
+    """
+    Omite el test si la BD externa de docker-compose.test.yml no escucha.
+
+    Con REQUIRE_TEST_DATABASES=1 (CI) falla en vez de omitirse, para que no se salten en silencio.
+    """
+    try:
+        socket.create_connection((host, port), timeout=2).close()
+    except OSError as e:
+        message = f"{name} de test no disponible en {host}:{port} (docker-compose.test.yml): {e}"
+        if os.getenv("REQUIRE_TEST_DATABASES") == "1":
+            pytest.fail(message)
+        pytest.skip(message)
+
+
+@pytest.fixture(scope="session")
+def external_test_db_check():
+    """Expone require_external_test_db a los tests de la propia infraestructura"""
+    return require_external_test_db
+
+
+@pytest.fixture(scope="session")
+def external_mysql():
+    """MySQL externo de test (puerto 3307)"""
+    require_external_test_db("MySQL", "localhost", 3307)
+
+
+@pytest.fixture(scope="session")
+def external_postgres():
+    """PostgreSQL externo de test (puerto 5433)"""
+    require_external_test_db("PostgreSQL", "localhost", 5433)
 
 
 # ============================================================================
@@ -283,11 +322,14 @@ def drop_worker_database(worker_id: str, config: dict):
         print(f"⚠️  Error eliminando BD {db_name}: {e}")
 
 
-@pytest.fixture(scope="session", autouse=True)
+@pytest.fixture(scope="session")
 def setup_worker_databases(worker_id):
     """
-    Fixture que crea automáticamente una base de datos específica para cada worker.
-    Se ejecuta al inicio de la sesión de tests y limpia al final.
+    Fixture que crea una base de datos específica para cada worker.
+    Se ejecuta la primera vez que un test la necesita y limpia al final de la sesión.
+
+    No es autouse: los tests unitarios puros deben poder ejecutarse sin PostgreSQL.
+    Los fixtures de BD (db_session, client, test_db_connection...) dependen de ella.
     """
     config = {
         "host": os.getenv("TEST_DB_HOST", os.getenv("DB_HOST", "localhost")),
@@ -300,7 +342,10 @@ def setup_worker_databases(worker_id):
 
     # Crear BD para este worker
     if not create_worker_database(worker_id, config):
-        pytest.fail(f"No se pudo crear la base de datos para worker {worker_id}")
+        pytest.fail(
+            f"No se pudo crear la base de datos para worker {worker_id}: "
+            f"¿está PostgreSQL de test en {config['host']}:{config['port']}?"
+        )
 
     # Configurar SessionLocal para que use la BD del worker
     db_name = f"datamap_test_{worker_id}"

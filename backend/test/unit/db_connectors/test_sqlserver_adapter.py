@@ -11,6 +11,9 @@ Tests for SQLServerAdapter with mocked pyodbc:
 - Error handling
 """
 
+import os
+import subprocess
+import sys
 from unittest.mock import MagicMock, Mock, call, patch
 
 import pytest
@@ -23,7 +26,7 @@ from app.utils.db_adapters.exceptions import (
     DBQueryExecutionError,
     DBTimeoutError,
 )
-from app.utils.db_adapters.sqlserver_adapter import SQLServerAdapter
+from app.utils.db_adapters.sqlserver_adapter import SQLServerAdapter, pyodbc
 
 # ============================================================================
 # FIXTURES
@@ -51,6 +54,36 @@ def adapter(valid_config):
 # ============================================================================
 # TEST: Connection Management
 # ============================================================================
+
+
+class TestMissingDriver:
+    """Sin pyodbc/unixODBC el resto de la app debe poder importarse"""
+
+    def test_adapters_import_and_sqlserver_fails_cleanly_without_pyodbc(self, valid_config):
+        # sys.modules["pyodbc"] = None hace que "import pyodbc" lance ImportError
+        code = (
+            "import sys; sys.modules['pyodbc'] = None\n"
+            "from app.utils.db_adapters import PostgreSQLAdapter, SQLServerAdapter\n"
+            "from app.utils.db_adapters.exceptions import DBConnectionError\n"
+            f"adapter = SQLServerAdapter({valid_config!r})\n"
+            "try:\n"
+            "    adapter.connect()\n"
+            "except DBConnectionError as e:\n"
+            "    assert 'pyodbc' in str(e), e\n"
+            "    print('ok')\n"
+        )
+        backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            cwd=backend_dir,
+            env={**os.environ, "PYTHONPATH": backend_dir},
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "ok"
 
 
 class TestConnection:
@@ -106,8 +139,6 @@ class TestConnection:
     @patch("app.utils.db_adapters.sqlserver_adapter.pyodbc.connect")
     def test_connect_authentication_error(self, mock_connect, adapter):
         """Test authentication error raises DBAuthenticationError"""
-        import pyodbc
-
         mock_connect.side_effect = pyodbc.Error("18456", "Login failed for user")
 
         with pytest.raises(DBAuthenticationError) as exc_info:
@@ -118,8 +149,6 @@ class TestConnection:
     @patch("app.utils.db_adapters.sqlserver_adapter.pyodbc.connect")
     def test_connect_timeout_error(self, mock_connect, adapter):
         """Test connection timeout raises DBTimeoutError"""
-        import pyodbc
-
         mock_connect.side_effect = pyodbc.Error("Connection timeout exceeded")
 
         with pytest.raises(DBTimeoutError) as exc_info:
@@ -130,8 +159,6 @@ class TestConnection:
     @patch("app.utils.db_adapters.sqlserver_adapter.pyodbc.connect")
     def test_connect_generic_error(self, mock_connect, adapter):
         """Test generic connection error raises DBConnectionError"""
-        import pyodbc
-
         mock_connect.side_effect = pyodbc.Error("Network error")
 
         with pytest.raises(DBConnectionError) as exc_info:
@@ -229,8 +256,6 @@ class TestListSchemas:
     @patch("app.utils.db_adapters.sqlserver_adapter.pyodbc.connect")
     def test_list_schemas_query_error(self, mock_connect, adapter):
         """Test query error raises DBQueryExecutionError"""
-        import pyodbc
-
         mock_cursor = MagicMock()
         mock_cursor.execute.side_effect = pyodbc.Error("Query failed")
 

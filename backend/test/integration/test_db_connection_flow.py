@@ -70,7 +70,7 @@ def db_connection_service(redis_test_client, encryption_key):
 
 
 @pytest.fixture
-def postgres_config():
+def postgres_config(external_postgres):
     """PostgreSQL test database configuration"""
     return DBConnectionConfig(
         dialect="postgresql",
@@ -84,7 +84,7 @@ def postgres_config():
 
 
 @pytest.fixture
-def mysql_config():
+def mysql_config(external_mysql):
     """MySQL test database configuration"""
     return DBConnectionConfig(
         dialect="mysql",
@@ -98,7 +98,7 @@ def mysql_config():
 
 
 @pytest.fixture
-def postgres_invalid_config():
+def postgres_invalid_config(external_postgres):
     """Invalid PostgreSQL configuration (wrong password)"""
     return DBConnectionConfig(
         dialect="postgresql",
@@ -112,7 +112,7 @@ def postgres_invalid_config():
 
 
 @pytest.fixture
-def mysql_invalid_config():
+def mysql_invalid_config(external_mysql):
     """Invalid MySQL configuration (wrong password)"""
     return DBConnectionConfig(
         dialect="mysql",

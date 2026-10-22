@@ -12,10 +12,8 @@ Requiere:
 """
 
 import logging
+import types
 from typing import Any, Dict, List, Optional
-
-import pyodbc
-from pyodbc import InterfaceError, OperationalError, ProgrammingError
 
 from app.models.db_metadata import (
     CheckConstraintMetadata,
@@ -46,6 +44,32 @@ from .type_mappers import SQLServerTypeMapper
 from .validators import validate_metadata_name
 
 logger = logging.getLogger(__name__)
+
+
+def _missing_pyodbc(import_error: ImportError) -> types.SimpleNamespace:
+    """
+    Sustituto de pyodbc cuando no está instalado (o falta unixODBC).
+
+    Permite importar el resto de adapters y la app; solo falla al conectar a SQL Server.
+    """
+
+    class Error(Exception):
+        pass
+
+    def connect(*args: Any, **kwargs: Any) -> None:
+        raise Error(
+            "SQL Server no disponible: pyodbc o el driver ODBC no están instalados "
+            f"({import_error})"
+        )
+
+    return types.SimpleNamespace(Error=Error, connect=connect)
+
+
+try:
+    import pyodbc
+except ImportError as e:  # pyodbc ausente o libodbc.so no encontrada
+    logger.warning("pyodbc no disponible, SQL Server desactivado: %s", e)
+    pyodbc = _missing_pyodbc(e)
 
 # ssl_mode del adapter -> atributos ODBC Driver 18
 _SSL_ATTRIBUTES = {
