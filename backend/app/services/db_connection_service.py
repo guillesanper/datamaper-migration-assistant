@@ -40,6 +40,7 @@ from app.utils.db_adapters import (
     validate_connection_host,
 )
 from app.utils.encryption import DecryptionError, EncryptionManager
+from app.utils.master_key import parse_master_key
 
 logger = logging.getLogger(__name__)
 
@@ -120,20 +121,9 @@ class DBConnectionService:
         """
         self.redis = redis_client
         self.encryption_manager = EncryptionManager()
-        # La encryption_key debe ser 32 bytes para AES-256
-        # Si es string base64, decodificar; si no, asumir que ya son bytes
-        if isinstance(encryption_key, str):
-            import base64
-
-            try:
-                self.encryption_key = base64.b64decode(encryption_key)
-            except:
-                # Si no es base64, usar los primeros 32 bytes del UTF-8
-                key_bytes = encryption_key.encode("utf-8")
-                # Pad o truncate a 32 bytes
-                self.encryption_key = key_bytes[:32].ljust(32, b"\x00")
-        else:
-            self.encryption_key = encryption_key
+        # 32 bytes para AES-256 (base64 estricto); una clave inválida es un error, no se
+        # "arregla" en silencio
+        self.encryption_key = parse_master_key(encryption_key)
 
         logger.info("DBConnectionService initialized")
 
@@ -460,21 +450,28 @@ class DBConnectionService:
 
         Raises:
             SessionNotFoundError: Si la sesión no existe
-            ValueError: Si ttl_hours excede el máximo
+            ValueError: Si ttl_hours no está entre 1 y el máximo
         """
-        # Validar TTL
+        # Validar TTL: con 0 o negativo EXPIRE borraba la sesión y el HSET siguiente la
+        # recreaba solo con expires_at y sin TTL (clave huérfana que nunca caducaba)
+        if ttl_hours < 1:
+            raise ValueError("TTL must be at least 1 hour")
         if ttl_hours > self.MAX_TTL_HOURS:
             raise ValueError(f"TTL cannot exceed {self.MAX_TTL_HOURS} hours")
 
         # Verificar que existe
-        session = self.get_session(user_id, session_id)
+        self.get_session(user_id, session_id)
 
         # Extender TTL
         redis_key = self._get_redis_key(user_id, session_id)
         ttl_seconds = ttl_hours * 3600
         new_expires_at = datetime.utcnow() + timedelta(hours=ttl_hours)
 
-        self.redis.expire(redis_key, ttl_seconds)
+        # EXPIRE devuelve False si la clave ya no existe (caducó entre medias): no recrearla
+        if not self.redis.expire(redis_key, ttl_seconds):
+            raise SessionNotFoundError(
+                f"Session not found: user_id={user_id}, session_id={session_id}"
+            )
         self.redis.hset(redis_key, "expires_at", new_expires_at.isoformat())
 
         logger.info(

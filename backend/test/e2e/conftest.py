@@ -566,7 +566,7 @@ def set_encryption_key():
     original_key = os.getenv("ENCRYPTION_MASTER_KEY")
 
     # Set test encryption key
-    test_key = "test-encryption-key-min-32-chars-long-for-security"
+    test_key = "ZGF0YW1hcC10ZXN0LW1hc3Rlci1rZXktMzItYnl0ZXM="  # base64 de 32 bytes
     os.environ["ENCRYPTION_MASTER_KEY"] = test_key
 
     yield test_key

@@ -258,12 +258,36 @@ class TestClientIPDetection:
     """Tests for client IP detection"""
 
     def test_get_client_ip_x_forwarded_for(self, mock_request):
-        """Test IP detection from X-Forwarded-For header"""
+        """Desde un proxy de confianza: la IP que añadió el último proxy (la de la derecha)"""
         mock_request.headers = {"X-Forwarded-For": "203.0.113.1, 198.51.100.1"}
 
         ip = SecurityUtils.get_client_ip(mock_request)
 
-        assert ip == "203.0.113.1"
+        assert ip == "198.51.100.1"
+
+    def test_spoofed_x_forwarded_for_is_ignored_from_untrusted_peer(self, mock_request):
+        """Un cliente conectado directamente no puede elegir su IP con la cabecera"""
+        mock_request.client.host = "198.51.100.7"
+        mock_request.headers = {"X-Forwarded-For": "1.2.3.4", "X-Real-IP": "5.6.7.8"}
+
+        assert SecurityUtils.get_client_ip(mock_request) == "198.51.100.7"
+
+    def test_values_prepended_by_client_are_ignored(self, mock_request):
+        """El proxy añade la IP real al final; lo que el cliente puso delante no cuenta"""
+        mock_request.headers = {"X-Forwarded-For": "1.2.3.4, 9.9.9.9, 198.51.100.7, 10.0.0.3"}
+
+        assert SecurityUtils.get_client_ip(mock_request) == "198.51.100.7"
+
+    def test_malformed_hop_stops_the_walk(self, mock_request):
+        mock_request.headers = {"X-Forwarded-For": "203.0.113.9, not-an-ip, 10.0.0.3"}
+
+        assert SecurityUtils.get_client_ip(mock_request) == "192.168.1.1"
+
+    def test_trusted_proxies_can_be_disabled(self, mock_request, monkeypatch):
+        monkeypatch.setenv("TRUSTED_PROXIES", "none")
+        mock_request.headers = {"X-Forwarded-For": "203.0.113.1"}
+
+        assert SecurityUtils.get_client_ip(mock_request) == "192.168.1.1"
 
     def test_get_client_ip_x_real_ip(self, mock_request):
         """Test IP detection from X-Real-IP header"""
@@ -273,13 +297,13 @@ class TestClientIPDetection:
 
         assert ip == "203.0.113.1"
 
-    def test_get_client_ip_x_forwarded(self, mock_request):
-        """Test IP detection from X-Forwarded header"""
+    def test_get_client_ip_x_forwarded_is_not_used(self, mock_request):
+        """X-Forwarded (no estándar) ya no se usa"""
         mock_request.headers = {"X-Forwarded": "203.0.113.1"}
 
         ip = SecurityUtils.get_client_ip(mock_request)
 
-        assert ip == "203.0.113.1"
+        assert ip == "192.168.1.1"
 
     def test_get_client_ip_direct(self, mock_request):
         """Test IP detection from direct connection"""

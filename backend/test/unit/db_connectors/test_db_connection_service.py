@@ -44,7 +44,7 @@ def mock_redis():
 @pytest.fixture
 def encryption_key():
     """Test encryption key"""
-    return "test_master_key_12345"
+    return "ZGF0YW1hcC10ZXN0LW1hc3Rlci1rZXktMzItYnl0ZXM="  # base64 de 32 bytes
 
 
 @pytest.fixture
@@ -522,3 +522,61 @@ class TestOracleConnectionTarget:
                 password="tiger",
                 service_name="ORCL)(HOST=evil\n",
             )
+
+
+class TestRefreshTtlBounds:
+    """Con ttl_hours <= 0 la sesión acababa como clave huérfana sin TTL"""
+
+    @pytest.mark.parametrize("ttl_hours", [0, -1])
+    def test_non_positive_ttl_is_rejected(self, ttl_hours, encryption_key):
+        import fakeredis
+
+        redis_client = fakeredis.FakeRedis()
+        service = DBConnectionService(redis_client, encryption_key)
+        config = DBConnectionConfig(
+            dialect="postgresql",
+            host="db.example.com",
+            port=5432,
+            database="d",
+            user="u",
+            password="p",
+        )
+        with patch("app.services.db_connection_service.validate_connection_host"):
+            session = service.create_session("u1", config, test_connection=False)
+        key = service._get_redis_key("u1", session.session_id)
+
+        with pytest.raises(ValueError):
+            service.refresh_session("u1", session.session_id, ttl_hours)
+
+        assert redis_client.ttl(key) > 0
+        assert service.get_session("u1", session.session_id).session_id == session.session_id
+
+    def test_session_expiring_meanwhile_is_not_recreated(self, encryption_key):
+        import fakeredis
+
+        redis_client = fakeredis.FakeRedis()
+        service = DBConnectionService(redis_client, encryption_key)
+        config = DBConnectionConfig(
+            dialect="postgresql",
+            host="db.example.com",
+            port=5432,
+            database="d",
+            user="u",
+            password="p",
+        )
+        with patch("app.services.db_connection_service.validate_connection_host"):
+            session = service.create_session("u1", config, test_connection=False)
+        key = service._get_redis_key("u1", session.session_id)
+
+        real_get_session = service.get_session
+
+        def get_then_expire(*args):
+            result = real_get_session(*args)
+            redis_client.delete(key)  # caduca justo después de comprobarla
+            return result
+
+        with patch.object(service, "get_session", side_effect=get_then_expire):
+            with pytest.raises(SessionNotFoundError):
+                service.refresh_session("u1", session.session_id, 3)
+
+        assert not redis_client.exists(key)

@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
 from fastapi import HTTPException, Request
+from fastapi.responses import JSONResponse
 
 from app.config.security import security_settings
 from app.database.session import get_db_session
@@ -275,41 +276,52 @@ async def rate_limit_middleware(request: Request, call_next):
     Returns:
         Response: Respuesta procesada
     """
-    endpoint = request.url.path
+    endpoint = security_settings.normalize_rate_limit_path(request.url.path)
+    limited = security_settings.is_rate_limited_endpoint(endpoint)
 
     # Verificar si el endpoint tiene configuración de rate limiting
-    if endpoint in security_settings.RATE_LIMITS:
-        if not await db_rate_limiter.check_rate_limit(request, endpoint):
-            # Obtener información para el mensaje de error
-            info = await db_rate_limiter.get_rate_limit_info(request, endpoint)
+    if limited and not await db_rate_limiter.check_rate_limit(request, endpoint):
+        # Obtener información para el mensaje de error
+        info = await db_rate_limiter.get_rate_limit_info(request, endpoint)
 
-            if info["blocked_until"]:
-                blocked_until = info["blocked_until"]
-                remaining_time = (blocked_until - datetime.now(timezone.utc)).total_seconds()
-
-                raise HTTPException(
-                    status_code=429,
-                    detail=make_error(ErrorCode.RATE_LIMIT_BLOCKED, seconds=int(remaining_time)),
-                    headers={"Retry-After": str(int(remaining_time))},
-                )
-            else:
-                raise HTTPException(
-                    status_code=429,
-                    detail=make_error(ErrorCode.RATE_LIMIT_EXCEEDED),
-                    headers={"Retry-After": "900"},  # 15 minutos por defecto
-                )
+        # JSONResponse y no HTTPException: lanzada desde un middleware HTTP, Starlette
+        # la convierte en un 500 en lugar del 429
+        if info["blocked_until"]:
+            remaining_time = int(
+                (info["blocked_until"] - datetime.now(timezone.utc)).total_seconds()
+            )
+            return JSONResponse(
+                status_code=429,
+                content={
+                    "detail": make_error(ErrorCode.RATE_LIMIT_BLOCKED, seconds=remaining_time)
+                },
+                headers={"Retry-After": str(remaining_time)},
+            )
+        return JSONResponse(
+            status_code=429,
+            content={"detail": make_error(ErrorCode.RATE_LIMIT_EXCEEDED)},
+            headers={"Retry-After": "900"},  # 15 minutos por defecto
+        )
 
     # Procesar request
     response = await call_next(request)
 
     # Añadir headers informativos de rate limiting
-    if endpoint in security_settings.RATE_LIMITS:
+    if limited:
         info = await db_rate_limiter.get_rate_limit_info(request, endpoint)
         response.headers["X-RateLimit-Limit"] = str(info["max_attempts"])
         response.headers["X-RateLimit-Remaining"] = str(info["remaining_attempts"])
         response.headers["X-RateLimit-Window"] = str(info["window_seconds"])
 
     return response
+
+
+def _find_request(args, kwargs) -> Optional[Request]:
+    """Busca el Request entre los argumentos posicionales y con nombre del endpoint."""
+    for value in list(args) + list(kwargs.values()):
+        if isinstance(value, Request):
+            return value
+    return None
 
 
 # Decorador para rate limiting específico
@@ -329,31 +341,15 @@ def rate_limit(max_requests: int, window_seconds: int, use_database: bool = True
     def decorator(func):
         @functools.wraps(func)
         async def wrapper(*args, **kwargs):
-            # Buscar el request en los argumentos
-            request = None
-
-            # Buscar en args
-            for arg in args:
-                if isinstance(arg, Request):
-                    request = arg
-                    break
-
-            # Si no se encuentra en args, buscar en kwargs
-            if not request:
-                for key, value in kwargs.items():
-                    if isinstance(value, Request):
-                        request = value
-                        break
-
-            # También buscar por nombre de parámetro
-            if not request and "request" in kwargs:
-                if isinstance(kwargs["request"], Request):
-                    request = kwargs["request"]
-
+            request = _find_request(args, kwargs)
             if not request:
                 raise HTTPException(status_code=500, detail=make_error(ErrorCode.INTERNAL_ERROR))
 
             if use_database:
+                # Los endpoints de RATE_LIMITS ya los limita el middleware: contarlos aquí
+                # otra vez dividiría el límite efectivo entre dos
+                if security_settings.is_rate_limited_endpoint(request.url.path):
+                    return await func(*args, **kwargs)
                 # Usar rate limiter de base de datos
                 if not await db_rate_limiter.check_rate_limit(request):
                     raise HTTPException(status_code=429, detail=make_error(ErrorCode.RATE_LIMIT_EXCEEDED))

@@ -6,6 +6,8 @@ Contiene todas las configuraciones relacionadas con seguridad, rate limiting, CS
 import os
 from typing import Any, Dict
 
+from app.utils.master_key import InvalidMasterKeyError, parse_master_key
+
 
 class SecuritySettings:
     """Configuraciones de seguridad centralizadas"""
@@ -23,29 +25,37 @@ class SecuritySettings:
     RATE_LIMIT_VERIFY_ATTEMPTS = int(os.getenv("RATE_LIMIT_VERIFY_ATTEMPTS", "10"))
     RATE_LIMIT_VERIFY_WINDOW = int(os.getenv("RATE_LIMIT_VERIFY_WINDOW", "3600"))  # 1 hora
 
-    # Configuración de rate limits por endpoint
+    # Configuración de rate limits por endpoint. Las claves son las rutas reales (el
+    # middleware compara request.url.path); antes eran "/login", "/verify-code"... y
+    # ningún límite de autenticación se aplicaba.
     RATE_LIMITS: Dict[str, Dict[str, Any]] = {
-        "/login": {
+        "/api/auth/login": {
             "max_attempts": RATE_LIMIT_LOGIN_ATTEMPTS,
             "window_seconds": RATE_LIMIT_LOGIN_WINDOW,
             "block_duration": 300,  # 5 minutos de bloqueo (reducido)
         },
-        "/register": {
+        "/api/auth/register": {
             "max_attempts": RATE_LIMIT_REGISTER_ATTEMPTS,
             "window_seconds": RATE_LIMIT_REGISTER_WINDOW,
             "block_duration": 600,  # 10 minutos de bloqueo (reducido)
         },
-        "/forgot": {
+        # Envía códigos por email (verificación y recuperación de contraseña)
+        "/api/auth/resend-code": {
             "max_attempts": RATE_LIMIT_FORGOT_ATTEMPTS,
             "window_seconds": RATE_LIMIT_FORGOT_WINDOW,
             "block_duration": 600,  # 10 minutos de bloqueo (reducido)
         },
-        "/verify-code": {
+        "/api/auth/forgot": {
+            "max_attempts": RATE_LIMIT_FORGOT_ATTEMPTS,
+            "window_seconds": RATE_LIMIT_FORGOT_WINDOW,
+            "block_duration": 600,  # 10 minutos de bloqueo (reducido)
+        },
+        "/api/auth/verify-code": {
             "max_attempts": RATE_LIMIT_VERIFY_ATTEMPTS,
             "window_seconds": RATE_LIMIT_VERIFY_WINDOW,
             "block_duration": 300,  # 5 minutos de bloqueo (reducido)
         },
-        "/reset": {
+        "/api/auth/reset": {
             "max_attempts": 5,
             "window_seconds": 3600,
             "block_duration": 600,  # 10 minutos de bloqueo (reducido)
@@ -205,7 +215,16 @@ class SecuritySettings:
             "block_duration": 300,  # 5 minutos de bloqueo
         }
 
-        return cls.RATE_LIMITS.get(endpoint, default_config)
+        return cls.RATE_LIMITS.get(cls.normalize_rate_limit_path(endpoint), default_config)
+
+    @classmethod
+    def normalize_rate_limit_path(cls, path: str) -> str:
+        """ "/api/auth/login/" y "/api/auth/login" comparten límite."""
+        return path.rstrip("/") or "/"
+
+    @classmethod
+    def is_rate_limited_endpoint(cls, path: str) -> bool:
+        return cls.normalize_rate_limit_path(path) in cls.RATE_LIMITS
 
     @classmethod
     def is_csrf_protected_endpoint(cls, path: str, method: str) -> bool:
@@ -269,6 +288,28 @@ class SecuritySettings:
 security_settings = SecuritySettings()
 
 
+def _validate_secrets(errors: list, warnings: list) -> None:
+    """SECRET_KEY y ENCRYPTION_MASTER_KEY (antes no se comprobaban al arrancar)."""
+    # Firma la cookie de sesión (app/utils/cookies.py); vacío = firma con clave ""
+    secret_key = os.getenv("SECRET_KEY", "")
+    if not secret_key.strip():
+        errors.append("SECRET_KEY debe configurarse en producción")
+    elif len(secret_key) < 32:
+        warnings.append("SECRET_KEY debería tener al menos 32 caracteres aleatorios")
+
+    # Cifra las credenciales de las conexiones a BDs externas
+    master_key = os.getenv("ENCRYPTION_MASTER_KEY")
+    if not master_key:
+        warnings.append(
+            "ENCRYPTION_MASTER_KEY no configurada: las conexiones a BDs externas no funcionarán"
+        )
+        return
+    try:
+        parse_master_key(master_key)
+    except InvalidMasterKeyError as e:
+        errors.append(str(e))
+
+
 # Validaciones de configuración
 def validate_security_config():
     """Valida que la configuración de seguridad sea correcta"""
@@ -280,6 +321,8 @@ def validate_security_config():
 
     if security_settings.IP_HASH_SALT == "default-ip-salt":
         errors.append("IP_HASH_SALT debe ser configurado en producción")
+
+    _validate_secrets(errors, warnings)
 
     if security_settings.OTP_LENGTH < 6:
         errors.append("OTP_LENGTH debe ser al menos 6 caracteres")

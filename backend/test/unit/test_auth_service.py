@@ -458,7 +458,7 @@ class TestVerifyEmailCode:
 
         mock_db.query.return_value.filter.return_value.first.return_value = mock_user
 
-        with pytest.raises(AuthenticationError, match="ya verificado"):
+        with pytest.raises(AuthenticationError, match="Código inválido o expirado"):
             auth_service.verify_email_code("test@example.com", "123456")
 
 
@@ -519,7 +519,7 @@ class TestResetPassword:
 
         mock_db.query.return_value.filter.return_value.first.return_value = None
 
-        with pytest.raises(AuthenticationError, match="no encontrado"):
+        with pytest.raises(AuthenticationError, match="Código inválido o expirado"):
             auth_service.reset_password("nonexistent@example.com", "123456", strong_password)
 
     @patch("app.crud.email_otp_crud.verify_otp_orm")

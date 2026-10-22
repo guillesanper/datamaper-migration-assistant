@@ -240,8 +240,16 @@ REDIS_SSL=false
 
 # App
 ENV=development
-SECRET_KEY=your-secret-key
+SECRET_KEY=your-secret-key            # obligatorio fuera de development (≥ 32 caracteres)
 ENCRYPTION_ENABLED=true
+# Cifra las credenciales de conexiones a BDs externas: base64 de 32 bytes aleatorios
+# python -c "import base64,os;print(base64.b64encode(os.urandom(32)).decode())"
+ENCRYPTION_MASTER_KEY=
+
+# Seguridad HTTP
+CORS_ALLOWED_ORIGINS=https://app.tudominio.com   # orígenes del frontend, separados por comas
+TRUSTED_PROXIES=                                 # CIDRs de proxies de confianza para X-Forwarded-For
+                                                 # (por defecto redes privadas y loopback; "none" = ninguno)
 
 # External Services
 STRIPE_SECRET_KEY=your-stripe-key

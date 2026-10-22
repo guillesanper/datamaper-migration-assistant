@@ -41,6 +41,7 @@ from app.crud.user_preferences_crud import get_or_create_preferences_orm, update
 from app.database.session import get_db_session
 from app.models.orm.security import SecurityLog
 from app.routers.dependencies import get_current_user_orm
+from app.services.auth_service import revoke_user_sessions
 from app.utils.cookies import verify_signed_cookie
 from app.utils.error_codes import ErrorCode, make_error
 from app.utils.security import SecurityUtils
@@ -204,6 +205,7 @@ def delete_avatar(
 @router.put("/password")
 def change_password(
     body: ChangePasswordRequest,
+    request: Request,
     current_user: dict = Depends(get_current_user_orm),
     db: Session = Depends(get_db_session),
 ):
@@ -221,7 +223,18 @@ def change_password(
     if not ok:
         raise HTTPException(400, detail=make_error(ErrorCode.USER_WRONG_PASSWORD))
 
+    # Cerrar el resto de sesiones (otros dispositivos); la actual sigue abierta
+    revoke_user_sessions(
+        db, user_id, reason="password_change", except_token=_current_session_hash(request)
+    )
+
     return {"success": True, "message": "Contraseña actualizada"}
+
+
+def _current_session_hash(request: Request) -> Optional[str]:
+    """Hash (como se guarda en BD) del token de la cookie de sesión de esta petición."""
+    token = verify_signed_cookie(request.cookies.get("session") or "")
+    return hashlib.sha256(token.encode()).hexdigest() if token else None
 
 
 # ─── NOTIFICACIONES ───────────────────────────────────────────────────────────

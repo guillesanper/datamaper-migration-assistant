@@ -3,12 +3,16 @@ Utilidades de seguridad para DataMap
 Funciones para generación de tokens, sanitización, manejo de IPs, etc.
 """
 
+import functools
 import hashlib
 import hmac
+import ipaddress
+import logging
+import os
 import re
 import secrets
 import string
-from typing import Any, Optional, Union
+from typing import Any, Optional, Tuple, Union
 
 import bleach  # type: ignore[import-untyped]
 from fastapi import Request
@@ -136,7 +140,16 @@ class SecurityUtils:
     @staticmethod
     def get_client_ip(request: Request) -> str:
         """
-        Obtiene la IP real del cliente considerando proxies
+        Obtiene la IP real del cliente considerando proxies de confianza.
+
+        Las cabeceras X-Forwarded-For / X-Real-IP solo se usan si la conexión viene de
+        un proxy de confianza (TRUSTED_PROXIES; por defecto redes privadas y loopback,
+        donde están el balanceador de la plataforma o el proxy de docker). Antes se
+        tomaba la primera IP de X-Forwarded-For, que la pone el propio cliente: rotando
+        la cabecera se esquivaba cualquier límite por IP.
+
+        X-Forwarded-For se recorre de derecha a izquierda (cada proxy añade al final la
+        IP de quien le conectó) y se devuelve la primera IP que no es de un proxy.
 
         Args:
             request: Request de FastAPI
@@ -144,22 +157,28 @@ class SecurityUtils:
         Returns:
             str: IP del cliente
         """
-        # Verificar headers de proxy en orden de prioridad
+        peer = request.client.host if request.client else None
+        if not peer:
+            return "unknown"
+        if not _is_trusted_proxy(peer):
+            return str(peer)
+
         forwarded_for = request.headers.get("X-Forwarded-For")
         if forwarded_for:
-            # Tomar la primera IP (cliente original)
-            return str(forwarded_for.split(",")[0].strip())
+            hops = [hop.strip() for hop in forwarded_for.split(",")]
+            for hop in reversed(hops):
+                ip = _parse_ip(hop)
+                if ip is None:
+                    # Entrada malformada: lo que haya a su izquierda no es fiable
+                    break
+                if not _is_trusted_proxy(hop):
+                    return str(ip)
 
-        real_ip = request.headers.get("X-Real-IP")
-        if real_ip:
-            return str(real_ip.strip())
+        real_ip = _parse_ip((request.headers.get("X-Real-IP") or "").strip())
+        if real_ip is not None:
+            return str(real_ip)
 
-        forwarded = request.headers.get("X-Forwarded")
-        if forwarded:
-            return str(forwarded.strip())
-
-        # Fallback a la IP directa
-        return str(request.client.host) if request.client else "unknown"
+        return str(peer)
 
     @staticmethod
     def hash_ip_address(ip_address: str) -> str:
@@ -368,3 +387,38 @@ def sanitize_input(input_str: str) -> str:
 def get_client_ip(request: Request) -> str:
     """Obtiene IP del cliente"""
     return SecurityUtils.get_client_ip(request)
+
+
+_DEFAULT_TRUSTED_PROXIES = "127.0.0.0/8,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7"
+
+
+def _parse_ip(value: str) -> Optional[Union[ipaddress.IPv4Address, ipaddress.IPv6Address]]:
+    try:
+        return ipaddress.ip_address(value)
+    except ValueError:
+        return None
+
+
+@functools.lru_cache(maxsize=8)
+def _trusted_proxy_networks(
+    spec: str,
+) -> Tuple[Union[ipaddress.IPv4Network, ipaddress.IPv6Network], ...]:
+    networks = []
+    for item in spec.split(","):
+        item = item.strip()
+        if not item or item.lower() == "none":
+            continue
+        try:
+            networks.append(ipaddress.ip_network(item, strict=False))
+        except ValueError:
+            logging.getLogger(__name__).warning(f"Ignoring invalid TRUSTED_PROXIES entry: {item}")
+    return tuple(networks)
+
+
+def _is_trusted_proxy(value: str) -> bool:
+    """True si la IP pertenece a TRUSTED_PROXIES (CIDRs separados por comas, "none" = ninguno)."""
+    ip = _parse_ip(value)
+    if ip is None:
+        return False
+    networks = _trusted_proxy_networks(os.getenv("TRUSTED_PROXIES", _DEFAULT_TRUSTED_PROXIES))
+    return any(ip in network for network in networks)

@@ -60,7 +60,7 @@ def redis_test_client():
 @pytest.fixture
 def encryption_key():
     """Test encryption key (32 bytes minimum for AES-256)"""
-    return "test-encryption-key-min-32-chars-long-for-security"
+    return "ZGF0YW1hcC10ZXN0LW1hc3Rlci1rZXktMzItYnl0ZXM="  # base64 de 32 bytes
 
 
 @pytest.fixture

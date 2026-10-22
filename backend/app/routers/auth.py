@@ -9,7 +9,6 @@ from pydantic import BaseModel, EmailStr, Field, ValidationError, field_validato
 # CRUDs ORM
 from app.crud import session_crud, user_crud
 from app.database.session import get_db_session as get_db
-from app.middleware.rate_limiting import rate_limit
 from app.routers.dependencies import get_current_user, get_current_user_optional
 from app.services.auth_service import AuthenticationError, AuthService, DatabaseError
 from app.utils.cookies import SESSION_COOKIE_CONFIG, sign_cookie
@@ -330,10 +329,13 @@ async def verify_code(request: Request, db=Depends(get_db)):
         )
 
 
+# Respuesta idéntica exista o no el email: distinguirlas permitía enumerar usuarios
+CODE_SENT_MESSAGE = "Si el email corresponde a una cuenta, recibirás un código en breve"
+
+
 @router.post("/resend-code", response_model=StandardResponse)
-@rate_limit(3, 600)
 async def resend_code(request: Request, data: ResendCodeRequest, db=Depends(get_db)):
-    """Reenvío de código de verificación"""
+    """Reenvío de código de verificación (limitado por el middleware de rate limiting)"""
 
     email = SecurityUtils.sanitize_email(data.email)
 
@@ -341,14 +343,11 @@ async def resend_code(request: Request, data: ResendCodeRequest, db=Depends(get_
         # Obtener usuario usando CRUD ORM
         user = user_crud.get_user_by_email_orm(db, email)
 
-        if not user:
-            return create_error_response(
-                message="Usuario no encontrado", error_code="user_not_found", status_code=404
-            )
+        # Solo cuentas pendientes de verificar; al resto no se le envía nada
+        if user and not user.get("is_verified"):
+            send_verification_code(db, email, user["id"])
 
-        send_verification_code(db, email, user["id"])
-
-        return create_success_response(message="Código reenviado correctamente")
+        return create_success_response(message=CODE_SENT_MESSAGE)
 
     except Exception as e:
         await SecurityLogger.log_suspicious_activity(
@@ -359,8 +358,36 @@ async def resend_code(request: Request, data: ResendCodeRequest, db=Depends(get_
         )
 
 
+@router.post("/forgot", response_model=StandardResponse)
+async def forgot_password(request: Request, data: ForgotPasswordRequest, db=Depends(get_db)):
+    """
+    Solicitud de recuperación de contraseña: envía el código que pide /reset.
+
+    El frontend ya llamaba a este endpoint pero no existía (404), así que la
+    recuperación de contraseña no funcionaba.
+    """
+    email = SecurityUtils.sanitize_email(data.email)
+
+    try:
+        user = user_crud.get_user_by_email_orm(db, email)
+        if user:
+            send_verification_code(db, email, user["id"])
+
+        await SecurityLogger.log_password_reset_attempt(
+            request, email, True, None, stage="request"  # type: ignore[arg-type]
+        )
+        return create_success_response(message=CODE_SENT_MESSAGE)
+
+    except Exception as e:
+        await SecurityLogger.log_suspicious_activity(
+            request, "forgot_password_error", {"error": str(e)}
+        )
+        return create_error_response(
+            message="Error interno del servidor", error_code="internal_error", status_code=500
+        )
+
+
 @router.post("/reset", response_model=StandardResponse)
-@rate_limit(5, 600)
 async def reset_password(request: Request, data: ResetPasswordRequest, db=Depends(get_db)):
     """Reset de contraseña con código OTP"""
 

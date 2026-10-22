@@ -90,7 +90,7 @@ class TestNetworkPolicy:
         from app.models.db_connection import DBConnectionConfig
         from app.services.db_connection_service import DBConnectionService
 
-        service = DBConnectionService(MagicMock(), "a" * 44)
+        service = DBConnectionService(MagicMock(), "ZGF0YW1hcC10ZXN0LW1hc3Rlci1rZXktMzItYnl0ZXM=")
         config = DBConnectionConfig(
             dialect="postgresql", host="127.0.0.1", port=5432, database="db", user="u", password="p"
         )
