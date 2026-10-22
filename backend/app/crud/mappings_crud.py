@@ -952,6 +952,8 @@ def get_mappings_by_project_orm(
                 "destination_table_id": (
                     str(mapping.destination_table_id) if mapping.destination_table_id else None
                 ),
+                # Texto plano (proyectos sin cifrado); si está cifrado se descifra abajo
+                "transformation_logic": mapping.transformation_logic,
                 "transformation_logic_encrypted": mapping.transformation_logic_encrypted,
                 "transformation_logic_nonce": mapping.transformation_logic_nonce,
                 "is_encrypted": mapping.is_encrypted,

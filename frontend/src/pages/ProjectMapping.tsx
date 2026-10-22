@@ -567,6 +567,7 @@ export const ProjectMapping: React.FC = () => {
           onClose={() => setIsMigrationModalOpen(false)}
           projectId={projectId || ''}
           destConnectionSessionId={activeDBSessions.destination ?? null}
+          originConnectionSessionId={activeDBSessions.origin ?? null}
           destinationDb={project?.destination_db}
         />
       </Suspense>

@@ -33,6 +33,7 @@ interface MigrationModalProps {
   onClose: () => void;
   projectId: string;
   destConnectionSessionId: string | null;
+  originConnectionSessionId?: string | null;
   destinationDb?: string;
 }
 
@@ -68,6 +69,7 @@ export const MigrationModal: React.FC<MigrationModalProps> = ({
   onClose,
   projectId,
   destConnectionSessionId,
+  originConnectionSessionId,
   destinationDb,
 }) => {
   const { t } = useTranslation('mapping');
@@ -157,6 +159,10 @@ export const MigrationModal: React.FC<MigrationModalProps> = ({
         batch_size: batchSize,
         include_constraints: includeConstraints,
         include_validation: includeValidation,
+        ...(originConnectionSessionId
+          ? { origin_connection_session_id: originConnectionSessionId }
+          : {}),
+        ...(destConnectionSessionId ? { dest_connection_session_id: destConnectionSessionId } : {}),
       });
       setGeneratedScript(script);
       setStep('preview');
@@ -176,6 +182,9 @@ export const MigrationModal: React.FC<MigrationModalProps> = ({
         script_id: generatedScript.script_id,
         dry_run: dryRun,
         dest_connection_session_id: destConnectionSessionId,
+        ...(originConnectionSessionId
+          ? { origin_connection_session_id: originConnectionSessionId }
+          : {}),
       });
       setStep('running');
       startPolling(started.execution_id);

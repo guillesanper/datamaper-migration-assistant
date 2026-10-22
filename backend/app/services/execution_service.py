@@ -15,9 +15,11 @@ import logging
 import re
 import time
 import traceback
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from app.crud import migration_script_crud
+from app.services.data_copy_service import DataCopyService, disable_autocommit
+from app.services.migration_script_service import TablePlan
 from app.utils.db_adapters.base_adapter import BaseDBAdapter
 from app.utils.sql_safety import is_transaction_control, split_sql_statements
 
@@ -98,6 +100,66 @@ class ExecutionService:
                 ]
             }
         """
+        return self._run_tracked(
+            db_connection=db_connection,
+            project_id=project_id,
+            record_text=script,
+            user_id=user_id,
+            dry_run=dry_run,
+            run=lambda: self._execute_script(adapter=dest_adapter, script=script, dry_run=dry_run),
+        )
+
+    def execute_copy(
+        self,
+        db_connection,
+        project_id: str,
+        plans: List[TablePlan],
+        origin_adapter: BaseDBAdapter,
+        dest_adapter: BaseDBAdapter,
+        dry_run: bool = False,
+        user_id: Optional[str] = None,
+        batch_size: int = 10000,
+        include_constraints: bool = True,
+        include_validation: bool = True,
+        project_name: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Migración entre dos BDs distintas: copia por lotes del origen al destino.
+
+        Mismo registro de ejecución y formato de respuesta que execute_migration; el
+        "script" registrado es la descripción del plan (DataCopyService.describe).
+        """
+        copier = DataCopyService(origin_adapter, dest_adapter, batch_size=batch_size)
+        plan_text = copier.describe(
+            plans,
+            project_name=project_name,
+            include_constraints=include_constraints,
+            include_validation=include_validation,
+        )
+        return self._run_tracked(
+            db_connection=db_connection,
+            project_id=project_id,
+            record_text=plan_text,
+            user_id=user_id,
+            dry_run=dry_run,
+            run=lambda: copier.copy(
+                plans,
+                dry_run=dry_run,
+                include_constraints=include_constraints,
+                include_validation=include_validation,
+            ),
+        )
+
+    def _run_tracked(
+        self,
+        db_connection,
+        project_id: str,
+        record_text: str,
+        user_id: Optional[str],
+        dry_run: bool,
+        run: Callable[[], Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """Crea el registro de ejecución, ejecuta `run` y guarda el resultado o el error."""
         start_time = time.time()
         execution_id = None
         errors = []
@@ -106,14 +168,15 @@ class ExecutionService:
             # PASO 1: Crear registro de ejecución
             logger.info(f"Starting migration execution for project {project_id}")
             execution_id = self._create_execution_record(
-                db_connection=db_connection, project_id=project_id, script=script, user_id=user_id
+                db_connection=db_connection,
+                project_id=project_id,
+                script=record_text,
+                user_id=user_id,
             )
 
-            # PASO 2: Ejecutar script (transacción única en la BD destino)
-            logger.info(f"Executing script (dry_run={dry_run})")
-            execution_result = self._execute_script(
-                adapter=dest_adapter, script=script, dry_run=dry_run
-            )
+            # PASO 2: Ejecutar (transacción única en la BD destino)
+            logger.info(f"Executing migration (dry_run={dry_run})")
+            execution_result = run()
 
             # PASO 3: Determinar status final
             if dry_run:
@@ -371,12 +434,7 @@ class ExecutionService:
     @staticmethod
     def _disable_autocommit(connection) -> None:
         """Desactiva autocommit en la conexión destino (psycopg2, pyodbc, pymysql, oracledb)."""
-        autocommit = getattr(connection, "autocommit", None)
-        if callable(autocommit):
-            # pymysql expone autocommit como método
-            autocommit(False)
-        else:
-            connection.autocommit = False
+        disable_autocommit(connection)
 
     def _extract_table_name(self, statement: str) -> Optional[str]:
         """

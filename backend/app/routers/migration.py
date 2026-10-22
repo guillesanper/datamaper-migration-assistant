@@ -18,11 +18,12 @@ CREATED: 2025-01-17
 import hashlib
 import logging
 import os
+from contextlib import ExitStack
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from psycopg2.extras import RealDictCursor
 from pydantic import BaseModel, Field
 
@@ -31,10 +32,12 @@ from app.crud import activity_crud, mappings_crud, migration_script_crud, notifi
 # CRUDs ORM
 from app.crud.project_crud import ProjectCRUD
 from app.database.session import get_db_session
+from app.models.db_connection import DBConnectionConfig
 from app.models.db_metadata.constraint import ForeignKeyMetadata
 from app.models.db_metadata.schema import SchemaMetadata
 from app.models.db_metadata.table import TableMetadata
-from app.routers.dependencies import get_current_user
+from app.routers.dependencies import get_current_user, validate_encryption_session
+from app.services.data_copy_service import COPY_PLAN_MARKER, DataCopyService
 from app.services.db_connection_service import (
     DBConnectionService,
     SessionExpiredError,
@@ -46,6 +49,7 @@ from app.services.migration_script_service import (
     MigrationScriptService,
     MigrationScriptServiceError,
 )
+from app.utils.db_adapters.base_adapter import BaseDBAdapter
 from app.utils.redis_client import get_redis_client
 
 logger = logging.getLogger(__name__)
@@ -66,6 +70,17 @@ class MigrationScriptOptions(BaseModel):
     include_constraints: bool = Field(default=True)
     include_validation: bool = Field(default=True)
     dialect: str = Field(default="postgresql", pattern="^(postgresql|mysql|sqlserver|oracle)$")
+    origin_connection_session_id: Optional[str] = Field(
+        default=None,
+        description="Sesión de conexión origen (resuelve mappings connector del origen)",
+    )
+    dest_connection_session_id: Optional[str] = Field(
+        default=None,
+        description=(
+            "Sesión de conexión destino (resuelve mappings connector del destino y fija "
+            "el dialecto)"
+        ),
+    )
 
 
 class ExecutionRequest(BaseModel):
@@ -77,6 +92,13 @@ class ExecutionRequest(BaseModel):
     dry_run: bool = Field(default=False, description="Si True, ejecuta ROLLBACK al final")
     dest_connection_session_id: str = Field(
         ..., description="UUID de la sesión de conexión destino"
+    )
+    origin_connection_session_id: Optional[str] = Field(
+        default=None,
+        description=(
+            "UUID de la sesión de conexión origen. Si es otra BD distinta del destino, "
+            "DataMap copia los datos por lotes en lugar de ejecutar el script SQL"
+        ),
     )
 
 
@@ -132,24 +154,173 @@ def validate_project_access(
     return project
 
 
-def get_project_mappings(db, project_id: str) -> List[Dict[str, Any]]:
+def get_project_mappings(
+    db, project_id: str, encryption_key: Optional[bytes] = None
+) -> List[Dict[str, Any]]:
     """
-    Obtiene todos los mappings de un proyecto usando CRUD ORM.
+    Obtiene todos los mappings de un proyecto usando CRUD ORM, descifrados.
 
     Args:
         db: Database session
         project_id: UUID del proyecto
+        encryption_key: Clave de la sesión de cifrado del usuario (proyectos cifrados)
 
     Returns:
         Lista de mappings
+
+    Raises:
+        HTTPException 423: Si hay campos cifrados que no se pudieron descifrar. Sin esto la
+            migración usaba nombres vacíos o, peor, se ejecutaba sin las transformaciones.
     """
-    # Obtener mappings usando CRUD ORM
-    mappings = mappings_crud.get_mappings_by_project_orm(db, project_id, encryption_key=None)
+    mappings = mappings_crud.get_mappings_by_project_orm(
+        db, project_id, encryption_key=encryption_key
+    )
+    ensure_mappings_decrypted(mappings)
 
     # Ordenar por destination_table y destination_column
     return sorted(
-        mappings, key=lambda m: (m.get("destination_table", ""), m.get("destination_column", ""))
+        mappings,
+        key=lambda m: (m.get("destination_table") or "", m.get("destination_column") or ""),
     )
+
+
+# (campo cifrado, campo descifrado que debe quedar disponible)
+_ENCRYPTED_MAPPING_FIELDS = [
+    ("origin_table_encrypted", "origin_table"),
+    ("origin_column_encrypted", "origin_column"),
+    ("destination_table_encrypted", "destination_table"),
+    ("destination_column_encrypted", "destination_column"),
+    ("transformation_logic_encrypted", "transformation_logic"),
+]
+
+
+def ensure_mappings_decrypted(mappings: List[Dict[str, Any]]) -> None:
+    """Falla si algún mapping tiene campos cifrados sin su valor en claro."""
+    for mapping in mappings:
+        for encrypted_key, plain_key in _ENCRYPTED_MAPPING_FIELDS:
+            side = plain_key.split("_", 1)[0]
+            if side in ("origin", "destination") and (
+                mapping.get(f"{side}_source_type") == "connector"
+            ):
+                continue  # modo connector: no usa nombres cifrados
+            if mapping.get(encrypted_key) and not mapping.get(plain_key):
+                raise HTTPException(
+                    status_code=status.HTTP_423_LOCKED,
+                    detail=(
+                        "This project's mappings are encrypted: unlock the project's "
+                        "encryption session before generating or executing a migration"
+                    ),
+                )
+
+
+def open_session_adapter(
+    db_service: DBConnectionService,
+    user_id: str,
+    session_id: str,
+    side: str,
+    stack: ExitStack,
+    long_running: bool = False,
+) -> Tuple[DBConnectionConfig, BaseDBAdapter]:
+    """
+    Conecta a la BD de una sesión del usuario; el ExitStack la desconecta al salir.
+
+    Raises:
+        HTTPException 404/410: Sesión inexistente (o de otro usuario) o expirada
+    """
+    try:
+        session = db_service.get_session(user_id, session_id)
+    except SessionNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"{side.capitalize()} connection session not found",
+        )
+    except SessionExpiredError:
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail=f"{side.capitalize()} connection session expired",
+        )
+
+    config = db_service.get_decrypted_config(session)
+    adapter = db_service._get_adapter(config, long_running=long_running)
+    adapter.connect()
+    stack.callback(adapter.disconnect)
+    return config, adapter
+
+
+def connector_session_id(
+    mappings: List[Dict[str, Any]], side: str, explicit: Optional[str]
+) -> Optional[str]:
+    """
+    Sesión con la que resolver los mappings connector de un lado.
+
+    La de la petición si se indica; si no, la que se usó al crear los mappings (si
+    sigue activa y es del usuario, open_session_adapter lo comprueba).
+    """
+    if explicit:
+        return explicit
+    for mapping in mappings:
+        if mapping.get(f"{side}_source_type") == "connector" and mapping.get(f"{side}_session_id"):
+            return str(mapping[f"{side}_session_id"])
+    return None
+
+
+def require_connector_session(
+    mappings: List[Dict[str, Any]], side: str, session_id: Optional[str]
+) -> None:
+    """Error claro si hay mappings connector de un lado y no hay sesión con la que resolverlos."""
+    has_connector = any(m.get(f"{side}_source_type") == "connector" for m in mappings)
+    if has_connector and not session_id:
+        param = "origin" if side == "origin" else "dest"
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Mappings use a live connection on the {side} side: an active {side} "
+                f"connection session is required ({param}_connection_session_id)"
+            ),
+        )
+
+
+def is_cross_database(
+    origin_session_id: Optional[str],
+    dest_session_id: Optional[str],
+    origin_config: Optional[DBConnectionConfig],
+    dest_config: Optional[DBConnectionConfig],
+) -> bool:
+    """True si origen y destino son BDs distintas (el script SQL no puede leer el origen)."""
+    if origin_config is None or dest_config is None or origin_session_id == dest_session_id:
+        return False
+
+    def identity(config: DBConnectionConfig) -> tuple:
+        return (
+            config.dialect,
+            str(config.host).lower(),
+            config.port,
+            config.database,
+            getattr(config, "service_name", None),
+            getattr(config, "sid", None),
+        )
+
+    return identity(origin_config) != identity(dest_config)
+
+
+def build_copy_plans(mappings, origin_adapter, dest_adapter, dependency_order=None):
+    """Planes para la copia entre BDs; cualquier nombre sin resolver es un error."""
+    try:
+        plans, errors = MigrationScriptService.build_table_plans(
+            [dict(m) for m in mappings], origin_adapter, dest_adapter, dependency_order
+        )
+    except (MigrationScriptServiceError, ValueError) as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid mappings for migration: {str(e)}",
+        )
+    if errors:
+        # Copiar el resto omitiendo tablas dejaría una migración parcial "con éxito"
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Some mappings could not be resolved: {'; '.join(errors)}",
+        )
+    return plans
 
 
 def build_schema_metadata_from_mappings(mappings: List[Dict]) -> SchemaMetadata:
@@ -180,8 +351,126 @@ def build_schema_metadata_from_mappings(mappings: List[Dict]) -> SchemaMetadata:
     return SchemaMetadata(name="public", tables=tables, foreign_keys=foreign_keys)
 
 
+def generate_script_for_sessions(
+    mappings: List[Dict[str, Any]],
+    options: MigrationScriptOptions,
+    project: dict,
+    user_id: str,
+    dependency_order: Optional[List[str]],
+) -> Tuple[str, str]:
+    """
+    Genera el script conectando a las sesiones que hagan falta.
+
+    Returns:
+        (script, dialecto destino). Si origen y destino son BDs distintas el script es
+        el plan de copia por lotes (COPY_PLAN_MARKER) que ejecuta /execute.
+    """
+    origin_session_id = connector_session_id(
+        mappings, "origin", options.origin_connection_session_id
+    )
+    dest_session_id = connector_session_id(
+        mappings, "destination", options.dest_connection_session_id
+    )
+    require_connector_session(mappings, "origin", origin_session_id)
+    require_connector_session(mappings, "destination", dest_session_id)
+    dialect = options.dialect
+
+    with ExitStack() as stack:
+        origin_config = dest_config = None
+        origin_adapter = dest_adapter = None
+        if origin_session_id or dest_session_id:
+            db_service = get_db_connection_service()
+            if origin_session_id:
+                origin_config, origin_adapter = open_session_adapter(
+                    db_service, user_id, origin_session_id, "origin", stack
+                )
+            if dest_session_id:
+                dest_config, dest_adapter = open_session_adapter(
+                    db_service, user_id, dest_session_id, "destination", stack
+                )
+                # El script se ejecuta en el destino: su dialecto manda
+                dialect = dest_config.dialect
+
+        if is_cross_database(origin_session_id, dest_session_id, origin_config, dest_config):
+            # Entre BDs distintas un INSERT ... SELECT no puede leer el origen
+            plans = build_copy_plans(mappings, origin_adapter, dest_adapter, dependency_order)
+            script = DataCopyService(
+                origin_adapter, dest_adapter, batch_size=options.batch_size
+            ).describe(
+                plans,
+                project_name=project["name"],
+                include_constraints=options.include_constraints,
+                include_validation=options.include_validation,
+            )
+            return script, dialect
+
+        script = MigrationScriptService.generate_insert_script(
+            mappings=[dict(m) for m in mappings],
+            origin_adapter=origin_adapter,
+            dest_adapter=dest_adapter,
+            project_name=project["name"],
+            dependency_order=dependency_order if dependency_order else None,
+            batch_size=options.batch_size,
+            include_constraints=options.include_constraints,
+            include_validation=options.include_validation,
+            dialect=dialect,
+        )
+        return script, dialect
+
+
+def execute_cross_database_copy(
+    db,
+    project_id: str,
+    project: dict,
+    request: ExecutionRequest,
+    user_id: str,
+    mappings: List[Dict[str, Any]],
+    origin_adapter: BaseDBAdapter,
+    dest_adapter: BaseDBAdapter,
+) -> Dict[str, Any]:
+    """Copia por lotes origen -> destino con las opciones del script guardado (si hay)."""
+    options = MigrationScriptOptions(dialect=dest_adapter.dialect)
+    dependency_order = None
+    if request.script_id:
+        saved = migration_script_crud.get_migration_script_by_id_orm(
+            db, request.script_id, project_id
+        )
+        if not saved or str(saved.get("project_id")) != str(project_id):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Script not found")
+        options = MigrationScriptOptions(
+            dialect=dest_adapter.dialect,
+            batch_size=saved.get("batch_size") or options.batch_size,
+            include_constraints=saved.get("include_constraints", True),
+            include_validation=saved.get("include_validation", True),
+        )
+        dependency_order = saved.get("dependency_order") or None
+
+    plans = build_copy_plans(mappings, origin_adapter, dest_adapter, dependency_order)
+    logger.info(f"Cross-database copy of {len(plans)} tables")
+    return ExecutionService().execute_copy(
+        db_connection=db,
+        project_id=project_id,
+        plans=plans,
+        origin_adapter=origin_adapter,
+        dest_adapter=dest_adapter,
+        dry_run=request.dry_run,
+        user_id=user_id,
+        batch_size=options.batch_size,
+        include_constraints=options.include_constraints,
+        include_validation=options.include_validation,
+        project_name=project["name"],
+    )
+
+
 def load_or_generate_script(
-    db, project_id: str, project: dict, script_id: Optional[str], dialect: str
+    db,
+    project_id: str,
+    project: dict,
+    script_id: Optional[str],
+    dialect: str,
+    mappings: Optional[List[Dict[str, Any]]] = None,
+    origin_adapter: Optional[BaseDBAdapter] = None,
+    dest_adapter: Optional[BaseDBAdapter] = None,
 ) -> str:
     """
     Carga el script guardado (verificando que sea del mismo dialecto que el destino)
@@ -207,10 +496,19 @@ def load_or_generate_script(
                     f"connection is '{dialect}'"
                 ),
             )
+        if script.startswith(COPY_PLAN_MARKER):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "This script describes a copy between two databases: execute it with "
+                    "the origin connection session (origin_connection_session_id)"
+                ),
+            )
         logger.info(f"Loaded saved script: {script_id}")
     else:
         # Generar nuevo script on-the-fly
-        mappings = get_project_mappings(db, project_id)
+        if mappings is None:
+            mappings = get_project_mappings(db, project_id)
 
         if not mappings:
             raise HTTPException(
@@ -221,8 +519,8 @@ def load_or_generate_script(
         try:
             script = MigrationScriptService.generate_insert_script(
                 mappings=[dict(m) for m in mappings],
-                origin_adapter=None,
-                dest_adapter=None,
+                origin_adapter=origin_adapter,
+                dest_adapter=dest_adapter,
                 project_name=project["name"],
                 dialect=dialect,
             )
@@ -263,8 +561,10 @@ def get_db_connection_service() -> DBConnectionService:
 def generate_migration_script(
     project_id: str,
     options: MigrationScriptOptions,
+    http_request: Request,
     db=Depends(get_db_session),
     current_user=Depends(get_current_user),
+    _=Depends(validate_encryption_session),
 ) -> Dict[str, Any]:
     """
     Genera script de migración SQL con:
@@ -288,8 +588,9 @@ def generate_migration_script(
         project = validate_project_access(db, project_id, current_user, require_write=True)
         logger.info(f"Generating migration script for project {project_id} ({project['name']})")
 
-        # PASO 2: Obtener mappings del proyecto
-        mappings = get_project_mappings(db, project_id)
+        # PASO 2: Obtener mappings del proyecto (descifrados con la sesión de cifrado)
+        encryption_key = getattr(http_request.state, "encryption_key", None)
+        mappings = get_project_mappings(db, project_id, encryption_key)
 
         if not mappings:
             raise HTTPException(
@@ -313,19 +614,10 @@ def generate_migration_script(
                 logger.warning(f"Could not analyze dependencies: {str(e)}")
                 # Continuar sin orden de dependencias
 
-        # PASO 5: Generar script usando MigrationScriptService
-        # Nota: origin_adapter y dest_adapter son None porque los mappings
-        # no usan hashes en este caso (son nombres directos)
-        script = MigrationScriptService.generate_insert_script(
-            mappings=[dict(m) for m in mappings],
-            origin_adapter=None,
-            dest_adapter=None,
-            project_name=project["name"],
-            dependency_order=dependency_order if dependency_order else None,
-            batch_size=options.batch_size,
-            include_constraints=options.include_constraints,
-            include_validation=options.include_validation,
-            dialect=options.dialect,
+        # PASO 5: Generar script. Los mappings connector se resuelven con las sesiones
+        # de conexión (de la petición o las usadas al crear los mappings)
+        script, dialect = generate_script_for_sessions(
+            mappings, options, project, current_user["id"], dependency_order
         )
 
         # PASO 6: Calcular estimaciones
@@ -340,7 +632,7 @@ def generate_migration_script(
             batch_size=options.batch_size,
             include_constraints=options.include_constraints,
             include_validation=options.include_validation,
-            dialect=options.dialect,
+            dialect=dialect,
             dependency_order=dependency_order if dependency_order else [],
             created_by=str(current_user["id"]),
         )
@@ -355,7 +647,7 @@ def generate_migration_script(
             project_id=project_id,
             user_id=str(current_user["id"]),
             activity_type="migration:script_generated",
-            description=f"Migration script generated: {tables_count} tables, dialect={options.dialect}",
+            description=f"Migration script generated: {tables_count} tables, dialect={dialect}",
             entity_id=script_id,
             entity_type="migration_script",
         )
@@ -396,8 +688,10 @@ def generate_migration_script(
 def execute_migration(
     project_id: str,
     request: ExecutionRequest,
+    http_request: Request,
     db=Depends(get_db_session),
     current_user=Depends(get_current_user),
+    _=Depends(validate_encryption_session),
 ) -> Dict[str, Any]:
     """
     Ejecuta migración con:
@@ -418,45 +712,77 @@ def execute_migration(
         project = validate_project_access(db, project_id, current_user, require_write=True)
         logger.info(f"Executing migration for project {project_id}")
 
-        # PASO 2: Obtener sesión de conexión destino (define el dialecto del script)
+        # PASO 2: Mappings (descifrados) y sesión origen. Con un script guardado y sin
+        # sesión origen no hacen falta los mappings: se ejecuta el script tal cual
+        encryption_key = getattr(http_request.state, "encryption_key", None)
+        mappings: Optional[List[Dict[str, Any]]] = None
+        origin_session_id = request.origin_connection_session_id
+        if not request.script_id:
+            mappings = get_project_mappings(db, project_id, encryption_key)
+            origin_session_id = connector_session_id(mappings, "origin", origin_session_id)
+            require_connector_session(mappings, "origin", origin_session_id)
+
         db_service = get_db_connection_service()
 
-        try:
-            session = db_service.get_session(current_user["id"], request.dest_connection_session_id)
-        except SessionNotFoundError:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Destination connection session not found",
+        with ExitStack() as stack:
+            # PASO 3: Conectar al destino (sin límite de lectura: los INSERT pueden tardar)
+            config, dest_adapter = open_session_adapter(
+                db_service,
+                current_user["id"],
+                request.dest_connection_session_id,
+                "destination",
+                stack,
+                long_running=True,
             )
-        except SessionExpiredError:
-            raise HTTPException(
-                status_code=status.HTTP_410_GONE, detail="Destination connection session expired"
-            )
+            logger.info(f"Connected to destination database: {config.dialect}")
 
-        config = db_service.get_decrypted_config(session)
+            origin_config, origin_adapter = None, None
+            if origin_session_id:
+                origin_config, origin_adapter = open_session_adapter(
+                    db_service,
+                    current_user["id"],
+                    origin_session_id,
+                    "origin",
+                    stack,
+                    long_running=True,
+                )
 
-        # PASO 3: Obtener o generar script para el dialecto destino
-        script = load_or_generate_script(db, project_id, project, request.script_id, config.dialect)
-
-        # PASO 4: Conectar a la BD destino (sin límite de lectura: los INSERT pueden tardar)
-        dest_adapter = db_service._get_adapter(config, long_running=True)
-        dest_adapter.connect()
-        logger.info(f"Connected to destination database: {config.dialect}")
-
-        # PASO 5: Ejecutar migración usando ExecutionService
-        execution_service = ExecutionService()
-
-        try:
-            result = execution_service.execute_migration(
-                db_connection=db,
-                project_id=project_id,
-                script=script,
-                dest_adapter=dest_adapter,
-                dry_run=request.dry_run,
-                user_id=current_user["id"],
-            )
-        finally:
-            dest_adapter.disconnect()
+            if is_cross_database(
+                origin_session_id, request.dest_connection_session_id, origin_config, config
+            ):
+                # PASO 4a: BDs distintas: copia por lotes origen -> destino
+                if mappings is None:
+                    mappings = get_project_mappings(db, project_id, encryption_key)
+                result = execute_cross_database_copy(
+                    db,
+                    project_id,
+                    project,
+                    request,
+                    current_user["id"],
+                    mappings,
+                    origin_adapter,
+                    dest_adapter,
+                )
+            else:
+                # PASO 4b: misma BD: script INSERT ... SELECT en el destino
+                script = load_or_generate_script(
+                    db,
+                    project_id,
+                    project,
+                    request.script_id,
+                    config.dialect,
+                    mappings=mappings,
+                    origin_adapter=origin_adapter,
+                    dest_adapter=dest_adapter,
+                )
+                result = ExecutionService().execute_migration(
+                    db_connection=db,
+                    project_id=project_id,
+                    script=script,
+                    dest_adapter=dest_adapter,
+                    dry_run=request.dry_run,
+                    user_id=current_user["id"],
+                )
 
         logger.info(f"Migration execution completed: {result['status']}")
 

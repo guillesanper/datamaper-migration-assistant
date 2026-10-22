@@ -87,7 +87,27 @@ def quote_identifier(name: str, dialect: str = "postgresql") -> str:
 def _quote_part(part: str, dialect: str) -> str:
     if _SIMPLE_IDENTIFIER.match(part):
         return part
+    return _always_quote(part, dialect)
 
+
+def quote_exact_identifier(name: str, dialect: str = "postgresql") -> str:
+    """
+    Cita SIEMPRE un único identificador (sin interpretar puntos como cualificación).
+
+    Para nombres leídos del catálogo de la BD externa: sin comillas, "MixedCase" se
+    pasaría a minúsculas en PostgreSQL, "users" a mayúsculas en Oracle y "view" sería
+    un error de sintaxis.
+
+    Raises:
+        UnsafeSQLError: Si el nombre está vacío o contiene caracteres de control
+    """
+    if name is None or not str(name):
+        raise UnsafeSQLError("Identifier cannot be empty")
+    _check_no_control_chars(str(name), "Identifier")
+    return _always_quote(str(name), dialect)
+
+
+def _always_quote(part: str, dialect: str) -> str:
     dialect = (dialect or "").lower()
     if dialect == "mysql":
         return "`" + part.replace("`", "``") + "`"

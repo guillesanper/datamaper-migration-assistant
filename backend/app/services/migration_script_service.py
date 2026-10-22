@@ -8,13 +8,24 @@ IMPORTANTE:
 - Los hashes SHA-256 son irreversibles (one-way)
 - Solo se pueden resolver consultando la BD real usando adapters
 - Si una tabla fue renombrada en BD externa, el hash no coincidirá
+- El script (INSERT INTO destino SELECT ... FROM origen) se ejecuta en la BD destino:
+  solo sirve cuando origen y destino son la misma BD. Entre BDs distintas la
+  migración la ejecuta DataMap copiando por lotes (ExecutionService.execute_copy)
+  a partir de los mismos planes (build_table_plans).
 """
 
 import hashlib
 import logging
+from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
+from app.services.connector_resolver import (  # noqa: F401 (re-export)
+    ConnectorNameResolver,
+    HashNotFoundError,
+    MigrationScriptServiceError,
+    SqlName,
+)
 from app.utils.db_adapters.base_adapter import BaseDBAdapter
 from app.utils.sql_safety import (
     quote_identifier,
@@ -27,23 +38,40 @@ from app.utils.sql_safety import (
 
 logger = logging.getLogger(__name__)
 
-
-class MigrationScriptServiceError(Exception):
-    """Base exception for MigrationScriptService"""
-
-    pass
+# Tabla o columna: nombre ya resuelto (SqlName) o nombre de un mapping import (str)
+NameLike = Union[str, SqlName]
 
 
-class HashNotFoundError(MigrationScriptServiceError):
-    """Hash no se encontró en la base de datos"""
+def _render(name: NameLike, dialect: str) -> str:
+    """Cita un nombre para el dialecto (SqlName respeta su modo exacto)."""
+    if isinstance(name, SqlName):
+        return name.render(dialect)
+    return quote_identifier(name, dialect)
 
-    def __init__(self, hash_value: str, side: str):
-        self.hash_value = hash_value
-        self.side = side
-        super().__init__(
-            f"Hash {hash_value[:8]}... not found in {side} database. "
-            f"Table/column may have been renamed or deleted."
-        )
+
+def _plain(name: NameLike) -> str:
+    """Nombre sin citar (para comentarios, literales y sufijos)."""
+    return name.name if isinstance(name, SqlName) else str(name)
+
+
+@dataclass
+class ColumnPlan:
+    """Una columna destino y de qué columna/expresión del origen sale."""
+
+    origin: SqlName
+    dest: SqlName
+    transformation_logic: Optional[str] = None
+    origin_type: Optional[str] = None
+    dest_type: Optional[str] = None
+
+
+@dataclass
+class TablePlan:
+    """Qué columnas de una tabla origen se copian a una tabla destino."""
+
+    origin: SqlName
+    dest: SqlName
+    columns: List[ColumnPlan] = field(default_factory=list)
 
 
 class MigrationScriptService:
@@ -63,6 +91,164 @@ class MigrationScriptService:
             dest_adapter=dest_adapter
         )
     """
+
+    @staticmethod
+    def build_table_plans(
+        mappings: List[Dict[str, Any]],
+        origin_adapter: Optional[BaseDBAdapter] = None,
+        dest_adapter: Optional[BaseDBAdapter] = None,
+        dependency_order: Optional[List[str]] = None,
+    ) -> Tuple[List[TablePlan], List[str]]:
+        """
+        Agrupa los mappings por tabla destino y resuelve todos los nombres.
+
+        Args:
+            mappings: Mappings del proyecto (ya descifrados)
+            origin_adapter: Adapter conectado al origen (necesario si hay mappings connector)
+            dest_adapter: Adapter conectado al destino (necesario si hay mappings connector)
+            dependency_order: Orden topológico de tablas destino (por nombre)
+
+        Returns:
+            (planes en orden de ejecución, errores de resolución por tabla)
+
+        Raises:
+            ValueError: Si hay mappings connector y falta el adapter de ese lado
+            MigrationScriptServiceError: Si un mapping es inválido o una tabla destino
+                recibe columnas de varias tablas origen
+        """
+        origin_resolver = (
+            ConnectorNameResolver(origin_adapter, "origin") if origin_adapter else None
+        )
+        dest_resolver = ConnectorNameResolver(dest_adapter, "destination") if dest_adapter else None
+
+        errors: List[str] = []
+        grouped: Dict[SqlName, List[Dict[str, Any]]] = {}
+        for mapping in mappings:
+            try:
+                dest_table = MigrationScriptService._resolve_table(
+                    mapping, "destination", dest_resolver
+                )
+            except HashNotFoundError as e:
+                logger.error(f"Hash not found in mapping preparation: {str(e)}")
+                errors.append(str(e))
+                continue
+            grouped.setdefault(dest_table, []).append(mapping)
+
+        dest_tables = list(grouped)
+        if dependency_order:
+            position = {name: idx for idx, name in enumerate(dependency_order)}
+            # sorted es estable: las tablas fuera del orden quedan al final
+            dest_tables.sort(key=lambda t: position.get(t.name, len(position)))
+
+        plans: List[TablePlan] = []
+        for dest_table in dest_tables:
+            try:
+                plans.append(
+                    MigrationScriptService._build_table_plan(
+                        dest_table, grouped[dest_table], origin_resolver, dest_resolver
+                    )
+                )
+            except HashNotFoundError as e:
+                logger.error(f"Hash not found for table {dest_table}: {str(e)}")
+                errors.append(f"{dest_table}: {e}")
+
+        return plans, errors
+
+    @staticmethod
+    def _build_table_plan(
+        dest_table: SqlName,
+        table_mappings: List[Dict[str, Any]],
+        origin_resolver: Optional[ConnectorNameResolver],
+        dest_resolver: Optional[ConnectorNameResolver],
+    ) -> TablePlan:
+        origin_tables = []
+        for mapping in table_mappings:
+            origin_table = MigrationScriptService._resolve_table(mapping, "origin", origin_resolver)
+            if origin_table not in origin_tables:
+                origin_tables.append(origin_table)
+
+        if len(origin_tables) > 1:
+            # Antes se usaba en silencio la primera tabla y el SELECT referenciaba
+            # columnas de las otras (SQL roto o datos de la tabla equivocada)
+            raise MigrationScriptServiceError(
+                f"Destination table '{dest_table}' maps columns from several origin tables "
+                f"({', '.join(str(t) for t in origin_tables)}); only one origin table per "
+                f"destination table is supported"
+            )
+        origin_table = origin_tables[0]
+
+        columns = [
+            ColumnPlan(
+                origin=MigrationScriptService._resolve_column(
+                    mapping, "origin", origin_resolver, origin_table
+                ),
+                dest=MigrationScriptService._resolve_column(
+                    mapping, "destination", dest_resolver, dest_table
+                ),
+                # Campo cifrado que el CRUD ya descifró
+                transformation_logic=mapping.get("transformation_logic"),
+                origin_type=mapping.get("origin_data_type"),
+                dest_type=mapping.get("destination_data_type"),
+            )
+            for mapping in table_mappings
+        ]
+        return TablePlan(origin=origin_table, dest=dest_table, columns=columns)
+
+    @staticmethod
+    def _connector_hash(mapping: Dict[str, Any], hash_key: str, side: str, resolver) -> str:
+        hash_value = mapping.get(hash_key)
+        if not hash_value:
+            raise MigrationScriptServiceError(
+                f"Missing {hash_key} for connector mode in mapping {mapping.get('id')}"
+            )
+        if resolver is None:
+            raise ValueError(
+                f"Adapter is required for connector mode ({side}), but None was provided"
+            )
+        return str(hash_value)
+
+    @staticmethod
+    def _import_name(mapping: Dict[str, Any], name_key: str) -> str:
+        name = mapping.get(name_key)
+        if not name:
+            raise MigrationScriptServiceError(
+                f"Missing {name_key} for import mode in mapping {mapping.get('id')}"
+            )
+        return str(name)
+
+    @staticmethod
+    def _source_type(mapping: Dict[str, Any], side: str) -> str:
+        source_type = mapping.get(f"{side}_source_type") or "import"
+        if source_type not in ("import", "connector"):
+            raise MigrationScriptServiceError(f"Unknown source_type: {source_type} for {side}")
+        return str(source_type)
+
+    @staticmethod
+    def _resolve_table(
+        mapping: Dict[str, Any], side: str, resolver: Optional[ConnectorNameResolver]
+    ) -> SqlName:
+        if MigrationScriptService._source_type(mapping, side) == "import":
+            return SqlName(MigrationScriptService._import_name(mapping, f"{side}_table"))
+        hash_value = MigrationScriptService._connector_hash(
+            mapping, f"{side}_table_hash", side, resolver
+        )
+        assert resolver is not None
+        return resolver.resolve_table(hash_value)
+
+    @staticmethod
+    def _resolve_column(
+        mapping: Dict[str, Any],
+        side: str,
+        resolver: Optional[ConnectorNameResolver],
+        table: SqlName,
+    ) -> SqlName:
+        if MigrationScriptService._source_type(mapping, side) == "import":
+            return SqlName(MigrationScriptService._import_name(mapping, f"{side}_column"))
+        hash_value = MigrationScriptService._connector_hash(
+            mapping, f"{side}_column_hash", side, resolver
+        )
+        assert resolver is not None
+        return resolver.resolve_column(hash_value, table)
 
     @staticmethod
     def generate_insert_script(
@@ -94,234 +280,127 @@ class MigrationScriptService:
             Script SQL completo con transacciones, constraints, batching y validación
 
         Raises:
-            HashNotFoundError: Si un hash no se encuentra en la BD
             ValueError: Si se requiere adapter pero es None
+            MigrationScriptServiceError: Si un mapping es inválido
         """
         if not mappings:
             return "-- No mappings found for this project\n"
 
-        # ============================================================================
-        # FASE 1: PREPARACIÓN - Agrupar mappings por tabla y preparar metadata
-        # ============================================================================
+        plans, errors = MigrationScriptService.build_table_plans(
+            mappings, origin_adapter, dest_adapter, dependency_order
+        )
+        all_tables = [plan.dest for plan in plans]
 
-        # Agrupar mappings por tabla de destino
-        table_mappings: Dict[str, List[Dict]] = {}
-
-        for mapping in mappings:
-            try:
-                dest_table = MigrationScriptService._resolve_name(
-                    mapping=mapping, side="destination", adapter=dest_adapter
-                )
-
-                if dest_table not in table_mappings:
-                    table_mappings[dest_table] = []
-
-                table_mappings[dest_table].append(mapping)
-
-            except HashNotFoundError as e:
-                logger.error(f"Hash not found in mapping preparation: {str(e)}")
-                # Continuamos con los demás mappings
-
-        # Obtener lista de tablas únicas
-        all_tables = list(table_mappings.keys())
-
-        # Aplicar orden de dependencias si se proporcionó
-        if dependency_order:
-            # Ordenar tablas según el orden topológico
-            ordered_tables = [t for t in dependency_order if t in all_tables]
-            # Agregar tablas que no están en dependency_order al final
-            remaining_tables = [t for t in all_tables if t not in ordered_tables]
-            all_tables = ordered_tables + remaining_tables
-
-        # ============================================================================
-        # FASE 2: HEADER - Generar header del script con metadata
-        # ============================================================================
-
+        # Header
         now_utc = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
         lines = [
             "-- ========================================",
             "-- MIGRATION SCRIPT",
             f"-- Generated at {now_utc} UTC",
         ]
-
         if project_name:
             lines.append(f"-- Project: {sanitize_comment(project_name)}")
-
         lines.append(f"-- Total mappings: {len(mappings)}")
         lines.append(f"-- Total tables: {len(all_tables)}")
         lines.append(f"-- Dialect: {dialect}")
         lines.append(f"-- Batch size: {batch_size}")
         lines.append("-- ========================================")
+        for error in errors:
+            lines.append(f"-- ERROR: {sanitize_comment(error)}")
         lines.append("")
-
-        # ============================================================================
-        # FASE 3: TRANSACTION BEGIN
-        # ============================================================================
 
         begin_stmt, commit_stmt = MigrationScriptService._generate_transaction_wrapper(dialect)
         lines.append("-- SECTION 1: Transaction Start")
         lines.append(begin_stmt)
         lines.append("")
 
-        # ============================================================================
-        # FASE 4: DISABLE CONSTRAINTS
-        # ============================================================================
-
         if include_constraints and all_tables:
             lines.append("-- SECTION 2: Disable Constraints")
-            constraint_sql = MigrationScriptService._generate_constraint_disabling(
-                all_tables, dialect
-            )
-            lines.append(constraint_sql)
+            lines.append(MigrationScriptService._generate_constraint_disabling(all_tables, dialect))
             lines.append("")
-
-        # ============================================================================
-        # FASE 5: DATA MIGRATION - Generar INSERTs por tabla
-        # ============================================================================
 
         lines.append("-- SECTION 3: Data Migration (in dependency order)")
         lines.append("")
-
-        table_stats = {}  # Para tracking de rows por tabla
-
-        for table_idx, dest_table in enumerate(all_tables, start=1):
-            table_mapping_list = table_mappings[dest_table]
-
-            lines.append(f"-- Table {table_idx}/{len(all_tables)}: {sanitize_comment(dest_table)}")
-
-            try:
-                # Preparar columnas y valores para el INSERT
-                dest_columns = []
-                select_expressions = []
-
-                for mapping in table_mapping_list:
-                    # Resolver nombres
-                    origin_table = MigrationScriptService._resolve_name(
-                        mapping=mapping, side="origin", adapter=origin_adapter
-                    )
-
-                    origin_column = MigrationScriptService._resolve_name(
-                        mapping=mapping, side="origin", adapter=origin_adapter, is_column=True
-                    )
-
-                    dest_column = MigrationScriptService._resolve_name(
-                        mapping=mapping, side="destination", adapter=dest_adapter, is_column=True
-                    )
-
-                    # Obtener tipos (si están disponibles)
-                    origin_type = mapping.get("origin_data_type")
-                    dest_type = mapping.get("destination_data_type")
-
-                    # Obtener transformación (campo encriptado que el CRUD ya descifró)
-                    transformation_logic = mapping.get("transformation_logic")
-
-                    # Aplicar transformación o conversión de tipos
-                    select_expr = MigrationScriptService._apply_transformation(
-                        column_name=origin_column,
-                        transformation_logic=transformation_logic,
-                        origin_type=origin_type,
-                        dest_type=dest_type,
-                        dialect=dialect,
-                    )
-
-                    dest_columns.append(dest_column)
-                    select_expressions.append(select_expr)
-
-                # IMPORTANTE: Asumir que todos los mappings de una tabla vienen de la misma tabla origen
-                # (esto es una simplificación, en un caso real podríamos tener múltiples orígenes)
-                first_mapping = table_mapping_list[0]
-                origin_table = MigrationScriptService._resolve_name(
-                    mapping=first_mapping, side="origin", adapter=origin_adapter
+        for table_idx, plan in enumerate(plans, start=1):
+            lines.append(f"-- Table {table_idx}/{len(plans)}: {sanitize_comment(str(plan.dest))}")
+            lines.append(
+                MigrationScriptService._generate_table_insert(
+                    plan, origin_adapter, batch_size, dialect
                 )
-
-                # Construir SELECT clause
-                select_clause = (
-                    f"SELECT {', '.join(select_expressions)} "
-                    f"FROM {quote_identifier(origin_table, dialect)}"
-                )
-
-                # Obtener row count real del adapter si está disponible
-                estimated_rows = None
-                if origin_adapter:
-                    try:
-                        stats = origin_adapter.get_table_statistics(origin_table)
-                        estimated_rows = stats.row_count
-                    except Exception as e:
-                        logger.warning(f"Could not get row count for {origin_table}: {e}")
-
-                use_batching = estimated_rows is not None and estimated_rows > batch_size
-
-                if use_batching:
-                    # Generar INSERT con batching para tablas grandes
-                    lines.append(
-                        f"-- Large table - using batching (estimated rows: {estimated_rows})"
-                    )
-                    batched_insert = MigrationScriptService._generate_batched_insert(
-                        table_name=dest_table,
-                        columns=dest_columns,
-                        select_clause=select_clause,
-                        total_rows=estimated_rows,
-                        batch_size=batch_size,
-                        dialect=dialect,
-                    )
-                    lines.append(batched_insert)
-                else:
-                    # INSERT simple sin batching
-                    quoted_columns = [quote_identifier(c, dialect) for c in dest_columns]
-                    lines.append(
-                        f"INSERT INTO {quote_identifier(dest_table, dialect)} "
-                        f"({', '.join(quoted_columns)})"
-                    )
-                    lines.append(select_clause + ";")
-
-                table_stats[dest_table] = len(table_mapping_list)
-                lines.append("")
-
-            except HashNotFoundError as e:
-                logger.error(f"Hash not found for table {dest_table}: {str(e)}")
-                lines.append(f"-- ERROR: {sanitize_comment(str(e))}")
-                lines.append("")
-
-        # ============================================================================
-        # FASE 6: ENABLE CONSTRAINTS
-        # ============================================================================
+            )
+            lines.append("")
 
         if include_constraints and all_tables:
             lines.append("-- SECTION 4: Enable Constraints")
-            constraint_sql = MigrationScriptService._generate_constraint_enabling(
-                all_tables, dialect
-            )
-            lines.append(constraint_sql)
+            lines.append(MigrationScriptService._generate_constraint_enabling(all_tables, dialect))
             lines.append("")
-
-        # ============================================================================
-        # FASE 7: VALIDATION QUERIES
-        # ============================================================================
 
         if include_validation and all_tables:
             lines.append("-- SECTION 5: Validation")
-            for table_name in all_tables:
-                columns_count = table_stats.get(table_name, 0)
-                lines.append(
-                    f"SELECT {quote_literal(table_name, dialect)} AS table_name, "
-                    f"COUNT(*) AS row_count FROM {quote_identifier(table_name, dialect)};"
-                )
+            for table in all_tables:
+                lines.append(MigrationScriptService.validation_query(table, dialect) + ";")
             lines.append("")
-
-        # ============================================================================
-        # FASE 8: TRANSACTION COMMIT
-        # ============================================================================
 
         lines.append("-- SECTION 6: Transaction Commit")
         lines.append(commit_stmt)
         lines.append("")
-
         lines.append("-- ========================================")
         lines.append("-- MIGRATION COMPLETE")
         lines.append(f"-- Total tables migrated: {len(all_tables)}")
         lines.append("-- ========================================")
 
         return "\n".join(lines)
+
+    @staticmethod
+    def validation_query(table: NameLike, dialect: str) -> str:
+        """SELECT con el número de filas de una tabla destino."""
+        return (
+            f"SELECT {quote_literal(_plain(table), dialect)} AS table_name, "
+            f"COUNT(*) AS row_count FROM {_render(table, dialect)}"
+        )
+
+    @staticmethod
+    def _generate_table_insert(
+        plan: TablePlan, origin_adapter: Optional[BaseDBAdapter], batch_size: int, dialect: str
+    ) -> str:
+        """INSERT INTO destino SELECT ... FROM origen (con batching si la tabla es grande)."""
+        select_expressions = [
+            MigrationScriptService._apply_transformation(
+                column_name=column.origin,
+                transformation_logic=column.transformation_logic,
+                origin_type=column.origin_type,
+                dest_type=column.dest_type,
+                dialect=dialect,
+            )
+            for column in plan.columns
+        ]
+        select_clause = f"SELECT {', '.join(select_expressions)} FROM {plan.origin.render(dialect)}"
+        dest_columns = [column.dest for column in plan.columns]
+
+        # Row count real del adapter si está disponible
+        estimated_rows = None
+        if origin_adapter:
+            try:
+                stats = origin_adapter.get_table_statistics(plan.origin.name, plan.origin.schema)
+                estimated_rows = stats.row_count
+            except Exception as e:
+                logger.warning(f"Could not get row count for {plan.origin}: {e}")
+
+        if estimated_rows is not None and estimated_rows > batch_size:
+            return (
+                f"-- Large table - using batching (estimated rows: {estimated_rows})\n"
+                + MigrationScriptService._generate_batched_insert(
+                    table_name=plan.dest,
+                    columns=dest_columns,
+                    select_clause=select_clause,
+                    total_rows=estimated_rows,
+                    batch_size=batch_size,
+                    dialect=dialect,
+                )
+            )
+
+        quoted_columns = ", ".join(_render(c, dialect) for c in dest_columns)
+        return f"INSERT INTO {plan.dest.render(dialect)} ({quoted_columns})\n{select_clause};"
 
     @staticmethod
     def _resolve_name(
@@ -488,7 +567,7 @@ class MigrationScriptService:
             return ("BEGIN;", "COMMIT;")
 
     @staticmethod
-    def _generate_constraint_disabling(tables: List[str], dialect: str) -> str:
+    def _generate_constraint_disabling(tables: List[NameLike], dialect: str) -> str:
         """
         Genera SQL para deshabilitar constraints y triggers antes de la migración.
 
@@ -511,9 +590,7 @@ class MigrationScriptService:
         if dialect_lower == "postgresql":
             lines.append("-- Disable triggers and constraints")
             for table in tables:
-                lines.append(
-                    f"ALTER TABLE {quote_identifier(table, dialect_lower)} DISABLE TRIGGER ALL;"
-                )
+                lines.append(f"ALTER TABLE {_render(table, dialect_lower)} DISABLE TRIGGER ALL;")
         elif dialect_lower == "mysql":
             lines.append("-- Disable foreign key checks")
             lines.append("SET FOREIGN_KEY_CHECKS=0;")
@@ -521,22 +598,18 @@ class MigrationScriptService:
         elif dialect_lower == "sqlserver":
             lines.append("-- Disable constraints")
             for table in tables:
-                lines.append(
-                    f"ALTER TABLE {quote_identifier(table, dialect_lower)} NOCHECK CONSTRAINT ALL;"
-                )
+                lines.append(f"ALTER TABLE {_render(table, dialect_lower)} NOCHECK CONSTRAINT ALL;")
         elif dialect_lower == "oracle":
             lines.append("-- Disable triggers")
             for table in tables:
-                lines.append(
-                    f"ALTER TABLE {quote_identifier(table, dialect_lower)} DISABLE ALL TRIGGERS;"
-                )
+                lines.append(f"ALTER TABLE {_render(table, dialect_lower)} DISABLE ALL TRIGGERS;")
         else:
             logger.warning(f"Unknown dialect '{dialect}', skipping constraint disabling")
 
         return "\n".join(lines)
 
     @staticmethod
-    def _generate_constraint_enabling(tables: List[str], dialect: str) -> str:
+    def _generate_constraint_enabling(tables: List[NameLike], dialect: str) -> str:
         """
         Genera SQL para habilitar constraints y triggers después de la migración.
 
@@ -559,24 +632,18 @@ class MigrationScriptService:
         if dialect_lower == "postgresql":
             lines.append("-- Enable triggers and constraints")
             for table in tables:
-                lines.append(
-                    f"ALTER TABLE {quote_identifier(table, dialect_lower)} ENABLE TRIGGER ALL;"
-                )
+                lines.append(f"ALTER TABLE {_render(table, dialect_lower)} ENABLE TRIGGER ALL;")
         elif dialect_lower == "mysql":
             lines.append("-- Enable foreign key checks")
             lines.append("SET FOREIGN_KEY_CHECKS=1;")
         elif dialect_lower == "sqlserver":
             lines.append("-- Enable constraints")
             for table in tables:
-                lines.append(
-                    f"ALTER TABLE {quote_identifier(table, dialect_lower)} CHECK CONSTRAINT ALL;"
-                )
+                lines.append(f"ALTER TABLE {_render(table, dialect_lower)} CHECK CONSTRAINT ALL;")
         elif dialect_lower == "oracle":
             lines.append("-- Enable triggers")
             for table in tables:
-                lines.append(
-                    f"ALTER TABLE {quote_identifier(table, dialect_lower)} ENABLE ALL TRIGGERS;"
-                )
+                lines.append(f"ALTER TABLE {_render(table, dialect_lower)} ENABLE ALL TRIGGERS;")
         else:
             logger.warning(f"Unknown dialect '{dialect}', skipping constraint enabling")
 
@@ -584,7 +651,7 @@ class MigrationScriptService:
 
     @staticmethod
     def _apply_transformation(
-        column_name: str,
+        column_name: NameLike,
         transformation_logic: Optional[str],
         origin_type: Optional[str],
         dest_type: Optional[str],
@@ -609,7 +676,7 @@ class MigrationScriptService:
             Sin transformación y tipos compatibles: "email"
         """
         # Si hay transformación customizada, aplicarla
-        column_name = quote_identifier(column_name, dialect)
+        column_name = _render(column_name, dialect)
 
         if transformation_logic:
             # La transformación es una expresión SQL por diseño: se exige que sea
@@ -692,8 +759,8 @@ class MigrationScriptService:
 
     @staticmethod
     def _generate_batched_insert(
-        table_name: str,
-        columns: List[str],
+        table_name: NameLike,
+        columns: List[NameLike],
         select_clause: str,
         total_rows: Optional[int],
         batch_size: int,
@@ -731,9 +798,9 @@ class MigrationScriptService:
             END $$;
         """
         dialect_lower = dialect.lower()
-        columns_str = ", ".join(quote_identifier(c, dialect_lower) for c in columns)
-        routine_suffix = safe_routine_suffix(table_name)
-        table_name = quote_identifier(table_name, dialect_lower)
+        columns_str = ", ".join(_render(c, dialect_lower) for c in columns)
+        routine_suffix = safe_routine_suffix(_plain(table_name))
+        table_name = _render(table_name, dialect_lower)
         total_rows_str = str(total_rows) if total_rows else "NULL"
 
         if dialect_lower == "postgresql":
