@@ -271,8 +271,14 @@ REDIS_SSL=false
 
 # App
 ENV=development
-SECRET_KEY=your-secret-key
+SECRET_KEY=your-secret-key            # obligatorio fuera de development (≥ 32 caracteres)
 ENCRYPTION_ENABLED=true
+# Cifra las credenciales de conexiones a BDs externas: base64 de 32 bytes aleatorios
+# python -c "import base64,os;print(base64.b64encode(os.urandom(32)).decode())"
+ENCRYPTION_MASTER_KEY=
+
+# Seguridad HTTP
+CORS_ALLOWED_ORIGINS=https://app.tudominio.com   # orígenes del frontend, separados por comas
 
 # External Services
 STRIPE_SECRET_KEY=your-stripe-key
@@ -308,6 +314,16 @@ Valores por defecto del código (todas opcionales; la tabla completa, la lectura
 Respuestas: `verify-code` y `reset` devuelven siempre `400 «Código inválido o expirado»`, y `resend-code` / `forgot` un `200` idéntico exista o no la cuenta (el motivo real queda en `security_logs`). `register` responde `201` con el mismo cuerpo exista o no una cuenta con ese email (a quien ya la tiene le llega un aviso «Ya tienes una cuenta», o un código nuevo si no la había verificado); solo el `409 username_taken` por un username ocupado es explícito. Riesgos residuales (enumeración de usernames y pre-secuestro de una cuenta sin verificar): ver la [guía](backend/docs/DEPLOYMENT_GUIDE.md#riesgos-residuales-decisiones-explícitas-no-defectos-pendientes-de-arreglar-en-esta-fase).
 
 La migración `0003` (`email_otps.failed_attempts`) la aplica el compose al arrancar el backend; si la BD de desarrollo sigue en `0002`: `docker-compose exec backend alembic upgrade head`.
+
+### Conectores a BDs externas: variables
+
+| Variable | Por defecto | Efecto |
+|----------|-------------|--------|
+| `DB_CONNECTOR_ALLOW_PRIVATE_HOSTS` | `true` solo en development | Permite conectar a hosts que resuelven a IPs privadas, loopback o link-local; fuera de desarrollo solo IPs públicas (protección SSRF) |
+| `DB_CONNECTOR_ALLOWED_NETWORKS` | vacío | Redes CIDR internas permitidas explícitamente, separadas por comas (ej. `10.20.0.0/16`) |
+| `DB_CONNECTOR_RATE_LIMIT` / `DB_CONNECTOR_RATE_WINDOW_SECONDS` | `10` / `60` | Intentos de conexión (test y creación de sesión) por usuario y ventana |
+
+Una sesión de conexión creada con `project_id` solo se puede usar desde ese proyecto (para los demás no existe: 404).
 
 ### Frontend (`.env`)
 ```env

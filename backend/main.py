@@ -44,21 +44,28 @@ app = FastAPI(title="DataMapper API", version="1.0.0")
 ENV = os.getenv("ENV", "production")
 IS_DEVELOPMENT = ENV in ["development", "dev", "debug"]
 
-# Configurar CORS
-allowed_origins = [
+# Configurar CORS: orígenes del frontend en CORS_ALLOWED_ORIGINS (separados por comas).
+# Antes la lista de producción estaba vacía (solo localhost): un frontend en otro dominio
+# no podía llamar a la API, y en producción se aceptaban orígenes localhost con cookies.
+DEV_ORIGINS = [
     "http://localhost:3000",
     "http://localhost:5173",
     "http://127.0.0.1:3000",
     "http://127.0.0.1:5173",
 ]
 
-if not IS_DEVELOPMENT:
-    # Añade tus dominios de producción aquí
-    allowed_origins.extend(
-        [
-            # "https://tudominio.com",
-        ]
-    )
+
+def get_allowed_origins(env_value: str, is_development: bool) -> list:
+    configured = [o.strip().rstrip("/") for o in env_value.split(",") if o.strip()]
+    if "*" in configured:
+        # allow_credentials=True con "*" haría que cualquier web use la sesión del usuario
+        raise ValueError("CORS_ALLOWED_ORIGINS cannot contain '*'")
+    return (DEV_ORIGINS if is_development else []) + configured
+
+
+allowed_origins = get_allowed_origins(os.getenv("CORS_ALLOWED_ORIGINS", ""), IS_DEVELOPMENT)
+if not allowed_origins:
+    print("⚠️  CORS_ALLOWED_ORIGINS no configurado: solo funcionará un frontend del mismo origen")
 
 app.add_middleware(
     CORSMiddleware,

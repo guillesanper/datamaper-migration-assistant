@@ -6,6 +6,8 @@ Contiene todas las configuraciones relacionadas con seguridad, rate limiting, CS
 import os
 from typing import Any, Dict, Optional
 
+from app.utils.master_key import InvalidMasterKeyError, parse_master_key
+
 
 class SecuritySettings:
     """Configuraciones de seguridad centralizadas"""
@@ -262,6 +264,28 @@ class SecuritySettings:
 security_settings = SecuritySettings()
 
 
+def _validate_secrets(errors: list, warnings: list) -> None:
+    """SECRET_KEY y ENCRYPTION_MASTER_KEY (antes no se comprobaban al arrancar)."""
+    # Firma la cookie de sesión (app/utils/cookies.py); vacío = firma con clave ""
+    secret_key = os.getenv("SECRET_KEY", "")
+    if not secret_key.strip():
+        errors.append("SECRET_KEY debe configurarse en producción")
+    elif len(secret_key) < 32:
+        warnings.append("SECRET_KEY debería tener al menos 32 caracteres aleatorios")
+
+    # Cifra las credenciales de las conexiones a BDs externas
+    master_key = os.getenv("ENCRYPTION_MASTER_KEY")
+    if not master_key:
+        warnings.append(
+            "ENCRYPTION_MASTER_KEY no configurada: las conexiones a BDs externas no funcionarán"
+        )
+        return
+    try:
+        parse_master_key(master_key)
+    except InvalidMasterKeyError as e:
+        errors.append(str(e))
+
+
 # Validaciones de configuración
 def validate_security_config():
     """Valida que la configuración de seguridad sea correcta"""
@@ -273,6 +297,8 @@ def validate_security_config():
 
     if security_settings.IP_HASH_SALT == "default-ip-salt":
         errors.append("IP_HASH_SALT debe ser configurado en producción")
+
+    _validate_secrets(errors, warnings)
 
     if security_settings.OTP_LENGTH < 6:
         errors.append("OTP_LENGTH debe ser al menos 6 caracteres")

@@ -16,6 +16,38 @@ from app.services.type_compatibility_service import TypeCompatibilityService
 router = APIRouter()
 
 
+def ensure_table_in_project(db, project_id: str, table_id) -> None:
+    """
+    404 si la tabla no existe o es de otro proyecto.
+
+    Los permisos se comprueban contra el project_id de la ruta; sin esto, con acceso a un
+    proyecto se podían leer o modificar tablas de otro pasando su id (y la versión y el
+    broadcast realtime se registraban en el proyecto equivocado).
+    """
+    row = db.execute(
+        text("SELECT project_id FROM tables WHERE id = :id"), {"id": str(table_id)}
+    ).first()
+    if not row or str(row[0]) != str(project_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=make_error(ErrorCode.TABLE_NOT_FOUND)
+        )
+
+
+def ensure_column_in_project(db, project_id: str, column_id) -> None:
+    """404 si la columna no existe o su tabla es de otro proyecto."""
+    row = db.execute(
+        text(
+            "SELECT t.project_id FROM columns c JOIN tables t ON t.id = c.table_id"
+            " WHERE c.id = :id"
+        ),
+        {"id": str(column_id)},
+    ).first()
+    if not row or str(row[0]) != str(project_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=make_error(ErrorCode.COLUMN_NOT_FOUND)
+        )
+
+
 # ==================== API ENDPOINTS (JSON) ====================
 # Nuevos endpoints REST API para React frontend
 
@@ -140,6 +172,7 @@ async def api_update_table(
     _=Depends(validate_encryption_session),
 ):
     """Update a table (API endpoint)"""
+    ensure_table_in_project(db, project_id, table_id)
     try:
         #  Get encryption key from session
         encryption_key = getattr(request.state, "encryption_key", None)
@@ -233,6 +266,7 @@ async def api_delete_table(
     current_user=Depends(get_current_user),
 ):
     """Delete a table (API endpoint)"""
+    ensure_table_in_project(db, project_id, table_id)
     try:
         table_data, columns_deleted, mappings_deleted = SchemaService.delete_table_with_cleanup(
             db, table_id, current_user["id"]
@@ -317,6 +351,7 @@ async def api_get_table(
     current_user=Depends(get_current_user),
 ):
     """Get table details (API endpoint)"""
+    ensure_table_in_project(db, project_id, table_id)
     from app.crud import schemas_crud
 
     #  Get encryption key from session
@@ -346,6 +381,7 @@ async def api_create_column(
     _=Depends(validate_encryption_session),
 ):
     """Create a new column (API endpoint)"""
+    ensure_table_in_project(db, project_id, table_id)
     try:
         from app.crud import schemas_crud
 
@@ -452,6 +488,7 @@ async def api_update_column(
     _=Depends(validate_encryption_session),
 ):
     """Update a column (API endpoint)"""
+    ensure_column_in_project(db, project_id, column_id)
     try:
         # Get encryption_key from request.state (set by middleware)
         encryption_key = getattr(request.state, "encryption_key", None)
@@ -571,6 +608,7 @@ async def api_delete_column(
     current_user=Depends(get_current_user),
 ):
     """Delete a column (API endpoint)"""
+    ensure_column_in_project(db, project_id, column_id)
     try:
         column_data, mappings_deleted = SchemaService.delete_column_with_cleanup(
             db, column_id, current_user["id"]
@@ -657,6 +695,7 @@ async def api_get_column(
     current_user=Depends(get_current_user),
 ):
     """Get column details (API endpoint)"""
+    ensure_column_in_project(db, project_id, column_id)
     from app.crud import schemas_crud
 
     column = schemas_crud.get_column_by_id_orm(db, column_id)
@@ -688,6 +727,7 @@ async def api_set_primary_key(
     current_user=Depends(get_current_user),
 ):
     """Set or update Primary Key for a table (API endpoint)"""
+    ensure_table_in_project(db, project_id, table_id)
     from app.crud import schemas_crud
     from app.services.pk_service import PrimaryKeyService
 
@@ -774,6 +814,7 @@ async def api_get_primary_key(
     current_user=Depends(get_current_user),
 ):
     """Get Primary Key for a table (API endpoint)"""
+    ensure_table_in_project(db, project_id, table_id)
     from app.crud import schemas_crud
     from app.services.pk_service import PrimaryKeyService
 
@@ -815,6 +856,7 @@ async def api_delete_primary_key(
     current_user=Depends(get_current_user),
 ):
     """Delete Primary Key for a table (API endpoint)"""
+    ensure_table_in_project(db, project_id, table_id)
     from app.crud import schemas_crud
     from app.services.pk_service import PrimaryKeyService
 

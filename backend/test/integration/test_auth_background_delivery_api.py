@@ -23,6 +23,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
+from sqlalchemy import text
 
 from app.crud import email_otp_crud
 from app.models.orm import EmailOTP, User
@@ -39,6 +40,27 @@ SMTP_DELAY_SECONDS = 3.0
 # ============================================================================
 # Fixtures y helpers
 # ============================================================================
+
+
+@pytest.fixture(autouse=True)
+def clean_auth_counters(db_session):
+    """
+    Contadores de /api/auth fuera antes y después (la BD de test no los deshace).
+
+    Sin esto, los registros de otros ficheros del mismo worker agotan el límite por IP y
+    estos tests reciben 429 según cómo reparta xdist los ficheros.
+    """
+
+    def _clean():
+        db_session.rollback()
+        db_session.execute(
+            text("DELETE FROM security_rate_limits WHERE endpoint LIKE '/api/auth/%'")
+        )
+        db_session.commit()
+
+    _clean()
+    yield
+    _clean()
 
 
 @pytest.fixture

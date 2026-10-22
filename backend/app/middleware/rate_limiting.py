@@ -8,6 +8,7 @@ import functools
 import hashlib
 import logging
 import math
+import threading
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, Optional, Tuple
 
@@ -375,6 +376,8 @@ class Limiter:
 
     def __init__(self):
         self._requests: Dict[str, list] = {}
+        # Los endpoints síncronos se ejecutan en el threadpool: proteger el dict compartido
+        self._lock = threading.Lock()
 
     def is_allowed(self, key: str, max_requests: int, window_seconds: int) -> bool:
         """
@@ -388,6 +391,10 @@ class Limiter:
         Returns:
             bool: True si está permitido
         """
+        with self._lock:
+            return self._is_allowed_locked(key, max_requests, window_seconds)
+
+    def _is_allowed_locked(self, key: str, max_requests: int, window_seconds: int) -> bool:
         current_time = datetime.now(timezone.utc)
         window_start = current_time - timedelta(seconds=window_seconds)
 
@@ -521,6 +528,14 @@ async def record_failure(
     return await db_rate_limiter.count_failure(request, endpoint, rule)
 
 
+def _find_request(args, kwargs) -> Optional[Request]:
+    """Busca el Request entre los argumentos posicionales y con nombre del endpoint."""
+    for value in list(args) + list(kwargs.values()):
+        if isinstance(value, Request):
+            return value
+    return None
+
+
 # Decorador para rate limiting específico
 def rate_limit(max_requests: int, window_seconds: int, use_database: bool = True):
     """
@@ -538,27 +553,7 @@ def rate_limit(max_requests: int, window_seconds: int, use_database: bool = True
     def decorator(func):
         @functools.wraps(func)
         async def wrapper(*args, **kwargs):
-            # Buscar el request en los argumentos
-            request = None
-
-            # Buscar en args
-            for arg in args:
-                if isinstance(arg, Request):
-                    request = arg
-                    break
-
-            # Si no se encuentra en args, buscar en kwargs
-            if not request:
-                for key, value in kwargs.items():
-                    if isinstance(value, Request):
-                        request = value
-                        break
-
-            # También buscar por nombre de parámetro
-            if not request and "request" in kwargs:
-                if isinstance(kwargs["request"], Request):
-                    request = kwargs["request"]
-
+            request = _find_request(args, kwargs)
             if not request:
                 raise HTTPException(status_code=500, detail=make_error(ErrorCode.INTERNAL_ERROR))
 
