@@ -4,6 +4,7 @@ Security Validators
 Validadores para prevenir SQL injection y asegurar inputs seguros.
 """
 
+import ipaddress
 import re
 from typing import Optional
 
@@ -16,6 +17,12 @@ IDENTIFIER_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 
 # Longitud máxima de identificadores (estándar SQL)
 MAX_IDENTIFIER_LENGTH = 128
+
+# Etiqueta de hostname DNS (RFC 1123, permitiendo '_' por los nombres de servicio de Docker)
+HOSTNAME_LABEL_PATTERN = re.compile(r"[A-Za-z0-9_](?:[A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?")
+
+# Longitud máxima de un hostname DNS sin el punto final (RFC 1035)
+MAX_HOSTNAME_LENGTH = 253
 
 # Keywords reservadas de SQL (subset común a todos los dialectos)
 SQL_RESERVED_KEYWORDS = {
@@ -251,6 +258,54 @@ def detect_sql_injection_attempt(value: str) -> bool:
     return False
 
 
+def validate_host(host: str) -> str:
+    """
+    Valida que el host sea un hostname DNS o una IP (v4/v6).
+
+    El host se interpola en cadenas de conexión (ODBC) y descriptores (Oracle), donde
+    ';', '{', '}', '(', ')', '=', ',' o espacios cambiarían el significado de la cadena.
+
+    Args:
+        host: Hostname o IP
+
+    Returns:
+        El mismo host, sin modificar
+
+    Raises:
+        DBValidationError: Si no es un hostname ni una IP válidos
+    """
+    if not isinstance(host, str) or not host.strip():
+        raise DBValidationError("Invalid host: empty")
+
+    if _is_ip_address(host):
+        return host
+
+    name = host[:-1] if host.endswith(".") else host
+    if len(name) > MAX_HOSTNAME_LENGTH or not all(
+        HOSTNAME_LABEL_PATTERN.fullmatch(label) for label in name.split(".")
+    ):
+        raise DBValidationError("Invalid host: must be a hostname or an IP address")
+
+    return host
+
+
+def normalize_hostname(value: str) -> str:
+    """Normaliza un hostname para compararlo: sin mayúsculas, espacios ni punto final."""
+    value = value.strip().lower()
+    return value[:-1] if value.endswith(".") else value
+
+
+def _is_ip_address(value: str) -> bool:
+    """True si value es una IPv4/IPv6 literal (sin zone id)."""
+    if "%" in value:
+        return False
+    try:
+        ipaddress.ip_address(value)
+    except ValueError:
+        return False
+    return True
+
+
 def validate_connection_config(config: dict) -> dict:
     """
     Valida configuración de conexión.
@@ -273,6 +328,7 @@ def validate_connection_config(config: dict) -> dict:
     # Validar host
     if not config["host"] or len(config["host"]) > 255:
         raise DBValidationError("Invalid host")
+    validate_host(config["host"])
 
     # Validar port
     port = config["port"]

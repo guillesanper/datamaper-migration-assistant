@@ -25,6 +25,21 @@ class DBConnectionError(DBAdapterError):
     pass
 
 
+class DBTLSError(DBConnectionError):
+    """
+    Error al negociar o verificar TLS con el servidor.
+
+    Se lanza cuando:
+    - El certificado no es de confianza (CA desconocida, autofirmado, caducado)
+    - El hostname no coincide con el certificado
+    - El servidor no admite TLS
+
+    Subclase de DBConnectionError: quien ya captura errores de conexión sigue capturándolos.
+    """
+
+    pass
+
+
 class DBAuthenticationError(DBAdapterError):
     """
     Error de autenticación (credenciales inválidas).

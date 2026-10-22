@@ -12,6 +12,7 @@ Requiere:
 """
 
 import logging
+import re
 from typing import Any, Dict, List, Optional
 
 import pyodbc
@@ -41,11 +42,29 @@ from .exceptions import (
     DBPermissionError,
     DBQueryExecutionError,
     DBTimeoutError,
+    DBTLSError,
+    DBValidationError,
 )
+from .tls import is_tls_error
 from .type_mappers import SQLServerTypeMapper
 from .validators import validate_schema_name, validate_table_name
 
 logger = logging.getLogger(__name__)
+
+# Valores que no necesitan llaves en una cadena de conexión ODBC
+_ODBC_PLAIN_VALUE = re.compile(r"[A-Za-z0-9_.\-]+")
+
+
+def _odbc_value(value: str) -> str:
+    """
+    Escapa un valor para una cadena de conexión ODBC.
+
+    Los valores con caracteres especiales (';', '=', '{', '}', espacios...) van entre llaves
+    y '}' se duplica, de modo que no puedan añadir ni sobrescribir atributos del driver.
+    """
+    if _ODBC_PLAIN_VALUE.fullmatch(value):
+        return value
+    return "{" + value.replace("}", "}}") + "}"
 
 
 class SQLServerAdapter(BaseDBAdapter):
@@ -63,6 +82,16 @@ class SQLServerAdapter(BaseDBAdapter):
     - BIT → BOOLEAN
     - DATETIME2 → TIMESTAMP
     """
+
+    def __init__(self, connection_config: Dict[str, Any]):
+        super().__init__(connection_config)
+        # ODBC Driver 18 solo confía en el almacén del sistema: ignorar la CA en silencio
+        # haría creer que se verifica contra ella
+        if self.tls.ca_pem:
+            raise DBValidationError(
+                "A custom CA is not supported for SQL Server: ODBC Driver 18 only uses the "
+                "system trust store. Install the CA in the system store"
+            )
 
     @property
     def dialect(self) -> str:
@@ -83,13 +112,14 @@ class SQLServerAdapter(BaseDBAdapter):
             username = self.connection_config["user"]
             password = self.connection_config["password"]
 
+            # server ya viene validado como hostname/IP (validate_host); el resto se escapa
             connection_string = (
                 f"DRIVER={driver};"
                 f"SERVER={server},{port};"
-                f"DATABASE={database};"
-                f"UID={username};"
-                f"PWD={password};"
-                f"TrustServerCertificate=yes;"
+                f"DATABASE={_odbc_value(database)};"
+                f"UID={_odbc_value(username)};"
+                f"PWD={_odbc_value(password)};"
+                f"{self._tls_attributes()}"
                 f"Connection Timeout={self.timeout};"
             )
 
@@ -104,6 +134,11 @@ class SQLServerAdapter(BaseDBAdapter):
             if "18456" in error_msg or "login failed" in error_msg.lower():
                 raise DBAuthenticationError(f"Invalid credentials for SQL Server: {error_msg}")
 
+            # El driver encadena el fallo de certificado con un "Login timeout expired":
+            # hay que mirar TLS antes que el timeout
+            if is_tls_error(error_msg):
+                raise DBTLSError(f"TLS error connecting to SQL Server: {error_msg}")
+
             # Check for timeout
             if "timeout" in error_msg.lower():
                 raise DBTimeoutError(f"Connection timeout to SQL Server: {error_msg}")
@@ -112,6 +147,16 @@ class SQLServerAdapter(BaseDBAdapter):
 
         except Exception as e:
             raise DBConnectionError(f"Unexpected error connecting to SQL Server: {str(e)}")
+
+    def _tls_attributes(self) -> str:
+        """
+        Atributos TLS de la cadena de conexión ODBC.
+
+        Se cifra siempre. Por defecto se valida el certificado y su hostname; el opt-out
+        (tls_verify=False) solo salta esa validación.
+        """
+        trust_certificate = "no" if self.tls.verify else "yes"
+        return f"Encrypt=yes;TrustServerCertificate={trust_certificate};"
 
     def disconnect(self) -> None:
         """Cierra conexión"""

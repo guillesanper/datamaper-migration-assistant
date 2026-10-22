@@ -35,7 +35,9 @@ from .exceptions import (
     DBMetadataNotFoundError,
     DBPermissionError,
     DBQueryExecutionError,
+    DBTLSError,
 )
+from .tls import is_tls_error, trust_file
 from .type_mappers import PostgreSQLTypeMapper
 from .validators import validate_schema_name, validate_table_name
 
@@ -65,16 +67,19 @@ class PostgreSQLAdapter(BaseDBAdapter):
     def connect(self) -> None:
         """Establece conexión con PostgreSQL"""
         try:
-            self.connection = psycopg2.connect(
-                host=self.connection_config["host"],
-                port=self.connection_config["port"],
-                database=self.connection_config["database"],
-                user=self.connection_config["user"],
-                password=self.connection_config["password"],
-                connect_timeout=self.timeout,
-                # Usar RealDictCursor para retornar rows como dicts
-                cursor_factory=psycopg2.extras.RealDictCursor,
-            )
+            # La CA propia se vuelca a un archivo temporal solo mientras dura el connect
+            with trust_file(self.tls.ca_pem) as root_cert:
+                self.connection = psycopg2.connect(
+                    host=self.connection_config["host"],
+                    port=self.connection_config["port"],
+                    database=self.connection_config["database"],
+                    user=self.connection_config["user"],
+                    password=self.connection_config["password"],
+                    connect_timeout=self.timeout,
+                    # Usar RealDictCursor para retornar rows como dicts
+                    cursor_factory=psycopg2.extras.RealDictCursor,
+                    **self._ssl_params(root_cert),
+                )
             self._is_connected = True
             logger.info(
                 f"Connected to PostgreSQL: {self.connection_config['database']}@{self.connection_config['host']}"
@@ -85,9 +90,22 @@ class PostgreSQLAdapter(BaseDBAdapter):
         except OperationalError as e:
             if "password authentication failed" in str(e).lower():
                 raise DBAuthenticationError(f"Authentication failed: {str(e)}")
+            if is_tls_error(str(e)):
+                raise DBTLSError(f"TLS error connecting to PostgreSQL: {str(e)}")
             raise DBConnectionError(f"Cannot connect to PostgreSQL: {str(e)}")
         except Exception as e:
             raise DBConnectionError(f"Unexpected error connecting to PostgreSQL: {str(e)}")
+
+    def _ssl_params(self, root_cert: str) -> Dict[str, str]:
+        """
+        Parámetros SSL de libpq según la política TLS de la conexión.
+
+        verify-full comprueba certificado y hostname. El opt-out usa require (cifra sin
+        verificar) y no pasa sslrootcert: con require + sslrootcert libpq verificaría la CA.
+        """
+        if self.tls.verify:
+            return {"sslmode": "verify-full", "sslrootcert": root_cert}
+        return {"sslmode": "require"}
 
     def disconnect(self) -> None:
         """Cierra conexión"""

@@ -27,12 +27,15 @@ import {
 import { toast } from '../../utils/toast';
 import styles from '../../styles/mapping/mapping.module.css';
 import { MigrationGuideModal } from './MigrationGuideModal';
+import { TlsUnverifiedBadge } from './TlsUnverifiedBadge';
 
 interface MigrationModalProps {
   isOpen: boolean;
   onClose: () => void;
   projectId: string;
   destConnectionSessionId: string | null;
+  /** true si la conexión de destino se creó sin verificar el certificado del servidor */
+  destConnectionUnverified?: boolean;
   destinationDb?: string;
 }
 
@@ -68,6 +71,7 @@ export const MigrationModal: React.FC<MigrationModalProps> = ({
   onClose,
   projectId,
   destConnectionSessionId,
+  destConnectionUnverified = false,
   destinationDb,
 }) => {
   const { t } = useTranslation('mapping');
@@ -350,7 +354,10 @@ export const MigrationModal: React.FC<MigrationModalProps> = ({
                   <div className={styles.alertContent}>
                     <Database className={`${styles.alertIcon}`} style={{ color: 'hsl(var(--primary))' }} />
                     <div className={styles.alertBody}>
-                      <p style={{ fontSize: '0.875rem', fontWeight: 500 }}>{t('migration.alert.sessionActive')}</p>
+                      <p style={{ fontSize: '0.875rem', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                        {t('migration.alert.sessionActive')}
+                        {destConnectionUnverified && <TlsUnverifiedBadge />}
+                      </p>
                       <p style={{ fontSize: '0.75rem', color: 'hsl(var(--muted-foreground))', marginTop: '0.125rem', fontFamily: 'monospace' }}>
                         {destConnectionSessionId}
                       </p>

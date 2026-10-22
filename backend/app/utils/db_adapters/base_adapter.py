@@ -29,6 +29,7 @@ from .exceptions import (
     DBPermissionError,
     DBQueryExecutionError,
 )
+from .tls import TLSOptions
 from .validators import validate_connection_config
 
 logger = logging.getLogger(__name__)
@@ -58,11 +59,18 @@ class BaseDBAdapter(ABC):
                 - database: str
                 - user: str
                 - password: str
-                - ssl_enabled: bool (opcional, default False)
                 - timeout: int (opcional, default 30)
+                - tls_verify: bool (opcional, default True). False salta solo la
+                  verificación del certificado y exige confirm_hostname == host
+                - tls_ca_pem: str (opcional) CA propia en PEM
+                - confirm_hostname: str (obligatorio si tls_verify es False)
+
+        Raises:
+            DBValidationError: Si la configuración (incluida la TLS) no es válida
         """
         # Validar configuración
         self.connection_config = validate_connection_config(connection_config)
+        self.tls = TLSOptions.from_config(self.connection_config)
         self.connection: Any = None
         self._is_connected = False
         self.timeout = connection_config.get("timeout", 30)
@@ -91,7 +99,7 @@ class BaseDBAdapter(ABC):
         Retorna metadata de la conexión (sin credenciales sensibles).
 
         Returns:
-            Dict con: host, port, database, dialect, is_connected
+            Dict con: host, port, database, dialect, is_connected, timeout, tls_verified
         """
         return {
             "host": self.connection_config.get("host"),
@@ -100,6 +108,7 @@ class BaseDBAdapter(ABC):
             "dialect": self.dialect,
             "is_connected": self.is_connected,
             "timeout": self.timeout,
+            "tls_verified": self.tls.verify,
         }
 
     # =============================================================================

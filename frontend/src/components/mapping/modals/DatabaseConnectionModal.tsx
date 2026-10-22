@@ -1,9 +1,13 @@
 // src/components/mapping/modals/DatabaseConnectionModal.tsx
-import React, { useState, useEffect } from 'react';
-import { X, Database, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
+import { X, Database, CheckCircle, AlertCircle, Loader2, ShieldCheck } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { dbConnectionService } from '../../../services/db_connection.service';
 import { toast } from '../../../utils/toast';
+import { confirmsHostname, isPlausibleCaPem, isValidHostFormat } from '../../../utils/tls';
+import { TlsUnverifiedBadge } from '../TlsUnverifiedBadge';
+import { TlsSkipConfirmModal } from './TlsSkipConfirmModal';
 import type {
   DBConnectionConfig,
   DBDialect,
@@ -17,9 +21,16 @@ interface DatabaseConnectionModalProps {
   isOpen: boolean;
   onClose: () => void;
   projectId: string;
-  onSuccess: (sessionId: string, tableType: 'origin' | 'destination') => void;
+  onSuccess: (
+    sessionId: string,
+    tableType: 'origin' | 'destination',
+    tlsVerified: boolean
+  ) => void;
   targetType?: 'origin' | 'destination';
 }
+
+// Prefijo del mensaje del backend cuando falla la verificación TLS (lo fija un test del backend)
+const TLS_FAILURE_PREFIX = 'TLS verification failed';
 
 export const DatabaseConnectionModal: React.FC<DatabaseConnectionModalProps> = ({
   isOpen,
@@ -38,6 +49,18 @@ export const DatabaseConnectionModal: React.FC<DatabaseConnectionModalProps> = (
   const [isConnecting, setIsConnecting] = useState(false);
   const [testResult, setTestResult] = useState<DBConnectionTestResult | null>(null);
   const [validationErrors, setValidationErrors] = useState<ValidationErrors>({});
+  const [isSkipConfirmOpen, setIsSkipConfirmOpen] = useState(false);
+  const [caFileName, setCaFileName] = useState<string | null>(null);
+  const caFileInput = useRef<HTMLInputElement>(null);
+
+  const skipVerification = config.tls_verify === false;
+
+  const clearCa = () => {
+    setConfig(prev => ({ ...prev, tls_ca_pem: undefined }));
+    setCaFileName(null);
+    if (caFileInput.current) caFileInput.current.value = '';
+    setValidationErrors(prev => ({ ...prev, tls_ca_pem: undefined }));
+  };
 
   useEffect(() => {
     if (isOpen) {
@@ -46,6 +69,8 @@ export const DatabaseConnectionModal: React.FC<DatabaseConnectionModalProps> = (
       setTestResult(null);
       setValidationErrors({});
       setActiveTab(targetType ?? 'origin');
+      setIsSkipConfirmOpen(false);
+      setCaFileName(null);
     }
   }, [isOpen, targetType]);
 
@@ -55,9 +80,80 @@ export const DatabaseConnectionModal: React.FC<DatabaseConnectionModalProps> = (
         ...prev,
         dialect: selectedDialect,
         port: DEFAULT_PORTS[selectedDialect],
+        // SQL Server no admite una CA propia por conexión (usa el almacén del sistema)
+        tls_ca_pem: selectedDialect === 'sqlserver' ? undefined : prev.tls_ca_pem,
       }));
+      if (selectedDialect === 'sqlserver') setCaFileName(null);
     }
   }, [selectedDialect]);
+
+  // Cambiar el host invalida la confirmación: se confirmó el host anterior
+  const handleHostChange = (host: string) => {
+    setConfig(prev => {
+      const stillConfirmed =
+        prev.tls_verify === false && confirmsHostname(prev.confirm_hostname ?? '', host);
+      return prev.tls_verify === false && !stillConfirmed
+        ? { ...prev, host, tls_verify: undefined, confirm_hostname: undefined }
+        : { ...prev, host };
+    });
+  };
+
+  const handleCaFile = async (file: File | undefined) => {
+    if (!file) return;
+    const text = await file.text();
+    if (!isPlausibleCaPem(text)) {
+      clearCa();
+      setValidationErrors(prev => ({ ...prev, tls_ca_pem: t('db.tls.caInvalid') }));
+      return;
+    }
+    setConfig(prev => ({ ...prev, tls_ca_pem: text }));
+    setCaFileName(file.name);
+    setValidationErrors(prev => ({ ...prev, tls_ca_pem: undefined }));
+  };
+
+  const requestSkipVerification = () => {
+    if (!config.host?.trim()) {
+      setValidationErrors(prev => ({ ...prev, host: t('db.validation.hostRequired') }));
+      return;
+    }
+    setIsSkipConfirmOpen(true);
+  };
+
+  const confirmSkipVerification = (typedHostname: string) => {
+    // Una CA propia no tiene sentido sin verificar: el backend las rechaza juntas
+    setConfig(prev => ({
+      ...prev,
+      tls_verify: false,
+      confirm_hostname: typedHostname,
+      tls_ca_pem: undefined,
+    }));
+    setCaFileName(null);
+    setIsSkipConfirmOpen(false);
+  };
+
+  const restoreVerification = () => {
+    setConfig(prev => ({ ...prev, tls_verify: undefined, confirm_hostname: undefined }));
+  };
+
+  // Config que se envía al backend. El cifrado TLS es siempre obligatorio: aquí solo se decide
+  // si se verifica el certificado, y desactivarlo va con la confirmación del hostname.
+  const buildConfig = (dialect: DBDialect): DBConnectionConfig => ({
+    dialect,
+    host: config.host!.trim(),
+    port: config.port!,
+    database: config.database!,
+    user: config.user!,
+    password: config.password!,
+    timeout: config.timeout,
+    service_name: config.service_name,
+    sid: config.sid,
+    tls_verify: !skipVerification,
+    ...(skipVerification
+      ? { confirm_hostname: config.confirm_hostname }
+      : config.tls_ca_pem && dialect !== 'sqlserver'
+        ? { tls_ca_pem: config.tls_ca_pem }
+        : {}),
+  });
 
   const handleClose = () => {
     if (!isTestingConnection && !isConnecting) {
@@ -72,6 +168,8 @@ export const DatabaseConnectionModal: React.FC<DatabaseConnectionModalProps> = (
       errors.host = t('db.validation.hostRequired');
     } else if (config.host.length > 255) {
       errors.host = t('db.validation.hostMax');
+    } else if (!isValidHostFormat(config.host)) {
+      errors.host = t('db.validation.hostFormat');
     }
 
     if (!config.port) {
@@ -128,23 +226,15 @@ export const DatabaseConnectionModal: React.FC<DatabaseConnectionModalProps> = (
     setTestResult(null);
 
     try {
-      const fullConfig: DBConnectionConfig = {
-        dialect: selectedDialect,
-        host: config.host!,
-        port: config.port!,
-        database: config.database!,
-        user: config.user!,
-        password: config.password!,
-        timeout: config.timeout,
-        service_name: config.service_name,
-        sid: config.sid,
-      };
+      const fullConfig = buildConfig(selectedDialect);
 
       const result = await dbConnectionService.testConnection(fullConfig);
       setTestResult(result);
 
       if (result.success) {
         toast.success(t('db.toast.testSuccess'));
+      } else if (result.error_type === 'tls') {
+        toast.error(t('db.tls.verificationFailed'));
       } else {
         toast.error(result.error_message || t('db.toast.testError'));
       }
@@ -157,6 +247,7 @@ export const DatabaseConnectionModal: React.FC<DatabaseConnectionModalProps> = (
         database: config.database!,
         error_message: error instanceof Error ? error.message : t('db.toast.unknownError'),
         error_type: 'unknown_error',
+        tls_verified: !skipVerification,
       });
       toast.error(t('db.toast.testError'));
     } finally {
@@ -178,33 +269,27 @@ export const DatabaseConnectionModal: React.FC<DatabaseConnectionModalProps> = (
     setIsConnecting(true);
 
     try {
-      const fullConfig: DBConnectionConfig = {
-        dialect: selectedDialect,
-        host: config.host!,
-        port: config.port!,
-        database: config.database!,
-        user: config.user!,
-        password: config.password!,
-        timeout: config.timeout,
-        service_name: config.service_name,
-        sid: config.sid,
-      };
+      const fullConfig = buildConfig(selectedDialect);
 
       const session = await dbConnectionService.createSession(fullConfig, true, 3);
 
       toast.success(t('db.toast.connected', { name: DIALECT_NAMES[selectedDialect] }));
 
-      onSuccess(session.session_id, activeTab);
+      onSuccess(session.session_id, activeTab, session.tls_verified);
 
       handleClose();
     } catch (error: unknown) {
       console.error('Error connecting:', error);
       const errObj = error as Record<string, unknown>;
       const responseDetail = (errObj.response as Record<string, unknown> | undefined)?.data as Record<string, unknown> | undefined;
+      // apiService lanza { message } (el detail del backend); sin él no se distingue el fallo TLS
+      const apiMessage = String((errObj as { message?: unknown }).message ?? '');
       toast.error(
-        String(responseDetail?.detail ?? '') ||
-        (error instanceof Error ? error.message : '') ||
-        t('db.toast.connectError')
+        apiMessage.includes(TLS_FAILURE_PREFIX)
+          ? t('db.tls.verificationFailed')
+          : String(responseDetail?.detail ?? '') ||
+            (error instanceof Error ? error.message : '') ||
+            t('db.toast.connectError')
       );
     } finally {
       setIsConnecting(false);
@@ -307,7 +392,7 @@ export const DatabaseConnectionModal: React.FC<DatabaseConnectionModalProps> = (
                   <input
                     type="text"
                     value={config.host || ''}
-                    onChange={(e) => setConfig({ ...config, host: e.target.value })}
+                    onChange={(e) => handleHostChange(e.target.value)}
                     placeholder={t('db.host.placeholder')}
                     disabled={isTestingConnection || isConnecting}
                     className={`px-3 py-2 border rounded-md bg-background ${
@@ -451,6 +536,86 @@ export const DatabaseConnectionModal: React.FC<DatabaseConnectionModalProps> = (
                 )}
               </div>
 
+              {/* Seguridad TLS: el cifrado es obligatorio; aquí solo se elige cómo verificar */}
+              <fieldset
+                className="flex flex-col gap-3 p-4 border border-border rounded-lg"
+                disabled={isTestingConnection || isConnecting}
+              >
+                <legend className="px-2 text-sm font-semibold flex items-center gap-2">
+                  <ShieldCheck className="w-4 h-4" aria-hidden="true" />
+                  {t('db.tls.sectionTitle')}
+                </legend>
+                <p className="text-xs text-muted-foreground">{t('db.tls.encryptedNote')}</p>
+
+                {selectedDialect === 'sqlserver' ? (
+                  <p className="text-xs text-muted-foreground">{t('db.tls.caSqlServer')}</p>
+                ) : (
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-sm font-medium">{t('db.tls.caFileLabel')}</label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        ref={caFileInput}
+                        type="file"
+                        accept=".pem,.crt,.cer"
+                        onChange={(e) => handleCaFile(e.target.files?.[0])}
+                        disabled={skipVerification}
+                        className="text-sm file:mr-3 file:px-3 file:py-1.5 file:border file:border-border file:rounded-md file:bg-background file:text-sm disabled:opacity-50"
+                      />
+                      {caFileName && (
+                        <>
+                          <span className="text-xs text-muted-foreground">
+                            {t('db.tls.caLoaded', { name: caFileName })}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={clearCa}
+                            className="text-xs underline text-muted-foreground hover:text-foreground"
+                          >
+                            {t('db.tls.caClear')}
+                          </button>
+                        </>
+                      )}
+                    </div>
+                    <span className="text-xs text-muted-foreground">{t('db.tls.caHelp')}</span>
+                    {validationErrors.tls_ca_pem && (
+                      <span className="text-xs text-red-500">{validationErrors.tls_ca_pem}</span>
+                    )}
+                  </div>
+                )}
+
+                {selectedDialect === 'oracle' && !skipVerification && (
+                  <p className="text-xs text-muted-foreground">{t('db.tls.oracleHostHint')}</p>
+                )}
+
+                {skipVerification ? (
+                  <div className="flex items-center justify-between gap-3 p-3 rounded-md bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <TlsUnverifiedBadge />
+                      <span className="text-xs text-amber-900 dark:text-amber-200">
+                        {t('db.tls.skipActive', { host: config.host })}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={restoreVerification}
+                      className="text-xs underline text-amber-900 dark:text-amber-200 hover:no-underline"
+                    >
+                      {t('db.tls.skipUndo')}
+                    </button>
+                  </div>
+                ) : (
+                  <label className="flex items-center gap-2 text-sm cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={false}
+                      onChange={requestSkipVerification}
+                      className="h-4 w-4"
+                    />
+                    <span>{t('db.tls.skipLabel')}</span>
+                  </label>
+                )}
+              </fieldset>
+
               {/* Resultado de Test */}
               {testResult && (
                 <div
@@ -475,8 +640,15 @@ export const DatabaseConnectionModal: React.FC<DatabaseConnectionModalProps> = (
                     </p>
                     {testResult.error_message && (
                       <p className="text-sm text-red-700 dark:text-red-300 mt-1">
-                        {testResult.error_message}
+                        {testResult.error_type === 'tls'
+                          ? t('db.tls.verificationFailed')
+                          : testResult.error_message}
                       </p>
+                    )}
+                    {testResult.success && !testResult.tls_verified && (
+                      <div className="mt-2">
+                        <TlsUnverifiedBadge />
+                      </div>
                     )}
                   </div>
                 </div>
@@ -523,6 +695,17 @@ export const DatabaseConnectionModal: React.FC<DatabaseConnectionModalProps> = (
             </button>
           </div>
         </div>
+
+        {/* Portal: queda por encima y sus clics no cierran este modal */}
+        {createPortal(
+          <TlsSkipConfirmModal
+            isOpen={isSkipConfirmOpen}
+            host={config.host ?? ''}
+            onConfirm={confirmSkipVerification}
+            onCancel={() => setIsSkipConfirmOpen(false)}
+          />,
+          document.body
+        )}
       </div>
     </div>
   );

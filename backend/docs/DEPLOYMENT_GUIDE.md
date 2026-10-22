@@ -13,8 +13,9 @@
 4. [Staging/Testing](#stagingtesting)
 5. [Producción en Render](#producción-en-render)
 6. [Variables de Entorno](#variables-de-entorno)
-7. [Troubleshooting](#troubleshooting)
-8. [Monitoring y Logs](#monitoring-y-logs)
+7. [TLS de las conexiones a BD externas](#tls-de-las-conexiones-a-bd-externas)
+8. [Troubleshooting](#troubleshooting)
+9. [Monitoring y Logs](#monitoring-y-logs)
 
 ---
 
@@ -716,6 +717,26 @@ Añade `email_otps.failed_attempts INTEGER NOT NULL DEFAULT 0`: aditiva y revers
 - **La igualación de tiempos es de mejor esfuerzo.** Los caminos «sin cuenta» gastan un bcrypt simulado (`simulate_otp_check`). Medido (n=7, contenedor de test): sin él 20–30 ms frente a 310–440 ms; con él 310–410 ms con rangos solapados. No es una garantía: no se descartan diferencias de decenas de ms ni se midió con carga o por red.
 - **El 201 de `register` no garantiza que el correo salga** (entrega en segundo plano, sin cola persistente; ver arriba).
 - **Frontend (sin cambios en esta fase)**: la UI muestra el `message` del servidor, así que `VerifyEmail` mostrará «Código inválido o expirado» donde antes decía «Usuario no encontrado» o «Email ya verificado»; `resend-code` da éxito aunque no envíe nada (cuenta inexistente o ya verificada); y el 429 se lee de `detail.code` (`rate_limit.exceeded`, locales `es`/`en`) sin usar `Retry-After`.
+
+---
+
+## 🔐 TLS de las conexiones a BD externas
+
+El conector exige **TLS con verificación de certificado** en los cuatro motores (detalle por driver en [`app/utils/db_adapters/README.md`](../app/utils/db_adapters/README.md)). Qué cambia al desplegar:
+
+- **Las sesiones de conexión anteriores se invalidan.** Son sesiones en Redis (TTL de 1 a 24 h) sin el flag `tls_verified`; al primer uso se borran y los endpoints de `/api/db-connections` responden 410 «Session requires reconnect». No hay migración de Alembic: no existe tabla de conexiones. Los usuarios vuelven a conectar.
+- **Los servidores de destino/origen deben ofrecer TLS** con un certificado que el backend pueda verificar: firmado por una CA del almacén del sistema, o una CA propia subida en la conexión (no en SQL Server: ahí hay que instalarla en el sistema). Sin TLS no hay conexión, ni siquiera con el opt-out.
+- **El opt-out** (`tls_verify=false`) exige confirmar el hostname en la API y deja la conexión marcada como «Sin verificar» (campo `tls_verified=false` y badge en el frontend) **mientras dure la sesión**. Cada alta se registra con `logger.warning` («TLS verification disabled for connection», con usuario, proyecto y host, sin credenciales).
+- **Una CA subida** se guarda cifrada dentro del blob de la sesión en Redis (como las credenciales), no en disco: `render.yaml` no define disco persistente. Los drivers que exigen una ruta (PostgreSQL) la reciben en un archivo temporal que se borra siempre.
+- **Tests de integración y e2e**: los Postgres y MySQL de `docker-compose.test.yml` no tienen TLS, así que `test_db_connection_flow` y los e2e de conexiones no podrán conectar contra ellos hasta que se les añada. Pendiente (requiere Docker para validarlo).
+
+### Riesgos residuales
+
+- **El opt-out cifra pero no autentica al servidor.** Quien esté en la red entre el backend y la BD puede suplantarla y ver credenciales y datos de esa conexión. Es una decisión explícita del usuario, confirmada con el hostname y visible en la UI.
+- **La marca dura lo que la sesión** (≤ 24 h). No hay registro permanente de conexiones: lo único que persiste es el `logger.warning` del alta.
+- **El flag `tls_verified` del hash de Redis es solo metadata** para listar; el blob cifrado manda y una discrepancia se trata como sesión corrupta (error), no se ignora. Quien pueda escribir en Redis puede, en cualquier caso, borrar o reemplazar sesiones.
+- **SQL Server no está probado contra un servidor real** (ni ODBC Driver 18 en la imagen del backend).
+- **`POST /api/db-connections/test` no tiene límite de peticiones ni protección SSRF**: es un escáner de puertos autenticado. Fuera del alcance de este cambio.
 
 ---
 

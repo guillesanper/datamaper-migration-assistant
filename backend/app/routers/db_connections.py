@@ -40,8 +40,8 @@ from app.services.db_connection_service import (
     DBConnectionServiceError,
     SessionExpiredError,
     SessionNotFoundError,
+    SessionRequiresReconnectError,
 )
-from app.utils.db_adapters import MySQLAdapter, PostgreSQLAdapter
 
 router = APIRouter(prefix="/api/db-connections", tags=["Database Connections"])
 
@@ -112,6 +112,11 @@ async def get_user_session(
     except SessionNotFoundError:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=f"Session not found: {session_id}"
+        )
+    except SessionRequiresReconnectError:
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail=f"Session requires reconnect: {session_id}",
         )
     except SessionExpiredError:
         raise HTTPException(
@@ -227,6 +232,7 @@ async def list_sessions(
             host=session.host,
             database=session.database,
             expires_at=session.expires_at,
+            tls_verified=session.tls_verified,
         )
         for session in sessions
     ]
@@ -291,6 +297,7 @@ async def refresh_session(
             host=session.host,
             database=session.database,
             expires_at=new_expires_at,
+            tls_verified=session.tls_verified,
         )
 
     except ValueError as e:
