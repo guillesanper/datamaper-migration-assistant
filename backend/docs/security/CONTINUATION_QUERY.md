@@ -8,7 +8,7 @@
 
 ## 📋 Query para Copiar en Nuevo Chat
 
-Copia el siguiente texto completo y pégalo en un nuevo chat con Claude Code:
+Copia el siguiente texto completo y pégalo en un nuevo chat con el asistente:
 
 ```
 Hola, necesito continuar con la implementación de mejoras de seguridad en el proyecto DataMap.
@@ -82,9 +82,9 @@ REQUISITOS:
 
 1. **Copia** todo el texto entre las marcas de código (desde "Hola, necesito..." hasta "...documentándolo profesionalmente?")
 
-2. **Pega** en un nuevo chat con Claude Code
+2. **Pega** en un nuevo chat con el asistente
 
-3. Claude tendrá todo el contexto necesario para:
+3. El asistente tendrá todo el contexto necesario para:
    - Entender el estado actual del proyecto
    - Saber qué archivos leer primero (ROADMAP.md, etc.)
    - Conocer la arquitectura de seguridad existente

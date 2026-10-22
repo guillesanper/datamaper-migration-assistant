@@ -559,6 +559,5 @@ session = session_crud.create_session_orm(
 
 ---
 
-**Generado por:** Claude Code Migration Audit Tool
 **Versión:** 1.0.0
 **Proyecto:** DataMap - Migración SQLAlchemy ORM
