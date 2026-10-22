@@ -5,6 +5,7 @@ Implementa control de límites de requests por IP y endpoint usando base de dato
 
 import asyncio
 import functools
+import threading
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
@@ -212,6 +213,8 @@ class Limiter:
 
     def __init__(self):
         self._requests: Dict[str, list] = {}
+        # Los endpoints síncronos se ejecutan en el threadpool: proteger el dict compartido
+        self._lock = threading.Lock()
 
     def is_allowed(self, key: str, max_requests: int, window_seconds: int) -> bool:
         """
@@ -225,6 +228,10 @@ class Limiter:
         Returns:
             bool: True si está permitido
         """
+        with self._lock:
+            return self._is_allowed_locked(key, max_requests, window_seconds)
+
+    def _is_allowed_locked(self, key: str, max_requests: int, window_seconds: int) -> bool:
         current_time = datetime.now(timezone.utc)
         window_start = current_time - timedelta(seconds=window_seconds)
 

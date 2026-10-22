@@ -75,28 +75,37 @@ class OracleAdapter(BaseDBAdapter):
     def connect(self) -> None:
         """Establece conexión con Oracle Database"""
         try:
-            # Build DSN (Data Source Name)
             host = self.connection_config["host"]
             port = self.connection_config.get("port", 1521)
             service_name = self.connection_config.get("service_name")
             sid = self.connection_config.get("sid")
 
+            # Identificador del servicio: service_name, SID o (por defecto) el nombre de BD
             if service_name:
-                dsn = oracledb.makedsn(host, port, service_name=service_name)
+                target = {"service_name": service_name}
             elif sid:
-                dsn = oracledb.makedsn(host, port, sid=sid)
+                target = {"sid": sid}
             else:
-                # Default to database name as service name
-                dsn = oracledb.makedsn(host, port, service_name=self.connection_config["database"])
+                target = {"service_name": self.connection_config["database"]}
 
-            username = self.connection_config["user"]
-            password = self.connection_config["password"]
+            # TLS: Oracle lo usa con el protocolo TCPS (normalmente otro listener/puerto).
+            # ssl_server_dn_match verifica que el certificado corresponda al host; con
+            # 'require' solo se omite esa comprobación (la cadena se sigue validando).
+            if self.ssl_mode == "disable":
+                tls = {"protocol": "tcp"}
+            else:
+                tls = {"protocol": "tcps", "ssl_server_dn_match": self.ssl_mode == "verify"}
 
+            # Nota: python-oracledb >= 2 no acepta el antiguo parámetro `encoding`
+            # (siempre usa UTF-8); pasarlo hacía fallar toda conexión con TypeError.
             self.connection = oracledb.connect(
-                user=username,
-                password=password,
-                dsn=dsn,
-                encoding="UTF-8",
+                user=self.connection_config["user"],
+                password=self.connection_config["password"],
+                host=host,
+                port=port,
+                tcp_connect_timeout=self.timeout,
+                **target,
+                **tls,
             )
 
             self._is_connected = True

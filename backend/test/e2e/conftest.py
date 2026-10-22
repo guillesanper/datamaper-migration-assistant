@@ -506,6 +506,7 @@ def postgres_connection_config():
         "user": "test_user",
         "password": "test_password",
         "timeout": 30,
+        "ssl_mode": "disable",  # BD de test local sin TLS
     }
 
 
@@ -520,6 +521,7 @@ def mysql_connection_config():
         "user": "test_user",
         "password": "test_password",
         "timeout": 30,
+        "ssl_mode": "disable",  # BD de test local sin TLS
     }
 
 
@@ -534,6 +536,7 @@ def postgres_invalid_config():
         "user": "test_user",
         "password": "wrong_password",
         "timeout": 30,
+        "ssl_mode": "disable",  # BD de test local sin TLS
     }
 
 
@@ -548,6 +551,7 @@ def mysql_invalid_config():
         "user": "test_user",
         "password": "wrong_password",
         "timeout": 30,
+        "ssl_mode": "disable",  # BD de test local sin TLS
     }
 
 

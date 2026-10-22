@@ -127,7 +127,9 @@ class TestTestConnection:
 
         assert result.success is False
         assert result.error_type == "authentication"
-        assert "Invalid password" in result.error_message
+        # El detalle del driver solo va al log, no a la respuesta
+        assert "Invalid password" not in result.error_message
+        assert "Authentication failed" in result.error_message
 
     @patch("app.services.db_connection_service.PostgreSQLAdapter")
     def test_connection_error(self, mock_adapter_class, service, valid_pg_config):

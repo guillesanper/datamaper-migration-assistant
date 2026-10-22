@@ -31,11 +31,13 @@ from app.models.db_connection import (
 from app.utils.db_adapters import (
     DBAuthenticationError,
     DBConnectionError,
+    DBHostNotAllowedError,
     DBTimeoutError,
     MySQLAdapter,
     OracleAdapter,
     PostgreSQLAdapter,
     SQLServerAdapter,
+    validate_connection_host,
 )
 from app.utils.encryption import DecryptionError, EncryptionManager
 
@@ -150,7 +152,12 @@ class DBConnectionService:
 
         Raises:
             DBConnectionServiceError: Si el dialecto no está soportado
+            DBHostNotAllowedError: Si el host resuelve a una red interna no permitida
         """
+        # Política de red anti-SSRF: se revalida en cada conexión, no solo al crear
+        # la sesión, para acotar ataques de DNS rebinding
+        validate_connection_host(config.host, config.port)
+
         adapter_config = config.to_adapter_config()
         if long_running:
             adapter_config["read_timeout"] = None
@@ -176,6 +183,20 @@ class DBConnectionService:
         Returns:
             DBConnectionTestResult con resultado del test
         """
+
+        def failure(error_type: str, message: str, exc: Exception) -> DBConnectionTestResult:
+            # El detalle del driver (IPs, puertos, versiones, mensajes del servidor) solo
+            # va al log: devolverlo convertiría el endpoint en un oráculo de la red
+            logger.warning(f"Connection test failed ({error_type}): {str(exc)}")
+            return DBConnectionTestResult(
+                success=False,
+                dialect=config.dialect,
+                host=config.host,
+                database=config.database,
+                error_message=message,
+                error_type=error_type,
+            )
+
         try:
             adapter = self._get_adapter(config)
 
@@ -193,49 +214,25 @@ class DBConnectionService:
                 database=config.database,
             )
 
+        except DBHostNotAllowedError as e:
+            return failure("host_not_allowed", str(e), e)
+
         except DBAuthenticationError as e:
-            logger.warning(f"Connection test failed (auth): {str(e)}")
-            return DBConnectionTestResult(
-                success=False,
-                dialect=config.dialect,
-                host=config.host,
-                database=config.database,
-                error_message=str(e),
-                error_type="authentication",
-            )
+            return failure("authentication", "Authentication failed: check user and password", e)
 
         except DBTimeoutError as e:
-            logger.warning(f"Connection test failed (timeout): {str(e)}")
-            return DBConnectionTestResult(
-                success=False,
-                dialect=config.dialect,
-                host=config.host,
-                database=config.database,
-                error_message=str(e),
-                error_type="timeout",
-            )
+            return failure("timeout", "Connection timed out", e)
 
         except DBConnectionError as e:
-            logger.warning(f"Connection test failed (connection): {str(e)}")
-            return DBConnectionTestResult(
-                success=False,
-                dialect=config.dialect,
-                host=config.host,
-                database=config.database,
-                error_message=str(e),
-                error_type="connection",
+            return failure(
+                "connection",
+                "Could not connect to the database: check host, port, database name and TLS mode",
+                e,
             )
 
         except Exception as e:
-            logger.error(f"Connection test failed (unexpected): {str(e)}")
-            return DBConnectionTestResult(
-                success=False,
-                dialect=config.dialect,
-                host=config.host,
-                database=config.database,
-                error_message=f"Unexpected error: {str(e)}",
-                error_type="unknown",
-            )
+            logger.exception("Unexpected error testing connection")
+            return failure("unknown", "Unexpected error testing connection", e)
 
     def create_session(
         self,
@@ -265,6 +262,12 @@ class DBConnectionService:
         # Validar TTL
         if ttl_hours > self.MAX_TTL_HOURS:
             raise ValueError(f"TTL cannot exceed {self.MAX_TTL_HOURS} hours")
+
+        # La política de red se aplica aunque no se pruebe la conexión
+        try:
+            validate_connection_host(config.host, config.port)
+        except DBHostNotAllowedError as e:
+            raise DBConnectionServiceError(str(e))
 
         # Test connection si está habilitado
         if test_connection:

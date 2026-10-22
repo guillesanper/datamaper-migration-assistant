@@ -713,3 +713,127 @@ def test_blocking_endpoints_run_in_threadpool():
     for module in (db_connections, migration):
         for route in module.router.routes:
             assert not inspect.iscoroutinefunction(route.endpoint), route.path
+
+
+# =============================================
+# TEST: Real execution against a real PostgreSQL destination (no ExecutionService mock)
+# =============================================
+
+
+@pytest.fixture
+def real_destination(db, auth_user):
+    """
+    Proyecto con mappings src_people -> dst_people y un adapter PostgreSQL real
+    apuntando a la BD de test (hace de BD externa origen/destino).
+    """
+    import os
+
+    from app.utils.db_adapters import PostgreSQLAdapter
+
+    suffix = uuid.uuid4().hex[:8]
+    src, dst = f"mig_src_{suffix}", f"mig_dst_{suffix}"
+    project_id = str(uuid.uuid4())
+
+    cursor = db.cursor()
+    cursor.execute(f"CREATE TABLE {src} (name text)")
+    cursor.execute(f"INSERT INTO {src} VALUES ('ana'), ('it''s; tricky -- text')")
+    cursor.execute(f"CREATE TABLE {dst} (full_name text)")
+    cursor.execute(
+        """
+        INSERT INTO projects (id, name, owner_id, created_at, updated_at, is_deleted)
+        VALUES (%s, %s, %s, NOW(), NOW(), false)
+    """,
+        (project_id, "Real Exec\nDROP TABLE projects;", auth_user["id"]),
+    )
+    cursor.execute(
+        """
+        INSERT INTO mappings (
+            id, project_id, origin_table, origin_column, destination_table, destination_column,
+            origin_source_type, destination_source_type, is_encrypted, created_at, updated_at
+        ) VALUES (%s, %s, %s, 'name', %s, 'full_name', 'import', 'import', false, NOW(), NOW())
+    """,
+        (str(uuid.uuid4()), project_id, src, dst),
+    )
+    db.commit()
+
+    adapter_config = {
+        "host": os.environ.get("TEST_DB_HOST", "localhost"),
+        "port": int(os.environ.get("TEST_DB_PORT", "5432")),
+        "database": os.environ["DB_NAME"],
+        "user": os.environ.get("TEST_DB_USER", "postgres"),
+        "password": os.environ.get("TEST_DB_PASSWORD", "postgres"),
+        "ssl_mode": "disable",
+    }
+
+    with patch("app.routers.migration.get_db_connection_service") as get_service:
+        service = Mock()
+        service.get_session.return_value = Mock()
+        service.get_decrypted_config.return_value = Mock(dialect="postgresql")
+        service._get_adapter.side_effect = lambda *a, **kw: PostgreSQLAdapter(adapter_config)
+        get_service.return_value = service
+        yield {"project_id": project_id, "dst": dst}
+
+    cursor.execute(f"DROP TABLE IF EXISTS {src}")
+    cursor.execute(f"DROP TABLE IF EXISTS {dst}")
+    cursor.execute("DELETE FROM migration_executions WHERE project_id = %s", (project_id,))
+    cursor.execute("DELETE FROM mappings WHERE project_id = %s", (project_id,))
+    cursor.execute("DELETE FROM project_activity WHERE project_id = %s", (project_id,))
+    cursor.execute("DELETE FROM notifications WHERE project_id = %s", (project_id,))
+    cursor.execute("DELETE FROM projects WHERE id = %s", (project_id,))
+    db.commit()
+    cursor.close()
+
+
+class TestRealMigrationExecution:
+    def _execute(self, client, project_id, dry_run):
+        return client.post(
+            f"/api/projects/{project_id}/migration/execute",
+            json={"dry_run": dry_run, "dest_connection_session_id": str(uuid.uuid4())},
+        )
+
+    def _count(self, db, table):
+        cursor = db.cursor()
+        cursor.execute(f"SELECT count(*) FROM {table}")
+        count = cursor.fetchone()[0]
+        db.commit()
+        cursor.close()
+        return count
+
+    def test_execute_persists_rows_and_records_execution(
+        self, client_with_auth, real_destination, db
+    ):
+        project_id = real_destination["project_id"]
+
+        response = self._execute(client_with_auth, project_id, dry_run=False)
+
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert data["status"] == "success"
+        assert self._count(db, real_destination["dst"]) == 2
+        # La inyección en el nombre del proyecto quedó en un comentario
+        assert self._count(db, "projects") >= 1
+
+        status_response = client_with_auth.get(
+            f"/api/projects/{project_id}/migration/executions/{data['execution_id']}"
+        )
+        assert status_response.status_code == 200
+        assert status_response.json()["status"] == "success"
+
+    def test_dry_run_persists_nothing(self, client_with_auth, real_destination, db):
+        response = self._execute(client_with_auth, real_destination["project_id"], dry_run=True)
+
+        assert response.status_code == 200, response.text
+        assert response.json()["status"] == "dry_run_complete"
+        assert self._count(db, real_destination["dst"]) == 0
+
+    def test_execute_does_not_write_backup_files(self, client_with_auth, real_destination):
+        from pathlib import Path
+
+        backups_dir = Path(__file__).resolve().parents[2] / "backups"
+        before = set(backups_dir.glob("*")) if backups_dir.exists() else set()
+
+        response = self._execute(client_with_auth, real_destination["project_id"], dry_run=False)
+
+        assert response.status_code == 200, response.text
+        after = set(backups_dir.glob("*")) if backups_dir.exists() else set()
+        assert after == before

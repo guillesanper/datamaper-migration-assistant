@@ -36,6 +36,13 @@ class DBConnectionConfig(BaseModel):
     user: str = Field(..., min_length=1, max_length=128, description="Usuario de la base de datos")
     password: str = Field(..., min_length=1, description="Contraseña de la base de datos")
     timeout: int = Field(default=30, ge=5, le=600, description="Timeout de conexión en segundos")
+    ssl_mode: Literal["verify", "require", "disable"] = Field(
+        default="verify",
+        description=(
+            "TLS: 'verify' cifra y verifica certificado y hostname (por defecto), "
+            "'require' cifra sin verificar el certificado, 'disable' sin TLS"
+        ),
+    )
 
     @property
     def username(self) -> str:
@@ -65,6 +72,7 @@ class DBConnectionConfig(BaseModel):
             "user": self.user,
             "password": self.password,
             "timeout": self.timeout,
+            "ssl_mode": self.ssl_mode,
         }
 
     class Config:
@@ -77,6 +85,7 @@ class DBConnectionConfig(BaseModel):
                 "user": "datamap_readonly",
                 "password": "secure_password",
                 "timeout": 30,
+                "ssl_mode": "verify",
             }
         }
 

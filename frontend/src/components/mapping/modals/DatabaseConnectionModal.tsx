@@ -7,6 +7,7 @@ import { toast } from '../../../utils/toast';
 import type {
   DBConnectionConfig,
   DBDialect,
+  DBSSLMode,
   DBConnectionTestResult,
   ValidationErrors,
 } from '../../../types/db_connection_types';
@@ -33,6 +34,7 @@ export const DatabaseConnectionModal: React.FC<DatabaseConnectionModalProps> = (
   const [selectedDialect, setSelectedDialect] = useState<DBDialect | null>(null);
   const [config, setConfig] = useState<Partial<DBConnectionConfig>>({
     timeout: 30,
+    ssl_mode: 'verify',
   });
   const [isTestingConnection, setIsTestingConnection] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
@@ -42,7 +44,7 @@ export const DatabaseConnectionModal: React.FC<DatabaseConnectionModalProps> = (
   useEffect(() => {
     if (isOpen) {
       setSelectedDialect(null);
-      setConfig({ timeout: 30 });
+      setConfig({ timeout: 30, ssl_mode: 'verify' });
       setTestResult(null);
       setValidationErrors({});
       setActiveTab(targetType ?? 'origin');
@@ -136,6 +138,7 @@ export const DatabaseConnectionModal: React.FC<DatabaseConnectionModalProps> = (
         user: config.user!,
         password: config.password!,
         timeout: config.timeout,
+        ssl_mode: config.ssl_mode,
         service_name: config.service_name,
         sid: config.sid,
       };
@@ -186,6 +189,7 @@ export const DatabaseConnectionModal: React.FC<DatabaseConnectionModalProps> = (
         user: config.user!,
         password: config.password!,
         timeout: config.timeout,
+        ssl_mode: config.ssl_mode,
         service_name: config.service_name,
         sid: config.sid,
       };
@@ -448,6 +452,24 @@ export const DatabaseConnectionModal: React.FC<DatabaseConnectionModalProps> = (
                 />
                 {validationErrors.timeout && (
                   <span className="text-xs text-red-500">{validationErrors.timeout}</span>
+                )}
+              </div>
+
+              {/* TLS */}
+              <div className="flex flex-col gap-1.5">
+                <label className="text-sm font-medium">{t('db.ssl.label')}</label>
+                <select
+                  value={config.ssl_mode || 'verify'}
+                  onChange={(e) => setConfig({ ...config, ssl_mode: e.target.value as DBSSLMode })}
+                  disabled={isTestingConnection || isConnecting}
+                  className="px-3 py-2 border rounded-md bg-background border-border"
+                >
+                  <option value="verify">{t('db.ssl.verify')}</option>
+                  <option value="require">{t('db.ssl.require')}</option>
+                  <option value="disable">{t('db.ssl.disable')}</option>
+                </select>
+                {config.ssl_mode && config.ssl_mode !== 'verify' && (
+                  <span className="text-xs text-amber-600">{t('db.ssl.warning')}</span>
                 )}
               </div>
 

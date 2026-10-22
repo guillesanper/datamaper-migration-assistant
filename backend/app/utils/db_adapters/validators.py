@@ -14,6 +14,12 @@ from .exceptions import DBValidationError
 # Debe empezar con letra o underscore
 IDENTIFIER_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 
+# Modos TLS soportados por los adapters:
+# - verify: cifrado + verificación de certificado y hostname (por defecto)
+# - require: cifrado sin verificar certificado (vulnerable a MITM, solo bajo decisión explícita)
+# - disable: sin TLS
+SSL_MODES = {"verify", "require", "disable"}
+
 # Longitud máxima de identificadores (estándar SQL)
 MAX_IDENTIFIER_LENGTH = 128
 
@@ -281,6 +287,12 @@ def validate_connection_config(config: dict) -> dict:
 
     # Validar database name
     validate_identifier(config["database"], "Database name")
+
+    # Validar modo TLS si está presente
+    if "ssl_mode" in config and config["ssl_mode"] not in SSL_MODES:
+        raise DBValidationError(
+            f"Invalid ssl_mode: {config['ssl_mode']}. Must be one of {sorted(SSL_MODES)}"
+        )
 
     # Validar timeout si está presente
     if "timeout" in config:

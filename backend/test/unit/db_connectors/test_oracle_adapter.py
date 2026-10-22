@@ -75,12 +75,9 @@ class MockDatabaseError(Exception):
 class TestConnection:
     """Tests for connection management"""
 
-    @patch("app.utils.db_adapters.oracle_adapter.oracledb.makedsn")
     @patch("app.utils.db_adapters.oracle_adapter.oracledb.connect")
-    def test_connect_success_with_service_name(self, mock_connect, mock_makedsn, adapter):
-        """Test successful connection with service_name"""
-        mock_dsn = "mocked_dsn"
-        mock_makedsn.return_value = mock_dsn
+    def test_connect_success_with_service_name(self, mock_connect, adapter):
+        """Test successful connection with service_name (TLS verificado por defecto)"""
         mock_conn = MagicMock()
         mock_connect.return_value = mock_conn
 
@@ -88,15 +85,18 @@ class TestConnection:
 
         assert adapter.is_connected is True
         assert adapter.connection == mock_conn
-        mock_makedsn.assert_called_once_with("localhost", 1521, service_name="ORCL")
-        mock_connect.assert_called_once()
+        kwargs = mock_connect.call_args.kwargs
+        assert kwargs["host"] == "localhost"
+        assert kwargs["port"] == 1521
+        assert kwargs["service_name"] == "ORCL"
+        assert kwargs["protocol"] == "tcps"
+        assert kwargs["ssl_server_dn_match"] is True
+        # python-oracledb >= 2 rechaza `encoding` con TypeError
+        assert "encoding" not in kwargs
 
-    @patch("app.utils.db_adapters.oracle_adapter.oracledb.makedsn")
     @patch("app.utils.db_adapters.oracle_adapter.oracledb.connect")
-    def test_connect_success_with_sid(self, mock_connect, mock_makedsn, valid_config_sid):
+    def test_connect_success_with_sid(self, mock_connect, valid_config_sid):
         """Test successful connection with SID"""
-        mock_dsn = "mocked_dsn"
-        mock_makedsn.return_value = mock_dsn
         mock_conn = MagicMock()
         mock_connect.return_value = mock_conn
 
@@ -104,7 +104,25 @@ class TestConnection:
         adapter.connect()
 
         assert adapter.is_connected is True
-        mock_makedsn.assert_called_once_with("localhost", 1521, sid="ORCL")
+        assert mock_connect.call_args.kwargs["sid"] == "ORCL"
+
+    @patch("app.utils.db_adapters.oracle_adapter.oracledb.connect")
+    def test_connect_without_tls(self, mock_connect, valid_config_sid):
+        adapter = OracleAdapter({**valid_config_sid, "ssl_mode": "disable"})
+        adapter.connect()
+
+        assert mock_connect.call_args.kwargs["protocol"] == "tcp"
+        assert "ssl_server_dn_match" not in mock_connect.call_args.kwargs
+
+    def test_connect_accepted_by_installed_oracledb(self, valid_config_sid):
+        """Los kwargs que se pasan existen en la versión instalada (sin mocks de firma)"""
+        import oracledb
+
+        adapter = OracleAdapter({**valid_config_sid, "port": 1, "timeout": 5})
+        with pytest.raises(DBConnectionError) as exc_info:
+            adapter.connect()
+        assert "unexpected keyword" not in str(exc_info.value)
+        assert oracledb.__version__
 
     @patch("app.utils.db_adapters.oracle_adapter.oracledb.DatabaseError", MockDatabaseError)
     @patch("app.utils.db_adapters.oracle_adapter.oracledb.makedsn")

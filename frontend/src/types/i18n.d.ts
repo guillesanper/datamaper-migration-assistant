@@ -930,6 +930,7 @@ declare module 'i18next' {
           tabDest: string;
           tabOrigin: string;
           test: { error: string; success: string };
+          ssl: { label: string; verify: string; require: string; disable: string; warning: string };
           timeout: { label: string };
           title: string;
           toast: {

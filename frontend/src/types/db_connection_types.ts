@@ -8,6 +8,8 @@ export type DBDialect = 'postgresql' | 'mysql' | 'sqlserver' | 'oracle';
 /**
  * Configuración de conexión a base de datos
  */
+export type DBSSLMode = 'verify' | 'require' | 'disable';
+
 export interface DBConnectionConfig {
   dialect: DBDialect;
   host: string;
@@ -16,6 +18,11 @@ export interface DBConnectionConfig {
   user: string;
   password: string;
   timeout?: number;
+  /**
+   * TLS: 'verify' cifra y verifica certificado y hostname (por defecto),
+   * 'require' cifra sin verificar certificado, 'disable' sin TLS
+   */
+  ssl_mode?: DBSSLMode;
   // Oracle específico
   service_name?: string;
   sid?: string;

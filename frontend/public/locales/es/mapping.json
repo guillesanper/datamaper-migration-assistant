@@ -78,6 +78,13 @@
     "port": {
       "label": "Puerto"
     },
+    "ssl": {
+      "label": "Seguridad de la conexión (TLS)",
+      "verify": "Cifrada y verificada (recomendado)",
+      "require": "Cifrada sin verificar certificado",
+      "disable": "Sin cifrar",
+      "warning": "Las credenciales y datos podrían ser interceptados en la red. Úsalo solo en redes de confianza."
+    },
     "tabDest": "Destino",
     "tabOrigin": "Origen",
     "test": {

@@ -8,6 +8,7 @@ NO ejecuta queries sobre datos de usuario.
 """
 
 import logging
+import ssl
 from typing import Any, Dict, List, Optional
 
 import pymysql  # type: ignore[import-untyped]
@@ -39,6 +40,17 @@ from .type_mappers import MySQLTypeMapper
 from .validators import validate_schema_name, validate_table_name
 
 logger = logging.getLogger(__name__)
+
+
+def _build_ssl_context(ssl_mode: str) -> Optional[ssl.SSLContext]:
+    """SSLContext para pymysql según ssl_mode (None = sin TLS)."""
+    if ssl_mode == "disable":
+        return None
+    context = ssl.create_default_context()  # CAs del sistema + verificación de hostname
+    if ssl_mode == "require":
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+    return context
 
 
 class MySQLAdapter(BaseDBAdapter):
@@ -76,6 +88,7 @@ class MySQLAdapter(BaseDBAdapter):
                 connect_timeout=self.timeout,
                 read_timeout=read_timeout,
                 write_timeout=self.timeout,
+                ssl=_build_ssl_context(self.ssl_mode),
                 # Usar DictCursor para retornar rows como dicts
                 cursorclass=pymysql.cursors.DictCursor,
                 charset="utf8mb4",

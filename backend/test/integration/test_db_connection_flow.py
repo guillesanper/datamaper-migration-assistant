@@ -79,6 +79,7 @@ def postgres_config():
         database="test_database",
         user="test_user",
         password="test_password",
+        ssl_mode="disable",  # BD de test local sin TLS
     )
 
 
@@ -92,6 +93,7 @@ def mysql_config():
         database="test_database",
         user="test_user",
         password="test_password",
+        ssl_mode="disable",  # BD de test local sin TLS
     )
 
 
@@ -105,6 +107,7 @@ def postgres_invalid_config():
         database="test_database",
         user="test_user",
         password="wrong_password",
+        ssl_mode="disable",  # BD de test local sin TLS
     )
 
 
@@ -118,6 +121,7 @@ def mysql_invalid_config():
         database="test_database",
         user="test_user",
         password="wrong_password",
+        ssl_mode="disable",  # BD de test local sin TLS
     )
 
 

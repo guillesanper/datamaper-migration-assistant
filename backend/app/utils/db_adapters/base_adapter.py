@@ -58,7 +58,7 @@ class BaseDBAdapter(ABC):
                 - database: str
                 - user: str
                 - password: str
-                - ssl_enabled: bool (opcional, default False)
+                - ssl_mode: 'verify' | 'require' | 'disable' (opcional, default 'verify')
                 - timeout: int (opcional, default 30)
         """
         # Validar configuración
@@ -66,6 +66,7 @@ class BaseDBAdapter(ABC):
         self.connection: Any = None
         self._is_connected = False
         self.timeout = connection_config.get("timeout", 30)
+        self.ssl_mode = connection_config.get("ssl_mode", "verify")
 
     @property
     @abstractmethod

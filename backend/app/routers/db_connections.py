@@ -17,12 +17,14 @@ SEGURIDAD:
 """
 
 import hashlib
+import logging
 import os
-from typing import List, Optional, cast
+from typing import List, NoReturn, Optional, cast
 
 import redis  # type: ignore[import-untyped]
 from fastapi import APIRouter, Depends, HTTPException, status
 
+from app.middleware.rate_limiting import simple_limiter
 from app.models.db_connection import (
     DBConnectionConfig,
     DBConnectionRequest,
@@ -43,9 +45,50 @@ from app.services.db_connection_service import (
     SessionExpiredError,
     SessionNotFoundError,
 )
-from app.utils.db_adapters import MySQLAdapter, PostgreSQLAdapter
+from app.utils.db_adapters import DBHostNotAllowedError, DBMetadataNotFoundError, DBValidationError
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/db-connections", tags=["Database Connections"])
+
+# Límite de intentos de conexión por usuario (test + crear sesión). Por usuario y no por
+# IP: la IP del cliente se puede falsear con X-Forwarded-For.
+CONNECT_RATE_LIMIT = int(os.getenv("DB_CONNECTOR_RATE_LIMIT", "10"))
+CONNECT_RATE_WINDOW_SECONDS = int(os.getenv("DB_CONNECTOR_RATE_WINDOW_SECONDS", "60"))
+
+
+def enforce_connect_rate_limit(user_id: str) -> None:
+    """Evita usar el servidor para fuerza bruta de credenciales o barrido de hosts."""
+    if not simple_limiter.is_allowed(
+        f"db-connect:{user_id}", CONNECT_RATE_LIMIT, CONNECT_RATE_WINDOW_SECONDS
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many connection attempts, please wait before retrying",
+        )
+
+
+def raise_db_error(action: str, error: Exception) -> NoReturn:
+    """
+    Convierte un error de la BD externa en HTTPException sin filtrar detalles del driver.
+
+    Los errores de validación (identificador inválido, host no permitido) y de
+    metadata inexistente se devuelven tal cual; el resto solo se loguea.
+    """
+    if isinstance(error, HTTPException):
+        raise error
+    if isinstance(error, DBHostNotAllowedError):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(error))
+    if isinstance(error, DBValidationError):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error))
+    if isinstance(error, DBMetadataNotFoundError):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error))
+
+    logger.error(f"Error {action}: {type(error).__name__}: {error}")
+    raise HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail=f"Error {action} on the external database",
+    )
 
 
 # =============================================================================
@@ -146,15 +189,14 @@ def test_connection(
 
     **Permisos requeridos**: Usuario autenticado
     """
+    enforce_connect_rate_limit(current_user["id"])
+
     try:
         result = service.test_connection(config)
         return result
 
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Unexpected error testing connection: {str(e)}",
-        )
+        raise_db_error("testing connection", e)
 
 
 # =============================================================================
@@ -183,6 +225,8 @@ def create_session(
 
     **Test opcional**: Si test_connection=true, valida credenciales antes de crear sesión
     """
+    enforce_connect_rate_limit(current_user["id"])
+
     # Validación adicional de ttl_hours para devolver 400 en vez de 422
     if request.ttl_hours > 24:
         raise HTTPException(
@@ -335,10 +379,7 @@ def list_schemas(
         return cast(List[str], schemas)
 
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error listing schemas: {str(e)}",
-        )
+        raise_db_error("listing schemas", e)
 
 
 @router.get(
@@ -372,10 +413,7 @@ def list_tables(
         return cast(List[TableMetadata], tables)
 
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error listing tables: {str(e)}",
-        )
+        raise_db_error("listing tables", e)
 
 
 @router.get(
@@ -410,10 +448,7 @@ def list_columns(
         return cast(List[ColumnMetadata], columns)
 
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error listing columns: {str(e)}",
-        )
+        raise_db_error("listing columns", e)
 
 
 @router.get(
@@ -455,10 +490,7 @@ def get_schema_metadata(
         return cast(SchemaMetadata, schema_metadata)
 
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error getting schema metadata: {str(e)}",
-        )
+        raise_db_error("getting schema metadata", e)
 
 
 @router.get(
@@ -546,10 +578,5 @@ def get_connector_tables(
             tables=connector_tables,
         )
 
-    except HTTPException:
-        raise
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error getting connector tables: {str(e)}",
-        )
+        raise_db_error("getting connector tables", e)

@@ -47,6 +47,23 @@ from .validators import validate_schema_name, validate_table_name
 
 logger = logging.getLogger(__name__)
 
+# ssl_mode del adapter -> atributos ODBC Driver 18
+_SSL_ATTRIBUTES = {
+    "verify": "Encrypt=yes;TrustServerCertificate=no;",
+    "require": "Encrypt=yes;TrustServerCertificate=yes;",
+    "disable": "Encrypt=no;",
+}
+
+
+def _odbc_value(value: Any) -> str:
+    """
+    Escapa un valor para una cadena de conexión ODBC.
+
+    Los valores van entre llaves y las '}' se doblan, de modo que ';', '=' o '{'
+    en usuario/contraseña/host no puedan inyectar atributos adicionales.
+    """
+    return "{" + str(value).replace("}", "}}") + "}"
+
 
 class SQLServerAdapter(BaseDBAdapter):
     """
@@ -85,12 +102,12 @@ class SQLServerAdapter(BaseDBAdapter):
 
             connection_string = (
                 f"DRIVER={driver};"
-                f"SERVER={server},{port};"
-                f"DATABASE={database};"
-                f"UID={username};"
-                f"PWD={password};"
-                f"TrustServerCertificate=yes;"
-                f"Connection Timeout={self.timeout};"
+                f"SERVER={_odbc_value(f'{server},{int(port)}')};"
+                f"DATABASE={_odbc_value(database)};"
+                f"UID={_odbc_value(username)};"
+                f"PWD={_odbc_value(password)};"
+                f"{_SSL_ATTRIBUTES[self.ssl_mode]}"
+                f"Connection Timeout={int(self.timeout)};"
             )
 
             self.connection = pyodbc.connect(connection_string)

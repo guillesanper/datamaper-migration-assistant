@@ -78,6 +78,13 @@
     "port": {
       "label": "Port"
     },
+    "ssl": {
+      "label": "Connection security (TLS)",
+      "verify": "Encrypted and verified (recommended)",
+      "require": "Encrypted, certificate not verified",
+      "disable": "Unencrypted",
+      "warning": "Credentials and data could be intercepted on the network. Use only on trusted networks."
+    },
     "tabDest": "Destination",
     "tabOrigin": "Origin",
     "test": {

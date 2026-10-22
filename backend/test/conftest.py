@@ -39,6 +39,10 @@ os.environ["DB_PORT"] = os.getenv("TEST_DB_PORT", "5432")
 os.environ["DB_USER"] = os.getenv("TEST_DB_USER", "postgres")
 os.environ["DB_PASSWORD"] = os.getenv("TEST_DB_PASSWORD", "postgres")
 os.environ["DB_NAME"] = "datamap_test"  # Use test database
+# Las BDs externas de test (docker-compose.test.yml) escuchan en localhost y sin TLS
+os.environ.setdefault("DB_CONNECTOR_ALLOW_PRIVATE_HOSTS", "true")
+# Los tests e2e prueban muchas conexiones seguidas con el mismo usuario
+os.environ.setdefault("DB_CONNECTOR_RATE_LIMIT", "10000")
 
 from main import app
 

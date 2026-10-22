@@ -41,6 +41,14 @@ from .validators import validate_schema_name, validate_table_name
 
 logger = logging.getLogger(__name__)
 
+# ssl_mode del adapter -> parámetros libpq. "verify" usa el almacén de CAs del sistema
+# (sslrootcert=system, libpq >= 16) y verifica también el hostname.
+_SSL_PARAMS: Dict[str, Dict[str, str]] = {
+    "verify": {"sslmode": "verify-full", "sslrootcert": "system"},
+    "require": {"sslmode": "require"},
+    "disable": {"sslmode": "disable"},
+}
+
 
 class PostgreSQLAdapter(BaseDBAdapter):
     """
@@ -74,6 +82,7 @@ class PostgreSQLAdapter(BaseDBAdapter):
                 connect_timeout=self.timeout,
                 # Usar RealDictCursor para retornar rows como dicts
                 cursor_factory=psycopg2.extras.RealDictCursor,
+                **_SSL_PARAMS[self.ssl_mode],
             )
             self._is_connected = True
             logger.info(

@@ -71,10 +71,37 @@ class TestConnection:
         # Verify connection string format
         conn_str = mock_connect.call_args[0][0]
         assert "DRIVER={ODBC Driver 18 for SQL Server}" in conn_str
-        assert "SERVER=localhost,1433" in conn_str
-        assert "DATABASE=testdb" in conn_str
-        assert "UID=testuser" in conn_str
-        assert "PWD=testpass" in conn_str
+        assert "SERVER={localhost,1433}" in conn_str
+        assert "DATABASE={testdb}" in conn_str
+        assert "UID={testuser}" in conn_str
+        assert "PWD={testpass}" in conn_str
+        # TLS verificado por defecto
+        assert "Encrypt=yes;TrustServerCertificate=no;" in conn_str
+
+    @patch("app.utils.db_adapters.sqlserver_adapter.pyodbc.connect")
+    def test_connection_string_values_cannot_inject_attributes(self, mock_connect, valid_config):
+        adapter = SQLServerAdapter(
+            {**valid_config, "password": "x};SAVEFILE=/tmp/pwn;TrustServerCertificate=yes;{"}
+        )
+
+        adapter.connect()
+
+        conn_str = mock_connect.call_args[0][0]
+        assert "PWD={x}};SAVEFILE=/tmp/pwn;TrustServerCertificate=yes;{};" in conn_str
+        assert "TrustServerCertificate=no;" in conn_str
+
+    @pytest.mark.parametrize(
+        "ssl_mode,expected",
+        [
+            ("require", "Encrypt=yes;TrustServerCertificate=yes;"),
+            ("disable", "Encrypt=no;"),
+        ],
+    )
+    @patch("app.utils.db_adapters.sqlserver_adapter.pyodbc.connect")
+    def test_ssl_modes(self, mock_connect, ssl_mode, expected, valid_config):
+        SQLServerAdapter({**valid_config, "ssl_mode": ssl_mode}).connect()
+
+        assert expected in mock_connect.call_args[0][0]
 
     @patch("app.utils.db_adapters.sqlserver_adapter.pyodbc.connect")
     def test_connect_authentication_error(self, mock_connect, adapter):
