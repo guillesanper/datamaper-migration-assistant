@@ -194,7 +194,10 @@ def test_downgrade_and_upgrade_again(empty_db):
 # ============================================================================
 
 # Ficheros que *generan* SQL para bases de datos ajenas (no insertan en la BD de la app)
-T3_EXCLUDED_FILES = {"app/services/migration_script_service.py"}
+T3_EXCLUDED_FILES = {
+    "app/services/migration_script_service.py",
+    "app/services/data_copy_service.py",
+}
 
 _INSERT_RE = re.compile(r"INSERT\s+INTO\s+(?:public\.)?(\w+)\s*\(([^)]*)\)", re.IGNORECASE)
 _INSERT_ANY_RE = re.compile(r"INSERT\s+INTO", re.IGNORECASE)
@@ -265,11 +268,16 @@ def _required_columns(table) -> set:
 
 def test_t3_extractor_reads_every_raw_insert():
     """Cordura de T3: si el extractor dejara de ver INSERTs, T3 pasaría sin comprobar nada."""
-    inserts, unparsed = _raw_inserts()
+    _, unparsed = _raw_inserts()
     assert unparsed == [], f"INSERT INTO que el extractor no sabe interpretar: {unparsed}"
-    # La auditoría de la Fase 1 localizó 19 en app/crud y app/services; al retirar los CRUD
-    # psycopg2 (sin llamadores) solo queda el de ExecutionService (migration_executions)
-    assert len(inserts) >= 1, f"Solo se encontraron {len(inserts)} INSERT crudos"
+    # La auditoría de la Fase 1 localizó 19 en app/crud y app/services; ya no queda ninguno
+    # (ExecutionService usa el ORM), así que el extractor se comprueba sobre una muestra para
+    # que T3 siga vigilando los que se añadan
+    sample = ast.parse('q = f"INSERT INTO migration_executions (id, status) VALUES ({x})"')
+    literals = [literal for _, literal in _string_literals(sample)]
+    assert [m for lit in literals for m in _INSERT_RE.findall(lit)] == [
+        ("migration_executions", "id, status")
+    ]
 
 
 def test_t3_raw_inserts_do_not_omit_required_columns():

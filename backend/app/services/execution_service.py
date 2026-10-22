@@ -2,9 +2,8 @@
 Execution Service
 
 Ejecuta scripts SQL de migración contra la base de datos destino con:
-- Manejo de transacciones (COMMIT/ROLLBACK)
-- Backups automáticos antes de ejecutar
-- Tracking de progreso en tiempo real
+- Manejo de transacciones (COMMIT/ROLLBACK): todo el script es atómico
+- Tracking de progreso en migration_executions (vía CRUD ORM)
 - Modo dry-run (ejecuta pero hace ROLLBACK al final)
 - Logging detallado de cada paso
 
@@ -12,18 +11,18 @@ Created: 2025-01-17
 """
 
 import hashlib
+import json
 import logging
 import re
 import time
 import traceback
-from datetime import datetime
-from typing import Any, Dict, List, Optional
-from uuid import uuid4
+from typing import Any, Callable, Dict, List, Optional
 
-from sqlalchemy import text
-
+from app.crud import migration_script_crud
+from app.services.data_copy_service import DataCopyService, disable_autocommit
+from app.services.migration_script_service import TablePlan
 from app.utils.db_adapters.base_adapter import BaseDBAdapter
-from utilities.migrations.validators import BackupManager
+from app.utils.sql_safety import is_transaction_control, split_sql_statements
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +33,41 @@ class ExecutionServiceError(Exception):
     pass
 
 
+FINISHED_STATUSES = ("success", "failed", "dry_run_complete")
+
+
+def execution_progress(execution: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Progreso de una ejecución a partir de su execution_log.
+
+    Returns:
+        {"progress_percent": int, "current_step": str}
+    """
+    raw_log = execution.get("execution_log") or []
+    log = json.loads(raw_log) if isinstance(raw_log, str) else raw_log
+
+    if execution.get("status") in FINISHED_STATUSES:
+        progress_percent = 100
+    else:
+        # El primer entry de metadata trae el total de sentencias
+        total_statements = next(
+            (e.get("total_statements") for e in log if e.get("type") == "metadata"), None
+        )
+        completed = len([e for e in log if e.get("step", 0) > 0 and e.get("status") == "success"])
+        if total_statements and total_statements > 0:
+            progress_percent = min(int((completed / total_statements) * 100), 99)
+        else:
+            progress_percent = 0
+
+    current_step = "Initializing..."
+    step_entries = [e for e in log if e.get("step", 0) > 0]
+    if step_entries:
+        last_step = step_entries[-1]
+        current_step = f"Step {last_step.get('step', 0)}: {last_step.get('table', 'Unknown')}"
+
+    return {"progress_percent": progress_percent, "current_step": current_step}
+
+
 class ExecutionService:
     """
     Servicio de ejecución de scripts de migración.
@@ -41,9 +75,13 @@ class ExecutionService:
     Responsabilidades:
     - Ejecutar scripts SQL contra BD destino
     - Manejar transacciones (COMMIT en éxito, ROLLBACK en error)
-    - Crear backups automáticos usando BackupManager
     - Tracking de progreso en migration_executions
     - Modo dry-run para testing
+
+    Nota sobre backups: no se hace copia de la BD destino. La protección ante fallos
+    es la transacción (un error revierte todo el script). La versión anterior volcaba
+    a disco, sin cifrar, tablas de la BD de la aplicación (de todos los proyectos), lo
+    que no protegía el destino y exponía datos de otros clientes.
 
     Usage:
         service = ExecutionService()
@@ -55,11 +93,6 @@ class ExecutionService:
             dry_run=False
         )
     """
-
-    def __init__(self):
-        """Inicializa el servicio con BackupManager"""
-        # BackupManager se inicializará con la conexión cuando sea necesario
-        self.backup_manager = None
 
     def execute_migration(
         self,
@@ -75,15 +108,14 @@ class ExecutionService:
 
         Flujo:
         1. Crear registro en migration_executions (status='running')
-        2. Crear backup automático usando BackupManager
-        3. Ejecutar script statement por statement con dest_adapter
-        4. Si dry_run=True: ROLLBACK al final
-        5. Si error durante ejecución: ROLLBACK + marcar status='failed'
-        6. Si éxito: COMMIT + marcar status='success'
-        7. Actualizar execution_log con cada paso
+        2. Ejecutar script statement por statement con dest_adapter, en una transacción
+        3. Si dry_run=True: ROLLBACK al final
+        4. Si error durante ejecución: ROLLBACK + marcar status='failed'
+        5. Si éxito: COMMIT + marcar status='success'
+        6. Guardar execution_log con cada paso
 
         Args:
-            db_connection: Session de SQLAlchemy (para migration_executions)
+            db_connection: SQLAlchemy Session de la BD de la aplicación (migration_executions)
             project_id: UUID del proyecto
             script: Script SQL a ejecutar
             dest_adapter: Adapter conectado a la BD destino
@@ -96,43 +128,93 @@ class ExecutionService:
                 'status': 'success' | 'failed' | 'dry_run_complete',
                 'rows_affected': 35000,
                 'duration_seconds': 42.5,
-                'backup_id': 'backup_20250117_143000',
+                'backup_id': None,
                 'errors': [],
                 'execution_log': [
                     {'step': 1, 'table': 'customers', 'rows': 10000, 'duration': 2.5},
                     {'step': 2, 'table': 'orders', 'rows': 25000, 'duration': 5.2}
                 ]
             }
-
-        Raises:
-            ExecutionServiceError: Si hay error en la ejecución
         """
+        return self._run_tracked(
+            db_connection=db_connection,
+            project_id=project_id,
+            record_text=script,
+            user_id=user_id,
+            dry_run=dry_run,
+            run=lambda: self._execute_script(adapter=dest_adapter, script=script, dry_run=dry_run),
+        )
+
+    def execute_copy(
+        self,
+        db_connection,
+        project_id: str,
+        plans: List[TablePlan],
+        origin_adapter: BaseDBAdapter,
+        dest_adapter: BaseDBAdapter,
+        dry_run: bool = False,
+        user_id: Optional[str] = None,
+        batch_size: int = 10000,
+        include_constraints: bool = True,
+        include_validation: bool = True,
+        project_name: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Migración entre dos BDs distintas: copia por lotes del origen al destino.
+
+        Mismo registro de ejecución y formato de respuesta que execute_migration; el
+        "script" registrado es la descripción del plan (DataCopyService.describe).
+        """
+        copier = DataCopyService(origin_adapter, dest_adapter, batch_size=batch_size)
+        plan_text = copier.describe(
+            plans,
+            project_name=project_name,
+            include_constraints=include_constraints,
+            include_validation=include_validation,
+        )
+        return self._run_tracked(
+            db_connection=db_connection,
+            project_id=project_id,
+            record_text=plan_text,
+            user_id=user_id,
+            dry_run=dry_run,
+            run=lambda: copier.copy(
+                plans,
+                dry_run=dry_run,
+                include_constraints=include_constraints,
+                include_validation=include_validation,
+            ),
+        )
+
+    def _run_tracked(
+        self,
+        db_connection,
+        project_id: str,
+        record_text: str,
+        user_id: Optional[str],
+        dry_run: bool,
+        run: Callable[[], Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """Crea el registro de ejecución, ejecuta `run` y guarda el resultado o el error."""
         start_time = time.time()
         execution_id = None
-        backup_id = None
         errors = []
 
         try:
             # PASO 1: Crear registro de ejecución
             logger.info(f"Starting migration execution for project {project_id}")
             execution_id = self._create_execution_record(
-                db_connection=db_connection, project_id=project_id, script=script, user_id=user_id
+                db_connection=db_connection,
+                project_id=project_id,
+                script=record_text,
+                user_id=user_id,
             )
 
-            # PASO 2: Crear backup automático
-            logger.info("Creating automatic backup before execution")
-            backup_id = self._create_backup(
-                db_connection=db_connection, project_id=project_id, script=script
-            )
-            logger.info(f"Backup created: {backup_id}")
+            # PASO 2: Ejecutar (transacción única en la BD destino)
+            logger.info(f"Executing migration (dry_run={dry_run})")
+            execution_result = run()
 
-            # PASO 3: Ejecutar script
-            logger.info(f"Executing script (dry_run={dry_run})")
-            execution_result = self._execute_script(
-                adapter=dest_adapter, script=script, dry_run=dry_run
-            )
-
-            # PASO 4: Determinar status final
+            # PASO 3: Determinar status final
             if dry_run:
                 final_status = "dry_run_complete"
                 logger.info("Dry-run completed successfully (ROLLBACK executed)")
@@ -140,13 +222,12 @@ class ExecutionService:
                 final_status = "success"
                 logger.info("Migration completed successfully (COMMIT executed)")
 
-            # PASO 5: Actualizar registro con éxito
+            # PASO 4: Actualizar registro con éxito
             self._update_execution_record(
                 db_connection=db_connection,
                 execution_id=execution_id,
                 status=final_status,
                 rows_migrated=execution_result["rows_affected"],
-                backup_id=backup_id,
                 execution_log=execution_result["log"],
             )
 
@@ -157,13 +238,13 @@ class ExecutionService:
                 "status": final_status,
                 "rows_affected": execution_result["rows_affected"],
                 "duration_seconds": round(duration, 2),
-                "backup_id": backup_id,
+                "backup_id": None,
                 "errors": [],
                 "execution_log": execution_result["log"],
             }
 
         except Exception as e:
-            # PASO 6: Manejar error
+            # PASO 5: Manejar error
             logger.error(f"Migration execution failed: {str(e)}")
             logger.error(traceback.format_exc())
 
@@ -172,14 +253,18 @@ class ExecutionService:
 
             # Actualizar registro con error
             if execution_id:
-                self._update_execution_record(
-                    db_connection=db_connection,
-                    execution_id=execution_id,
-                    status="failed",
-                    rows_migrated=0,
-                    backup_id=backup_id,
-                    error_message=error_message,
-                )
+                try:
+                    self._update_execution_record(
+                        db_connection=db_connection,
+                        execution_id=execution_id,
+                        status="failed",
+                        rows_migrated=0,
+                        error_message=error_message,
+                    )
+                except Exception as update_error:
+                    logger.error(
+                        f"Could not mark execution {execution_id} as failed: {update_error}"
+                    )
 
             duration = time.time() - start_time
 
@@ -188,7 +273,7 @@ class ExecutionService:
                 "status": "failed",
                 "rows_affected": 0,
                 "duration_seconds": round(duration, 2),
-                "backup_id": backup_id,
+                "backup_id": None,
                 "errors": errors,
                 "execution_log": [],
             }
@@ -197,10 +282,10 @@ class ExecutionService:
         self, db_connection, project_id: str, script: str, user_id: Optional[str]
     ) -> str:
         """
-        Crea registro en migration_executions, retorna execution_id.
+        Crea registro en migration_executions (status='running'), retorna execution_id.
 
         Args:
-            db_connection: Session de SQLAlchemy
+            db_connection: SQLAlchemy Session
             project_id: UUID del proyecto
             script: Script SQL completo
             user_id: UUID del usuario (opcional)
@@ -208,75 +293,21 @@ class ExecutionService:
         Returns:
             execution_id (UUID como string)
         """
-        execution_id = str(uuid4())
-
-        # Calcular hash SHA-256 del script
         script_hash = hashlib.sha256(script.encode("utf-8")).hexdigest()
 
-        # Insertar registro
-        db_connection.execute(
-            text("""
-                INSERT INTO migration_executions (
-                    id, project_id, status, script_hash, created_by,
-                    started_at, created_at, updated_at
-                ) VALUES (
-                    :id, :project_id, 'running', :script_hash, :created_by,
-                    NOW(), NOW(), NOW()
-                )
-            """),
-            {
-                "id": execution_id,
-                "project_id": project_id,
-                "script_hash": script_hash,
-                "created_by": user_id,
-            },
+        execution = migration_script_crud.create_migration_execution_orm(
+            db_connection,
+            project_id=project_id,
+            script_hash=script_hash,
+            created_by=str(user_id) if user_id else None,
         )
+        execution_id = str(execution["id"])
 
-        db_connection.commit()
+        migration_script_crud.update_execution_status_orm(
+            db_connection, execution_id, status="running", mark_started=True
+        )
         logger.info(f"Created execution record: {execution_id}")
         return execution_id
-
-    def _create_backup(self, db_connection, project_id: str, script: Optional[str] = None) -> str:
-        """
-        Usa BackupManager para crear backup, retorna backup_id.
-
-        Args:
-            db_connection: Session de SQLAlchemy
-            project_id: UUID del proyecto
-            script: Script SQL (para extraer tablas destino)
-
-        Returns:
-            backup_id (string con formato 'backup_YYYYMMDD_HHMMSS')
-        """
-        # Inicializar BackupManager con la conexión
-        self.backup_manager = BackupManager(db_connection)
-
-        # Extraer tablas destino del script para hacer backup específico del proyecto
-        if script:
-            tables_to_backup = list(
-                {
-                    table
-                    for stmt in self._parse_sql_script(script)
-                    for table in [self._extract_table_name(stmt)]
-                    if table
-                }
-            )
-            if not tables_to_backup:
-                tables_to_backup = ["projects", "mappings", "tables", "columns"]
-            logger.info(f"Backing up project-specific tables: {tables_to_backup}")
-        else:
-            tables_to_backup = ["projects", "mappings", "tables", "columns"]
-
-        # Crear backup
-        backup_info = self.backup_manager.create_backup(
-            tables=tables_to_backup,
-            description=f"Automatic backup before migration execution for project {project_id}",
-        )
-
-        backup_id = backup_info["backup_id"]
-        logger.info(f"Backup created: {backup_id} (tables: {len(backup_info['tables'])})")
-
-        return str(backup_id)
 
     def _execute_script(self, adapter: BaseDBAdapter, script: str, dry_run: bool) -> Dict[str, Any]:
         """
@@ -312,16 +343,19 @@ class ExecutionService:
 
         connection = adapter.connection
         assert connection is not None, "Adapter connection is None"
+
+        # La transacción la controla este servicio (COMMIT/ROLLBACK al final), nunca
+        # el script: sin esto un dry-run podría persistir cambios
+        self._disable_autocommit(connection)
         cursor = connection.cursor()
 
         try:
             # Parsear script en statements individuales
-            statements = self._parse_sql_script(script)
+            statements = self._parse_sql_script(script, dialect=self._adapter_dialect(adapter))
 
-            # Filtrar statements ejecutables (no vacíos ni solo comentarios)
-            executable_statements = [
-                s for s in statements if s.strip() and not s.strip().startswith("--")
-            ]
+            # Filtrar statements ejecutables: el control de transacciones del script
+            # (BEGIN/COMMIT/ROLLBACK/...) se ignora para no romper el dry-run
+            executable_statements = [s for s in statements if not is_transaction_control(s)]
             total_statements = len(executable_statements)
 
             logger.info(
@@ -341,8 +375,8 @@ class ExecutionService:
             for idx, stmt in enumerate(statements, start=1):
                 stmt_start = time.time()
 
-                # Ignorar statements vacíos o solo comentarios
-                if not stmt.strip() or stmt.strip().startswith("--"):
+                if is_transaction_control(stmt):
+                    logger.info(f"Skipping transaction control statement {idx}: {stmt[:50]}")
                     continue
 
                 try:
@@ -412,90 +446,31 @@ class ExecutionService:
         finally:
             cursor.close()
 
-    def _parse_sql_script(self, script: str) -> List[str]:
+    def _parse_sql_script(self, script: str, dialect: str = "postgresql") -> List[str]:
         """
         Parsea script SQL en statements individuales.
 
+        Respeta literales, identificadores citados, comentarios, bloques DO $$ de
+        PostgreSQL y bloques PL/SQL de Oracle (ver sql_safety.split_sql_statements).
+
         Args:
             script: Script SQL completo
+            dialect: Dialecto SQL del script
 
         Returns:
-            Lista de statements SQL (sin comentarios de línea)
-
-        Note:
-            Este es un parser simple. Para scripts complejos con
-            bloques PL/pgSQL (DO $$...), puede necesitar mejoras.
+            Lista de statements SQL (sin comentarios)
         """
-        # Remover comentarios de línea (-- ...)
-        lines = script.split("\n")
-        cleaned_lines = []
+        return split_sql_statements(script, dialect)
 
-        for line in lines:
-            # Remover comentarios inline
-            if "--" in line:
-                # Solo remover si el -- no está dentro de una string
-                line = line.split("--")[0]
+    @staticmethod
+    def _adapter_dialect(adapter: BaseDBAdapter) -> str:
+        dialect = getattr(adapter, "dialect", None)
+        return dialect if isinstance(dialect, str) else "postgresql"
 
-            cleaned_lines.append(line)
-
-        cleaned_script = "\n".join(cleaned_lines)
-
-        # Dividir por ';' (excepto dentro de bloques DO $$)
-        # Para simplificar, detectamos bloques DO $$ ... END $$;
-        statements = []
-        current_stmt = []
-        in_do_block = False
-
-        for line in cleaned_lines:
-            line_stripped = line.strip()
-
-            # Detectar inicio de bloque DO
-            if line_stripped.upper().startswith("DO $$") or line_stripped.upper().startswith(
-                "DO $"
-            ):
-                in_do_block = True
-                current_stmt.append(line)
-                continue
-
-            # Detectar fin de bloque DO
-            if in_do_block and ("END $$;" in line_stripped or "END $;" in line_stripped):
-                in_do_block = False
-                current_stmt.append(line)
-                statements.append("\n".join(current_stmt))
-                current_stmt = []
-                continue
-
-            # Si estamos en bloque DO, agregar toda la línea
-            if in_do_block:
-                current_stmt.append(line)
-                continue
-
-            # Si no estamos en bloque, dividir por ';'
-            if ";" in line:
-                parts = line.split(";")
-                for i, part in enumerate(parts):
-                    if i == len(parts) - 1 and not part.strip():
-                        # Última parte vacía, terminar statement
-                        if current_stmt or part.strip():
-                            current_stmt.append(part)
-                            statements.append("\n".join(current_stmt))
-                            current_stmt = []
-                    else:
-                        current_stmt.append(part)
-                        if i < len(parts) - 1:  # No es la última parte
-                            statements.append("\n".join(current_stmt))
-                            current_stmt = []
-            else:
-                current_stmt.append(line)
-
-        # Agregar último statement si quedó algo
-        if current_stmt:
-            statements.append("\n".join(current_stmt))
-
-        # Filtrar statements vacíos
-        statements = [s.strip() for s in statements if s.strip()]
-
-        return statements
+    @staticmethod
+    def _disable_autocommit(connection) -> None:
+        """Desactiva autocommit en la conexión destino (psycopg2, pyodbc, pymysql, oracledb)."""
+        disable_autocommit(connection)
 
     def _extract_table_name(self, statement: str) -> Optional[str]:
         """
@@ -530,50 +505,29 @@ class ExecutionService:
         execution_id: str,
         status: str,
         rows_migrated: int = 0,
-        backup_id: Optional[str] = None,
         execution_log: Optional[List[Dict]] = None,
         error_message: Optional[str] = None,
     ):
         """
-        Actualiza registro en migration_executions.
+        Actualiza registro en migration_executions y lo marca como completado.
 
         Args:
-            db_connection: Session de SQLAlchemy
+            db_connection: SQLAlchemy Session
             execution_id: UUID del execution record
             status: Nuevo status ('success', 'failed', 'dry_run_complete', etc.)
             rows_migrated: Total de filas migradas
-            backup_id: ID del backup creado
             execution_log: Log de ejecución (lista de dicts)
             error_message: Mensaje de error (si aplica)
         """
-        import json
-
-        # Convertir execution_log a JSON
-        execution_log_json = json.dumps(execution_log) if execution_log else None
-
-        db_connection.execute(
-            text("""
-                UPDATE migration_executions
-                SET status = :status,
-                    completed_at = NOW(),
-                    rows_migrated = :rows_migrated,
-                    backup_id = :backup_id,
-                    execution_log = CAST(:execution_log AS jsonb),
-                    error_message = :error_message,
-                    updated_at = NOW()
-                WHERE id = :execution_id
-            """),
-            {
-                "status": status,
-                "rows_migrated": rows_migrated,
-                "backup_id": backup_id,
-                "execution_log": execution_log_json,
-                "error_message": error_message,
-                "execution_id": execution_id,
-            },
+        migration_script_crud.update_execution_status_orm(
+            db_connection,
+            execution_id,
+            status=status,
+            rows_migrated=rows_migrated,
+            execution_log=execution_log,
+            error_message=error_message,
+            mark_completed=True,
         )
-
-        db_connection.commit()
         logger.info(
             f"Updated execution record {execution_id}: status={status}, rows={rows_migrated}"
         )
@@ -583,86 +537,24 @@ class ExecutionService:
         Consulta estado de una ejecución.
 
         Args:
-            db_connection: Session de SQLAlchemy
+            db_connection: SQLAlchemy Session
             execution_id: UUID del execution record
-
-        Returns:
-            {
-                'execution_id': uuid,
-                'status': 'running' | 'success' | 'failed',
-                'progress_percent': 60,
-                'rows_migrated': 21000,
-                'started_at': '2025-01-17T14:30:00Z',
-                'completed_at': None,
-                'current_step': 'Migrating table: orders'
-            }
 
         Raises:
             ExecutionServiceError: Si no se encuentra el execution record
         """
-        result = (
-            db_connection.execute(
-                text("""
-                SELECT id, project_id, status, rows_migrated,
-                       started_at, completed_at, execution_log, error_message
-                FROM migration_executions
-                WHERE id = :execution_id
-            """),
-                {"execution_id": execution_id},
-            )
-            .mappings()
-            .fetchone()
-        )
-
-        if not result:
+        execution = migration_script_crud.get_migration_execution_orm(db_connection, execution_id)
+        if not execution:
             raise ExecutionServiceError(f"Execution record {execution_id} not found")
 
-        # Calcular progreso desde el log de ejecución
-        import json
-
-        log = []
-        if result["execution_log"]:
-            log = (
-                json.loads(result["execution_log"])
-                if isinstance(result["execution_log"], str)
-                else result["execution_log"]
-            )
-
-        exec_status = result["status"]
-        if exec_status in ("success", "failed", "dry_run_complete"):
-            progress_percent = 100
-        else:
-            # Extraer total_statements del primer entry (metadata)
-            total_statements = None
-            for entry in log:
-                if entry.get("type") == "metadata":
-                    total_statements = entry.get("total_statements")
-                    break
-            completed = len(
-                [e for e in log if e.get("step", 0) > 0 and e.get("status") == "success"]
-            )
-            if total_statements and total_statements > 0:
-                progress_percent = min(int((completed / total_statements) * 100), 99)
-            else:
-                progress_percent = 0
-
-        # Determinar step actual del execution_log
-        current_step = "Initializing..."
-        if log:
-            step_entries = [e for e in log if e.get("step", 0) > 0]
-            if step_entries:
-                last_step = step_entries[-1]
-                current_step = f"Step {last_step['step']}: {last_step.get('table', 'Unknown')}"
-
+        started_at = execution.get("started_at")
+        completed_at = execution.get("completed_at")
         return {
-            "execution_id": str(result["id"]),
-            "status": result["status"],
-            "progress_percent": progress_percent,
-            "rows_migrated": result["rows_migrated"] or 0,
-            "started_at": result["started_at"].isoformat() if result["started_at"] else None,
-            "completed_at": (
-                result["completed_at"].isoformat() if result["completed_at"] else None
-            ),
-            "current_step": current_step,
-            "error_message": result["error_message"],
+            "execution_id": str(execution["id"]),
+            "status": execution.get("status"),
+            **execution_progress(execution),
+            "rows_migrated": execution.get("rows_migrated") or 0,
+            "started_at": started_at.isoformat() if started_at else None,
+            "completed_at": completed_at.isoformat() if completed_at else None,
+            "error_message": execution.get("error_message"),
         }
