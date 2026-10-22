@@ -952,7 +952,7 @@ def cross_db(db, auth_user):
 
     with patch("app.routers.migration.get_db_connection_service") as get_service:
         service = Mock()
-        service.get_session.side_effect = lambda user_id, sid: Mock(session_id=sid)
+        service.get_session.side_effect = lambda user_id, sid, project_id=None: Mock(session_id=sid)
         service.get_decrypted_config.side_effect = lambda session: configs[session.session_id]
         service._get_adapter.side_effect = make_adapter
         get_service.return_value = service
@@ -1074,7 +1074,7 @@ class TestCrossDatabaseMigration:
     def test_expired_stored_session_is_reported(self, client_with_auth, cross_db):
         from app.services.db_connection_service import SessionNotFoundError
 
-        def get_session(user_id, sid):
+        def get_session(user_id, sid, project_id=None):
             if sid == cross_db["origin_session"]:
                 raise SessionNotFoundError("gone")
             return Mock(session_id=sid)

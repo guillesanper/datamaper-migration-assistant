@@ -216,6 +216,7 @@ def ensure_mappings_decrypted(mappings: List[Dict[str, Any]]) -> None:
 def open_session_adapter(
     db_service: DBConnectionService,
     user_id: str,
+    project_id: str,
     session_id: str,
     side: str,
     stack: ExitStack,
@@ -225,10 +226,11 @@ def open_session_adapter(
     Conecta a la BD de una sesión del usuario; el ExitStack la desconecta al salir.
 
     Raises:
-        HTTPException 404/410: Sesión inexistente (o de otro usuario) o expirada
+        HTTPException 404/410: Sesión inexistente (de otro usuario o atada a otro
+            proyecto) o expirada
     """
     try:
-        session = db_service.get_session(user_id, session_id)
+        session = db_service.get_session(user_id, session_id, project_id=project_id)
     except SessionNotFoundError:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -355,6 +357,7 @@ def generate_script_for_sessions(
     mappings: List[Dict[str, Any]],
     options: MigrationScriptOptions,
     project: dict,
+    project_id: str,
     user_id: str,
     dependency_order: Optional[List[str]],
 ) -> Tuple[str, str]:
@@ -382,11 +385,11 @@ def generate_script_for_sessions(
             db_service = get_db_connection_service()
             if origin_session_id:
                 origin_config, origin_adapter = open_session_adapter(
-                    db_service, user_id, origin_session_id, "origin", stack
+                    db_service, user_id, project_id, origin_session_id, "origin", stack
                 )
             if dest_session_id:
                 dest_config, dest_adapter = open_session_adapter(
-                    db_service, user_id, dest_session_id, "destination", stack
+                    db_service, user_id, project_id, dest_session_id, "destination", stack
                 )
                 # El script se ejecuta en el destino: su dialecto manda
                 dialect = dest_config.dialect
@@ -617,7 +620,7 @@ def generate_migration_script(
         # PASO 5: Generar script. Los mappings connector se resuelven con las sesiones
         # de conexión (de la petición o las usadas al crear los mappings)
         script, dialect = generate_script_for_sessions(
-            mappings, options, project, current_user["id"], dependency_order
+            mappings, options, project, project_id, current_user["id"], dependency_order
         )
 
         # PASO 6: Calcular estimaciones
@@ -729,6 +732,7 @@ def execute_migration(
             config, dest_adapter = open_session_adapter(
                 db_service,
                 current_user["id"],
+                project_id,
                 request.dest_connection_session_id,
                 "destination",
                 stack,
@@ -741,6 +745,7 @@ def execute_migration(
                 origin_config, origin_adapter = open_session_adapter(
                     db_service,
                     current_user["id"],
+                    project_id,
                     origin_session_id,
                     "origin",
                     stack,
@@ -1070,7 +1075,9 @@ def get_dependency_graph(
         if dest_connection_session_id:
             try:
                 db_service = get_db_connection_service()
-                session = db_service.get_session(current_user["id"], dest_connection_session_id)
+                session = db_service.get_session(
+                    current_user["id"], dest_connection_session_id, project_id=project_id
+                )
                 config = db_service.get_decrypted_config(session)
                 dest_adapter = db_service._get_adapter(config)
                 dest_adapter.connect()

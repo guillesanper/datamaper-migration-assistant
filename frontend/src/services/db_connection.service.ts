@@ -48,11 +48,13 @@ class DBConnectionService {
 
   /**
    * Crear sesión de conexión (persiste en Redis con TTL)
+   * Con projectId la sesión solo se puede usar desde ese proyecto
    */
   async createSession(
     config: DBConnectionConfig,
     testConnection: boolean = true,
-    ttlHours: number = 3
+    ttlHours: number = 3,
+    projectId?: string
   ): Promise<DBConnectionSessionResponse> {
     const response = await apiService.post<DBConnectionSessionResponse>(
       `${this.baseUrl}/sessions`,
@@ -60,6 +62,7 @@ class DBConnectionService {
         connection: config,
         test_connection: testConnection,
         ttl_hours: ttlHours,
+        ...(projectId ? { project_id: projectId } : {}),
       }
     );
     return response;

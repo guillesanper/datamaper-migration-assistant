@@ -70,6 +70,17 @@ class SessionNotFoundError(DBConnectionServiceError):
     pass
 
 
+class SessionProjectMismatchError(SessionNotFoundError):
+    """
+    La sesión está atada a otro proyecto.
+
+    Hereda de SessionNotFoundError: para quien la usa desde otro proyecto no existe (404),
+    sin revelar que la sesión existe.
+    """
+
+    pass
+
+
 class SessionExpiredError(DBConnectionServiceError):
     """Session has expired"""
 
@@ -329,19 +340,24 @@ class DBConnectionService:
             expires_at=session.expires_at,
         )
 
-    def get_session(self, user_id: str, session_id: str) -> DBConnectionSession:
+    def get_session(
+        self, user_id: str, session_id: str, project_id: Optional[str] = None
+    ) -> DBConnectionSession:
         """
         Recupera una sesión activa.
 
         Args:
             user_id: ID del usuario propietario
             session_id: ID de la sesión
+            project_id: Proyecto desde el que se usa. Una sesión atada a otro proyecto se
+                rechaza; las sesiones sin proyecto valen para cualquiera del usuario
 
         Returns:
             DBConnectionSession con datos de la sesión
 
         Raises:
             SessionNotFoundError: Si la sesión no existe
+            SessionProjectMismatchError: Si la sesión es de otro proyecto
             SessionExpiredError: Si la sesión ha expirado
         """
         redis_key = self._get_redis_key(user_id, session_id)
@@ -361,6 +377,15 @@ class DBConnectionService:
             # Eliminar sesión expirada
             self.redis.delete(redis_key)
             raise SessionExpiredError(f"Session expired: {session_id}")
+
+        if (
+            project_id is not None
+            and session.project_id is not None
+            and str(session.project_id) != str(project_id)
+        ):
+            raise SessionProjectMismatchError(
+                f"Session not found for project: project_id={project_id}, session_id={session_id}"
+            )
 
         # Actualizar last_used_at
         session.last_used_at = datetime.utcnow()

@@ -23,7 +23,10 @@ from typing import List, NoReturn, Optional, cast
 
 import redis  # type: ignore[import-untyped]
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
 
+from app.crud.project_crud import ProjectCRUD
+from app.database.session import get_db_session
 from app.middleware.rate_limiting import simple_limiter
 from app.models.db_connection import (
     DBConnectionConfig,
@@ -215,6 +218,7 @@ def create_session(
     request: DBConnectionRequest,
     service: DBConnectionService = Depends(get_db_connection_service),
     current_user: dict = Depends(CurrentUser()),
+    db: Session = Depends(get_db_session),
 ) -> DBConnectionSessionResponse:
     """
     Crea sesión de conexión con credenciales cifradas.
@@ -224,6 +228,8 @@ def create_session(
     **TTL**: Por defecto 3 horas, máximo 24 horas
 
     **Test opcional**: Si test_connection=true, valida credenciales antes de crear sesión
+
+    **Proyecto opcional**: con project_id la sesión solo se puede usar desde ese proyecto
     """
     enforce_connect_rate_limit(current_user["id"])
 
@@ -233,10 +239,16 @@ def create_session(
             status_code=status.HTTP_400_BAD_REQUEST, detail="TTL cannot exceed 24 hours"
         )
 
+    project_id = str(request.project_id) if request.project_id else None
+    # 404 tanto si no existe como si no es del usuario: no revela qué proyectos existen
+    if project_id and not ProjectCRUD.check_user_access_orm(db, project_id, current_user["id"]):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+
     try:
         response = service.create_session(
             user_id=current_user["id"],
             config=request.connection,
+            project_id=project_id,
             ttl_hours=request.ttl_hours,
             test_connection=request.test_connection,
         )

@@ -580,3 +580,53 @@ class TestRefreshTtlBounds:
                 service.refresh_session("u1", session.session_id, 3)
 
         assert not redis_client.exists(key)
+
+
+# ============================================================================
+# TEST: Sesiones atadas a un proyecto
+# ============================================================================
+
+
+class TestSessionProjectScope:
+    """Una sesión creada con project_id solo se puede usar desde ese proyecto"""
+
+    @pytest.fixture
+    def real_service(self, encryption_key):
+        import fakeredis
+
+        return DBConnectionService(fakeredis.FakeRedis(decode_responses=True), encryption_key)
+
+    def _create(self, service, config, project_id):
+        with patch("app.services.db_connection_service.validate_connection_host"):
+            return service.create_session(
+                "user-1", config, project_id=project_id, test_connection=False
+            ).session_id
+
+    def test_bound_session_is_usable_from_its_project(self, real_service, valid_pg_config):
+        session_id = self._create(real_service, valid_pg_config, "project-a")
+
+        session = real_service.get_session("user-1", session_id, project_id="project-a")
+
+        assert session.project_id == "project-a"
+
+    def test_bound_session_is_not_found_from_another_project(self, real_service, valid_pg_config):
+        from app.services.db_connection_service import SessionProjectMismatchError
+
+        session_id = self._create(real_service, valid_pg_config, "project-a")
+
+        with pytest.raises(SessionProjectMismatchError):
+            real_service.get_session("user-1", session_id, project_id="project-b")
+        # Para los que la usan, es como si no existiera (404)
+        assert issubclass(SessionProjectMismatchError, SessionNotFoundError)
+
+    def test_unbound_session_is_usable_from_any_project(self, real_service, valid_pg_config):
+        session_id = self._create(real_service, valid_pg_config, None)
+
+        assert real_service.get_session("user-1", session_id, project_id="project-b")
+        assert real_service.get_session("user-1", session_id)
+
+    def test_bound_session_without_project_context_still_works(self, real_service, valid_pg_config):
+        # Endpoints de /db-connections (introspección) no tienen proyecto en la ruta
+        session_id = self._create(real_service, valid_pg_config, "project-a")
+
+        assert real_service.get_session("user-1", session_id).project_id == "project-a"
