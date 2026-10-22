@@ -19,6 +19,7 @@ from app.utils.db_adapters.validators import (
     validate_connection_config,
     validate_identifier,
     validate_index_name,
+    validate_metadata_name,
     validate_schema_name,
     validate_table_name,
 )
@@ -173,3 +174,43 @@ class TestValidateConnectionConfig:
         }
         with pytest.raises(DBValidationError, match="Invalid port"):
             validate_connection_config(config)
+
+    @pytest.mark.parametrize("database", ["my-db", "ORCLPDB1.dominio", "Año_2024", "view"])
+    def test_database_names_from_real_servers_are_accepted(self, database):
+        """Test: Nombres de BD/servicio válidos en el servidor no se rechazan"""
+        config = {
+            "host": "localhost",
+            "port": 5432,
+            "database": database,
+            "user": "testuser",
+            "password": "testpass",
+        }
+        assert validate_connection_config(config)["database"] == database
+
+
+# ============================================================================
+# TEST validate_metadata_name()
+# ============================================================================
+
+
+class TestValidateMetadataName:
+    """Nombres que llegan de la BD externa y se usan como parámetros enlazados"""
+
+    @pytest.mark.parametrize(
+        "name", ["users", "Año", "order-items", "view", "MixedCase", "my table", "a.b", "x;y"]
+    )
+    def test_accepts_names_valid_in_the_database(self, name):
+        assert validate_metadata_name(name, "Table name") == name
+
+    @pytest.mark.parametrize("name", ["", "   ", "bad\x00name", "bad\nname", "tab\tname"])
+    def test_rejects_empty_and_control_characters(self, name):
+        with pytest.raises(DBValidationError):
+            validate_metadata_name(name, "Table name")
+
+    def test_rejects_too_long(self):
+        with pytest.raises(DBValidationError, match="maximum length"):
+            validate_metadata_name("a" * 129, "Table name")
+
+    def test_rejects_non_string(self):
+        with pytest.raises(DBValidationError):
+            validate_metadata_name(None, "Table name")  # type: ignore[arg-type]

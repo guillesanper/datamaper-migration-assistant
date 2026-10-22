@@ -8,6 +8,8 @@ API endpoints para gestión de conexiones a bases de datos externas:
 - Listado de tablas y columnas
 
 SEGURIDAD:
+- Los endpoints son síncronos (def): los drivers de BD son bloqueantes y FastAPI
+  los ejecuta en el threadpool, de modo que una BD lenta no congela el event loop
 - Requiere autenticación (CurrentUser)
 - Credenciales cifradas con AES-256-GCM
 - Sesiones con TTL en Redis
@@ -15,12 +17,17 @@ SEGURIDAD:
 """
 
 import hashlib
+import logging
 import os
-from typing import List, Optional, cast
+from typing import List, NoReturn, Optional, cast
 
 import redis  # type: ignore[import-untyped]
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
 
+from app.crud.project_crud import ProjectCRUD
+from app.database.session import get_db_session
+from app.middleware.rate_limiting import simple_limiter
 from app.models.db_connection import (
     DBConnectionConfig,
     DBConnectionRequest,
@@ -42,8 +49,51 @@ from app.services.db_connection_service import (
     SessionNotFoundError,
     SessionRequiresReconnectError,
 )
+from app.utils.db_adapters import DBHostNotAllowedError, DBMetadataNotFoundError, DBValidationError
+from app.utils.redis_client import get_redis_client as shared_redis_client
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/db-connections", tags=["Database Connections"])
+
+# Límite de intentos de conexión por usuario (test + crear sesión). Por usuario y no por
+# IP: la IP del cliente se puede falsear con X-Forwarded-For.
+CONNECT_RATE_LIMIT = int(os.getenv("DB_CONNECTOR_RATE_LIMIT", "10"))
+CONNECT_RATE_WINDOW_SECONDS = int(os.getenv("DB_CONNECTOR_RATE_WINDOW_SECONDS", "60"))
+
+
+def enforce_connect_rate_limit(user_id: str) -> None:
+    """Evita usar el servidor para fuerza bruta de credenciales o barrido de hosts."""
+    if not simple_limiter.is_allowed(
+        f"db-connect:{user_id}", CONNECT_RATE_LIMIT, CONNECT_RATE_WINDOW_SECONDS
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many connection attempts, please wait before retrying",
+        )
+
+
+def raise_db_error(action: str, error: Exception) -> NoReturn:
+    """
+    Convierte un error de la BD externa en HTTPException sin filtrar detalles del driver.
+
+    Los errores de validación (identificador inválido, host no permitido) y de
+    metadata inexistente se devuelven tal cual; el resto solo se loguea.
+    """
+    if isinstance(error, HTTPException):
+        raise error
+    if isinstance(error, DBHostNotAllowedError):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(error))
+    if isinstance(error, DBValidationError):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error))
+    if isinstance(error, DBMetadataNotFoundError):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error))
+
+    logger.error(f"Error {action}: {type(error).__name__}: {error}")
+    raise HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail=f"Error {action} on the external database",
+    )
 
 
 # =============================================================================
@@ -52,14 +102,13 @@ router = APIRouter(prefix="/api/db-connections", tags=["Database Connections"])
 
 
 def get_redis_client() -> redis.Redis:
-    """Dependency para obtener cliente Redis"""
-    redis_client = redis.Redis(
-        host=os.getenv("REDIS_HOST", "localhost"),
-        port=int(os.getenv("REDIS_PORT", 6379)),
-        db=int(os.getenv("REDIS_DB", 0)),
-        decode_responses=False,  # Mantenemos bytes para hashes
-    )
-    return redis_client
+    """
+    Dependency para obtener cliente Redis.
+
+    Usa el cliente compartido (pool, REDIS_URL/REDIS_PASSWORD/REDIS_SSL); antes se creaba
+    un cliente nuevo por petición sin contraseña.
+    """
+    return shared_redis_client()
 
 
 def get_db_connection_service(
@@ -76,7 +125,7 @@ def get_db_connection_service(
     return DBConnectionService(redis_client, encryption_key)
 
 
-async def get_user_session(
+def get_user_session(
     session_id: str,
     service: DBConnectionService = Depends(get_db_connection_service),
     current_user: dict = Depends(CurrentUser()),
@@ -135,7 +184,7 @@ async def get_user_session(
     summary="Test database connection",
     description="Validates database credentials without creating a session",
 )
-async def test_connection(
+def test_connection(
     config: DBConnectionConfig,
     service: DBConnectionService = Depends(get_db_connection_service),
     current_user: dict = Depends(CurrentUser()),
@@ -149,15 +198,14 @@ async def test_connection(
 
     **Permisos requeridos**: Usuario autenticado
     """
+    enforce_connect_rate_limit(current_user["id"])
+
     try:
         result = service.test_connection(config)
         return result
 
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Unexpected error testing connection: {str(e)}",
-        )
+        raise_db_error("testing connection", e)
 
 
 # =============================================================================
@@ -172,10 +220,11 @@ async def test_connection(
     summary="Create connection session",
     description="Creates a new session with encrypted credentials stored in Redis",
 )
-async def create_session(
+def create_session(
     request: DBConnectionRequest,
     service: DBConnectionService = Depends(get_db_connection_service),
     current_user: dict = Depends(CurrentUser()),
+    db: Session = Depends(get_db_session),
 ) -> DBConnectionSessionResponse:
     """
     Crea sesión de conexión con credenciales cifradas.
@@ -185,17 +234,27 @@ async def create_session(
     **TTL**: Por defecto 3 horas, máximo 24 horas
 
     **Test opcional**: Si test_connection=true, valida credenciales antes de crear sesión
+
+    **Proyecto opcional**: con project_id la sesión solo se puede usar desde ese proyecto
     """
+    enforce_connect_rate_limit(current_user["id"])
+
     # Validación adicional de ttl_hours para devolver 400 en vez de 422
     if request.ttl_hours > 24:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="TTL cannot exceed 24 hours"
         )
 
+    project_id = str(request.project_id) if request.project_id else None
+    # 404 tanto si no existe como si no es del usuario: no revela qué proyectos existen
+    if project_id and not ProjectCRUD.check_user_access_orm(db, project_id, current_user["id"]):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+
     try:
         response = service.create_session(
             user_id=current_user["id"],
             config=request.connection,
+            project_id=project_id,
             ttl_hours=request.ttl_hours,
             test_connection=request.test_connection,
         )
@@ -213,7 +272,7 @@ async def create_session(
     summary="List user sessions",
     description="Lists all active sessions for the current user",
 )
-async def list_sessions(
+def list_sessions(
     service: DBConnectionService = Depends(get_db_connection_service),
     current_user: dict = Depends(CurrentUser()),
 ) -> List[DBConnectionSessionResponse]:
@@ -244,7 +303,7 @@ async def list_sessions(
     summary="Delete session",
     description="Deletes a connection session and removes credentials from Redis",
 )
-async def delete_session(
+def delete_session(
     session_id: str,
     service: DBConnectionService = Depends(get_db_connection_service),
     current_user: dict = Depends(CurrentUser()),
@@ -270,7 +329,7 @@ async def delete_session(
     summary="Refresh session TTL",
     description="Extends the TTL of an active session",
 )
-async def refresh_session(
+def refresh_session(
     session_id: str,
     ttl_hours: int = 3,
     service: DBConnectionService = Depends(get_db_connection_service),
@@ -283,7 +342,7 @@ async def refresh_session(
     """
     try:
         # Validar ownership
-        await get_user_session(session_id, service, current_user)
+        get_user_session(session_id, service, current_user)
 
         # Refresh
         new_expires_at = service.refresh_session(current_user["id"], session_id, ttl_hours)
@@ -315,7 +374,7 @@ async def refresh_session(
     summary="List schemas/databases",
     description="Lists all schemas (PostgreSQL) or databases (MySQL)",
 )
-async def list_schemas(
+def list_schemas(
     session_id: str,
     session: DBConnectionSession = Depends(get_user_session),
     service: DBConnectionService = Depends(get_db_connection_service),
@@ -340,10 +399,7 @@ async def list_schemas(
         return cast(List[str], schemas)
 
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error listing schemas: {str(e)}",
-        )
+        raise_db_error("listing schemas", e)
 
 
 @router.get(
@@ -352,7 +408,7 @@ async def list_schemas(
     summary="List tables in schema",
     description="Lists all tables and views in a schema",
 )
-async def list_tables(
+def list_tables(
     session_id: str,
     schema_name: str,
     session: DBConnectionSession = Depends(get_user_session),
@@ -377,10 +433,7 @@ async def list_tables(
         return cast(List[TableMetadata], tables)
 
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error listing tables: {str(e)}",
-        )
+        raise_db_error("listing tables", e)
 
 
 @router.get(
@@ -389,7 +442,7 @@ async def list_tables(
     summary="List table columns",
     description="Lists all columns with metadata (type, nullable, PK, FK, etc.)",
 )
-async def list_columns(
+def list_columns(
     session_id: str,
     schema_name: str,
     table_name: str,
@@ -415,10 +468,7 @@ async def list_columns(
         return cast(List[ColumnMetadata], columns)
 
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error listing columns: {str(e)}",
-        )
+        raise_db_error("listing columns", e)
 
 
 @router.get(
@@ -427,7 +477,7 @@ async def list_columns(
     summary="Get full schema metadata",
     description="Gets complete metadata for a schema (tables, columns, constraints, indexes)",
 )
-async def get_schema_metadata(
+def get_schema_metadata(
     session_id: str,
     schema_name: str,
     session: DBConnectionSession = Depends(get_user_session),
@@ -460,10 +510,7 @@ async def get_schema_metadata(
         return cast(SchemaMetadata, schema_metadata)
 
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error getting schema metadata: {str(e)}",
-        )
+        raise_db_error("getting schema metadata", e)
 
 
 @router.get(
@@ -475,7 +522,7 @@ async def get_schema_metadata(
         "The structure is NOT saved locally. Hashes are used to identify tables/columns in mappings."
     ),
 )
-async def get_connector_tables(
+def get_connector_tables(
     session_id: str,
     schema: Optional[str] = None,
     session: DBConnectionSession = Depends(get_user_session),
@@ -497,15 +544,27 @@ async def get_connector_tables(
         adapter = service._get_adapter(config)
 
         connector_tables: List[ConnectorTableResponse] = []
+        failed_schemas: List[str] = []
 
         with adapter:
             schemas_to_fetch: List[str] = [schema] if schema else adapter.get_schemas()
 
             for schema_name in schemas_to_fetch:
-                try:
+                if schema:
+                    # Schema pedido explícitamente: su error se devuelve al cliente
                     schema_metadata = adapter.get_full_schema_metadata(schema=schema_name)
-                except Exception:
-                    continue
+                else:
+                    try:
+                        schema_metadata = adapter.get_full_schema_metadata(schema=schema_name)
+                    except Exception as e:
+                        # Un schema ilegible no impide devolver el resto, pero no se omite
+                        # en silencio: se loguea y se informa en failed_schemas
+                        logger.warning(
+                            f"Skipping schema '{schema_name}' in connector tables: "
+                            f"{type(e).__name__}: {e}"
+                        )
+                        failed_schemas.append(schema_name)
+                        continue
 
                 for table in schema_metadata.tables:
                     table_hash = hashlib.sha256(table.name.encode()).hexdigest()
@@ -549,12 +608,8 @@ async def get_connector_tables(
         return ConnectorTablesResponse(
             session_id=session_id,
             tables=connector_tables,
+            failed_schemas=failed_schemas,
         )
 
-    except HTTPException:
-        raise
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error getting connector tables: {str(e)}",
-        )
+        raise_db_error("getting connector tables", e)

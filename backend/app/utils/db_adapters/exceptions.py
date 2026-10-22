@@ -127,3 +127,15 @@ class DBMetadataNotFoundError(DBAdapterError):
     """
 
     pass
+
+
+class DBHostNotAllowedError(DBValidationError):
+    """
+    El host de destino no está permitido por la política de red.
+
+    Se lanza cuando el host resuelve a una dirección interna (loopback, privada,
+    link-local, metadata cloud...) y la política no permite redes privadas.
+    Evita que el endpoint de conexión se use para SSRF o escaneo de la red interna.
+    """
+
+    pass

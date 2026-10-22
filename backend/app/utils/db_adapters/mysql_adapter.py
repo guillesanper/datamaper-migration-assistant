@@ -40,7 +40,7 @@ from .exceptions import (
 )
 from .tls import build_ssl_context, is_tls_error
 from .type_mappers import MySQLTypeMapper
-from .validators import validate_schema_name, validate_table_name
+from .validators import validate_metadata_name
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +88,9 @@ class MySQLAdapter(BaseDBAdapter):
 
     def connect(self) -> None:
         """Establece conexión con MySQL"""
+        # connect_timeout solo cubre el TCP connect; sin read/write timeout un servidor
+        # que acepta la conexión pero no responde bloquea el hilo indefinidamente
+        read_timeout = self.connection_config.get("read_timeout", self.timeout)
         try:
             self.connection = _TLSRequiredConnection(
                 host=self.connection_config["host"],
@@ -96,6 +99,8 @@ class MySQLAdapter(BaseDBAdapter):
                 user=self.connection_config["user"],
                 password=self.connection_config["password"],
                 connect_timeout=self.timeout,
+                read_timeout=read_timeout,
+                write_timeout=self.timeout,
                 # Usar DictCursor para retornar rows como dicts
                 cursorclass=pymysql.cursors.DictCursor,
                 charset="utf8mb4",
@@ -129,15 +134,17 @@ class MySQLAdapter(BaseDBAdapter):
 
     def test_connection(self) -> bool:
         """Valida credenciales sin mantener conexión"""
+        self.connect()
         try:
-            self.connect()
             # Test simple query
             with self.connection.cursor() as cursor:
                 cursor.execute("SELECT 1")
-            self.disconnect()
             return True
-        except (DBAuthenticationError, DBConnectionError):
-            raise
+        except Exception as e:
+            raise DBConnectionError(f"Connection test failed: {str(e)}")
+        finally:
+            # Desconectar siempre, también si falla la query (evita fugas de conexiones)
+            self.disconnect()
 
     # =============================================================================
     # METADATA INTROSPECTION
@@ -169,7 +176,7 @@ class MySQLAdapter(BaseDBAdapter):
     def get_tables(self, schema: Optional[str] = None) -> List[TableMetadata]:
         """Lista todas las tablas de un schema/database"""
         schema = schema or self._get_default_schema()
-        validate_schema_name(schema)
+        validate_metadata_name(schema, "Schema name")
 
         query = """
             SELECT
@@ -214,8 +221,8 @@ class MySQLAdapter(BaseDBAdapter):
     def get_columns(self, table_name: str, schema: Optional[str] = None) -> List[ColumnMetadata]:
         """Lista todas las columnas de una tabla"""
         schema = schema or self._get_default_schema()
-        validate_table_name(table_name)
-        validate_schema_name(schema)
+        validate_metadata_name(table_name, "Table name")
+        validate_metadata_name(schema, "Schema name")
 
         query = """
             SELECT
@@ -299,46 +306,20 @@ class MySQLAdapter(BaseDBAdapter):
     def _mark_key_columns(
         self, columns: List[ColumnMetadata], table_name: str, schema: str
     ) -> List[ColumnMetadata]:
-        """
-        Marca columnas que son PK o FK.
-        Returns a new list with updated column metadata.
-        """
-        # Obtener PKs
-        pks = self.get_primary_keys(table_name, schema)
-        pk_columns = set()
-        for pk in pks:
-            pk_columns.update(pk.columns)
-
-        # Obtener FKs
-        fks = self.get_foreign_keys(table_name, schema)
-        fk_columns = set()
-        for fk in fks:
-            fk_columns.update(fk.columns)
-
-        # Crear nuevas instancias con flags actualizados
-        updated_columns = []
-        for col in columns:
-            if col.name in pk_columns or col.name in fk_columns:
-                # Need to update - create new instance with updated fields
-                col_dict = col.model_dump()
-                if col.name in pk_columns:
-                    col_dict["is_primary_key"] = True
-                if col.name in fk_columns:
-                    col_dict["is_foreign_key"] = True
-                updated_columns.append(ColumnMetadata(**col_dict))
-            else:
-                # No changes needed
-                updated_columns.append(col)
-
-        return updated_columns
+        """Marca columnas que son PK o FK (devuelve una lista nueva)."""
+        return self._apply_key_flags(
+            columns,
+            self.get_primary_keys(table_name, schema),
+            self.get_foreign_keys(table_name, schema),
+        )
 
     def get_primary_keys(
         self, table_name: str, schema: Optional[str] = None
     ) -> List[PrimaryKeyMetadata]:
         """Obtiene las primary keys de una tabla"""
         schema = schema or self._get_default_schema()
-        validate_table_name(table_name)
-        validate_schema_name(schema)
+        validate_metadata_name(table_name, "Table name")
+        validate_metadata_name(schema, "Schema name")
 
         query = """
             SELECT
@@ -390,8 +371,8 @@ class MySQLAdapter(BaseDBAdapter):
     ) -> List[ForeignKeyMetadata]:
         """Obtiene las foreign keys de una tabla"""
         schema = schema or self._get_default_schema()
-        validate_table_name(table_name)
-        validate_schema_name(schema)
+        validate_metadata_name(table_name, "Table name")
+        validate_metadata_name(schema, "Schema name")
 
         query = """
             SELECT
@@ -464,8 +445,8 @@ class MySQLAdapter(BaseDBAdapter):
     def get_indexes(self, table_name: str, schema: Optional[str] = None) -> List[IndexMetadata]:
         """Obtiene los índices de una tabla"""
         schema = schema or self._get_default_schema()
-        validate_table_name(table_name)
-        validate_schema_name(schema)
+        validate_metadata_name(table_name, "Table name")
+        validate_metadata_name(schema, "Schema name")
 
         query = """
             SELECT
@@ -543,8 +524,8 @@ class MySQLAdapter(BaseDBAdapter):
         Usa information_schema.TABLES para obtener valores aproximados.
         """
         schema = schema or self._get_default_schema()
-        validate_table_name(table_name)
-        validate_schema_name(schema)
+        validate_metadata_name(table_name, "Table name")
+        validate_metadata_name(schema, "Schema name")
 
         query = """
             SELECT

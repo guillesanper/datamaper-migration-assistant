@@ -60,7 +60,7 @@ def redis_test_client():
 @pytest.fixture
 def encryption_key():
     """Test encryption key (32 bytes minimum for AES-256)"""
-    return "test-encryption-key-min-32-chars-long-for-security"
+    return "ZGF0YW1hcC10ZXN0LW1hc3Rlci1rZXktMzItYnl0ZXM="  # base64 de 32 bytes
 
 
 @pytest.fixture
@@ -70,7 +70,7 @@ def db_connection_service(redis_test_client, encryption_key):
 
 
 @pytest.fixture
-def postgres_config():
+def postgres_config(external_postgres, postgres_tls_optional):
     """PostgreSQL test database configuration"""
     return DBConnectionConfig(
         dialect="postgresql",
@@ -83,7 +83,7 @@ def postgres_config():
 
 
 @pytest.fixture
-def mysql_config():
+def mysql_config(external_mysql):
     """MySQL test database configuration"""
     return DBConnectionConfig(
         dialect="mysql",
@@ -92,11 +92,14 @@ def mysql_config():
         database="test_database",
         user="test_user",
         password="test_password",
+        # BD de test local con certificado autofirmado: cifrada, sin verificar
+        tls_verify=False,
+        confirm_hostname="localhost",
     )
 
 
 @pytest.fixture
-def postgres_invalid_config():
+def postgres_invalid_config(external_postgres, postgres_tls_optional):
     """Invalid PostgreSQL configuration (wrong password)"""
     return DBConnectionConfig(
         dialect="postgresql",
@@ -109,7 +112,7 @@ def postgres_invalid_config():
 
 
 @pytest.fixture
-def mysql_invalid_config():
+def mysql_invalid_config(external_mysql):
     """Invalid MySQL configuration (wrong password)"""
     return DBConnectionConfig(
         dialect="mysql",
@@ -118,6 +121,9 @@ def mysql_invalid_config():
         database="test_database",
         user="test_user",
         password="wrong_password",
+        # BD de test local con certificado autofirmado: cifrada, sin verificar
+        tls_verify=False,
+        confirm_hostname="localhost",
     )
 
 
@@ -463,7 +469,7 @@ class TestPostgreSQLIntrospection:
 
     def test_get_primary_keys(self, postgres_adapter):
         """Test getting primary key constraints"""
-        pks = postgres_adapter.get_primary_keys("public", "users")
+        pks = postgres_adapter.get_primary_keys("users", "public")
 
         assert len(pks) == 1
         pk = pks[0]
@@ -472,7 +478,7 @@ class TestPostgreSQLIntrospection:
 
     def test_get_foreign_keys(self, postgres_adapter):
         """Test getting foreign key constraints"""
-        fks = postgres_adapter.get_foreign_keys("public", "products")
+        fks = postgres_adapter.get_foreign_keys("products", "public")
 
         # Products table has FK to categories
         assert len(fks) >= 1
@@ -486,7 +492,7 @@ class TestPostgreSQLIntrospection:
 
     def test_get_unique_constraints(self, postgres_adapter):
         """Test getting unique constraints"""
-        uniques = postgres_adapter.get_unique_constraints("public", "users")
+        uniques = postgres_adapter.get_unique_constraints("users", "public")
 
         # Users has unique constraints on username and email
         constraint_names = [u.constraint_name for u in uniques]
@@ -497,7 +503,7 @@ class TestPostgreSQLIntrospection:
 
     def test_get_check_constraints(self, postgres_adapter):
         """Test getting check constraints"""
-        checks = postgres_adapter.get_check_constraints("public", "users")
+        checks = postgres_adapter.get_check_constraints("users", "public")
 
         # Users has check constraints on age and balance
         assert len(checks) >= 2
@@ -513,7 +519,7 @@ class TestPostgreSQLIntrospection:
 
     def test_get_indexes(self, postgres_adapter):
         """Test getting indexes"""
-        indexes = postgres_adapter.get_indexes("public", "users")
+        indexes = postgres_adapter.get_indexes("users", "public")
 
         # Should have indexes on email, username, created_at
         index_names = [idx.index_name.lower() for idx in indexes]
@@ -528,7 +534,7 @@ class TestPostgreSQLIntrospection:
 
     def test_get_table_statistics(self, postgres_adapter):
         """Test getting table statistics"""
-        stats = postgres_adapter.get_table_statistics("public", "users")
+        stats = postgres_adapter.get_table_statistics("users", "public")
 
         assert stats.table_name == "users"
         assert stats.row_count >= 0  # Should have sample data

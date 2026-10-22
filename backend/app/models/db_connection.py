@@ -192,6 +192,13 @@ class DBConnectionRequest(BaseModel):
     ttl_hours: int = Field(
         default=3, ge=1, description="Tiempo de vida de la sesión en horas (máximo 24)"
     )
+    project_id: Optional[uuid.UUID] = Field(
+        default=None,
+        description=(
+            "Proyecto al que se ata la sesión (opcional). Si se indica, solo se puede usar "
+            "desde ese proyecto"
+        ),
+    )
 
     class Config:
         json_schema_extra = {

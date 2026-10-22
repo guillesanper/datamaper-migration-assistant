@@ -44,7 +44,7 @@ def mock_redis():
 @pytest.fixture
 def encryption_key():
     """Test encryption key"""
-    return "test_master_key_12345"
+    return "ZGF0YW1hcC10ZXN0LW1hc3Rlci1rZXktMzItYnl0ZXM="  # base64 de 32 bytes
 
 
 @pytest.fixture
@@ -127,7 +127,9 @@ class TestTestConnection:
 
         assert result.success is False
         assert result.error_type == "authentication"
-        assert "Invalid password" in result.error_message
+        # El detalle del driver solo va al log, no a la respuesta
+        assert "Invalid password" not in result.error_message
+        assert "Authentication failed" in result.error_message
 
     @patch("app.services.db_connection_service.PostgreSQLAdapter")
     def test_connection_error(self, mock_adapter_class, service, valid_pg_config):
@@ -444,3 +446,167 @@ class TestGetAdapter:
 
         with pytest.raises(DBConnectionServiceError, match="Unsupported dialect"):
             service._get_adapter(config)
+
+
+# ============================================================================
+# TEST: Redis real (fakeredis) con y sin decode_responses
+# ============================================================================
+
+
+class TestRedisClientCompatibility:
+    """
+    El router de migración usa el cliente compartido (decode_responses=True) y el de
+    conexiones uno sin decodificar; el servicio debe funcionar con ambos.
+    """
+
+    @pytest.mark.parametrize("decode_responses", [False, True])
+    def test_session_roundtrip(self, decode_responses, encryption_key):
+        import fakeredis
+
+        redis_client = fakeredis.FakeRedis(decode_responses=decode_responses)
+        service = DBConnectionService(redis_client, encryption_key)
+        config = DBConnectionConfig(
+            dialect="oracle",
+            host="db.example.com",
+            port=1521,
+            database="ORCLPDB1.dominio",
+            user="scott",
+            password="tiger",
+            service_name="ORCLPDB1.dominio",
+        )
+
+        with patch("app.services.db_connection_service.validate_connection_host"):
+            session = service.create_session("user-1", config, test_connection=False)
+
+        restored = service.get_session("user-1", session.session_id)
+        decrypted = service.get_decrypted_config(restored)
+
+        assert decrypted.service_name == "ORCLPDB1.dominio"
+        assert decrypted.to_adapter_config()["service_name"] == "ORCLPDB1.dominio"
+        assert [s.session_id for s in service.list_user_sessions("user-1")] == [session.session_id]
+
+
+class TestOracleConnectionTarget:
+    """service_name/sid se conservan (antes Pydantic los descartaba)"""
+
+    def test_service_name_and_sid_reach_adapter_config(self):
+        config = DBConnectionConfig(
+            dialect="oracle",
+            host="db.example.com",
+            port=1521,
+            database="ORCL",
+            user="scott",
+            password="tiger",
+            sid="ORCL1",
+        )
+        adapter_config = config.to_adapter_config()
+        assert adapter_config["sid"] == "ORCL1"
+        assert "service_name" not in adapter_config
+
+
+class TestRefreshTtlBounds:
+    """Con ttl_hours <= 0 la sesión acababa como clave huérfana sin TTL"""
+
+    @pytest.mark.parametrize("ttl_hours", [0, -1])
+    def test_non_positive_ttl_is_rejected(self, ttl_hours, encryption_key):
+        import fakeredis
+
+        redis_client = fakeredis.FakeRedis()
+        service = DBConnectionService(redis_client, encryption_key)
+        config = DBConnectionConfig(
+            dialect="postgresql",
+            host="db.example.com",
+            port=5432,
+            database="d",
+            user="u",
+            password="p",
+        )
+        with patch("app.services.db_connection_service.validate_connection_host"):
+            session = service.create_session("u1", config, test_connection=False)
+        key = service._get_redis_key("u1", session.session_id)
+
+        with pytest.raises(ValueError):
+            service.refresh_session("u1", session.session_id, ttl_hours)
+
+        assert redis_client.ttl(key) > 0
+        assert service.get_session("u1", session.session_id).session_id == session.session_id
+
+    def test_session_expiring_meanwhile_is_not_recreated(self, encryption_key):
+        import fakeredis
+
+        redis_client = fakeredis.FakeRedis()
+        service = DBConnectionService(redis_client, encryption_key)
+        config = DBConnectionConfig(
+            dialect="postgresql",
+            host="db.example.com",
+            port=5432,
+            database="d",
+            user="u",
+            password="p",
+        )
+        with patch("app.services.db_connection_service.validate_connection_host"):
+            session = service.create_session("u1", config, test_connection=False)
+        key = service._get_redis_key("u1", session.session_id)
+
+        real_get_session = service.get_session
+
+        def get_then_expire(*args):
+            result = real_get_session(*args)
+            redis_client.delete(key)  # caduca justo después de comprobarla
+            return result
+
+        with patch.object(service, "get_session", side_effect=get_then_expire):
+            with pytest.raises(SessionNotFoundError):
+                service.refresh_session("u1", session.session_id, 3)
+
+        assert not redis_client.exists(key)
+
+
+# ============================================================================
+# TEST: Sesiones atadas a un proyecto
+# ============================================================================
+
+
+class TestSessionProjectScope:
+    """Una sesión creada con project_id solo se puede usar desde ese proyecto"""
+
+    @pytest.fixture
+    def real_service(self, encryption_key):
+        import fakeredis
+
+        return DBConnectionService(fakeredis.FakeRedis(decode_responses=True), encryption_key)
+
+    def _create(self, service, config, project_id):
+        with patch("app.services.db_connection_service.validate_connection_host"):
+            return service.create_session(
+                "user-1", config, project_id=project_id, test_connection=False
+            ).session_id
+
+    def test_bound_session_is_usable_from_its_project(self, real_service, valid_pg_config):
+        session_id = self._create(real_service, valid_pg_config, "project-a")
+
+        session = real_service.get_session("user-1", session_id, project_id="project-a")
+
+        assert session.project_id == "project-a"
+
+    def test_bound_session_is_not_found_from_another_project(self, real_service, valid_pg_config):
+        from app.services.db_connection_service import SessionProjectMismatchError
+
+        session_id = self._create(real_service, valid_pg_config, "project-a")
+
+        with pytest.raises(SessionProjectMismatchError):
+            real_service.get_session("user-1", session_id, project_id="project-b")
+        # Para los que la usan, es como si no existiera (404)
+        assert issubclass(SessionProjectMismatchError, SessionNotFoundError)
+
+    def test_unbound_session_is_usable_from_any_project(self, real_service, valid_pg_config):
+        session_id = self._create(real_service, valid_pg_config, None)
+
+        assert real_service.get_session("user-1", session_id, project_id="project-b")
+        assert real_service.get_session("user-1", session_id)
+
+    def test_bound_session_without_project_context_still_works(self, real_service, valid_pg_config):
+        # Endpoints de /db-connections (introspección) no tienen proyecto en la ruta
+        session_id = self._create(real_service, valid_pg_config, "project-a")
+
+        assert real_service.get_session("user-1", session_id).project_id == "project-a"
