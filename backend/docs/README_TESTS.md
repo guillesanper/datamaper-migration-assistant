@@ -285,4 +285,3 @@ class TestCreateFunction:
 ---
 
 **Última actualización:** 2025-11-12
-**Tests implementados por:** Claude Code Agent

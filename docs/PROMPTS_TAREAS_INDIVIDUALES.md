@@ -4,7 +4,7 @@
 
 **Fecha**: 2025-01-16
 **Propósito**: Prompts copy-paste para ejecutar cada tarea de forma independiente
-**Uso**: Copiar el prompt completo y pegarlo en un nuevo chat de Claude
+**Uso**: Copiar el prompt completo y pegarlo en un nuevo chat del asistente
 
 ---
 

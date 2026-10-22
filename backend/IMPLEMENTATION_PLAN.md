@@ -181,7 +181,7 @@ CREATE TABLE mappings (
 
 **Archivo original (referencia):** `backend/docs/legacy_sql/migrations/005_mapping_source_types.sql`
 
-**Prompt para Claude:**
+**Prompt:**
 ```
 Crea la migración SQL 004_mapping_source_types.sql que agregue las siguientes columnas a la tabla `mappings`:
 
@@ -237,7 +237,7 @@ psql -U postgres -d datamap_dev -c "\d+ mappings"
 **Archivo:** `backend/app/crud/mappings_crud.py` (MODIFICADO)
 **Líneas modificadas:** 10, 13-187
 
-**Prompt para Claude:**
+**Prompt:**
 ```
 Actualiza la función `create_mapping` en backend/app/crud/mappings_crud.py para soportar modo híbrido.
 
@@ -329,7 +329,7 @@ mapping = create_mapping(
 **Archivo:** `backend/app/crud/mappings_crud.py` (MODIFICADO)
 **Líneas modificadas:** 177-295
 
-**Prompt para Claude:**
+**Prompt:**
 ```
 Actualiza la función `get_mappings_by_project` en backend/app/crud/mappings_crud.py para retornar TODOS los nuevos campos.
 
@@ -393,7 +393,7 @@ Retorna el result_dict con todos los campos disponibles.
 
 **Archivo:** `backend/app/services/migration_script_service.py` (CREAR)
 
-**Prompt para Claude:**
+**Prompt:**
 ```
 Crea el servicio `MigrationScriptService` en backend/app/services/migration_script_service.py que genere scripts SQL de migración basados en mappings.
 
@@ -458,7 +458,7 @@ SELECT sku FROM products;
 
 **Archivo:** `backend/app/routers/mappings.py` (AGREGAR endpoint)
 
-**Prompt para Claude:**
+**Prompt:**
 ```
 Agrega un nuevo endpoint POST a backend/app/routers/mappings.py para generar scripts de migración.
 
@@ -533,7 +533,7 @@ def _create_adapter_from_config(config: DBConnectionConfig) -> BaseDBAdapter:
 **Archivo:** `backend/app/routers/mappings.py` (MODIFICADO)
 **Líneas modificadas:** 744-758, 871-1081
 
-**Prompt para Claude:**
+**Prompt:**
 ```
 Actualiza el endpoint POST /projects/{project_id}/mappings en backend/app/routers/mappings.py para soportar los nuevos parámetros.
 
@@ -672,7 +672,7 @@ curl -X POST "http://localhost:8000/api/mappings/projects/{project_id}/save?orig
 
 **Archivo:** `backend/test/unit/test_mapping_hashing.py` (CREAR)
 
-**Prompt para Claude:**
+**Prompt:**
 ```
 Crea tests unitarios en backend/test/unit/test_mapping_hashing.py para verificar el hashing de mappings.
 
@@ -734,7 +734,7 @@ class TestMappingHashing:
 
 **Archivo:** `backend/test/integration/test_connector_mappings.py` (CREAR)
 
-**Prompt para Claude:**
+**Prompt:**
 ```
 Crea tests de integración en backend/test/integration/test_connector_mappings.py que verifiquen el flujo completo de mappings con conectores.
 
@@ -768,7 +768,7 @@ Usar Docker Compose para levantar PostgreSQL y MySQL de test.
 
 **Archivo:** `backend/docs/API_MAPPINGS.md` (CREAR)
 
-**Prompt para Claude:**
+**Prompt:**
 ```
 Crea documentación de API en backend/docs/API_MAPPINGS.md para los nuevos endpoints de mappings.
 
@@ -940,7 +940,6 @@ curl -X POST http://localhost:8000/api/projects/{project_id}/generate-migration-
 ## Contacto y Soporte
 
 **Documentación adicional:**
-- Plan completo: `C:\Users\guill\.claude\plans\dynamic-wandering-pelican.md`
 - Reporte de exploración: Ver mensajes de agentes de exploración
 
 **Para continuar el desarrollo:**

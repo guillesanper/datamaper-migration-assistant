@@ -50,7 +50,7 @@ Se han creado 3 archivos principales de documentación:
   - 1.5 Connector Polish
   - 1.6 Database Migration Schema
 
-**Cuándo usar**: Cuando vayas a implementar una tarea específica, copia el prompt completo y pégalo en Claude.
+**Cuándo usar**: Cuando vayas a implementar una tarea específica, copia el prompt completo y pégalo en el asistente.
 
 ---
 
@@ -86,9 +86,9 @@ Se han creado 3 archivos principales de documentación:
 1. Abre `PROMPTS_TAREAS_INDIVIDUALES.md`
 2. Busca la tarea que vas a implementar (ej: "Tarea 1.1")
 3. Copia TODO el prompt (desde "Contexto:" hasta el final de esa sección)
-4. Abre un nuevo chat de Claude
+4. Abre un nuevo chat del asistente
 5. Pega el prompt completo
-6. Claude implementará esa tarea específica
+6. El asistente implementará esa tarea específica
 
 ### Para Tracking de Progreso
 1. Usa los checkboxes en `PLAN_MIGRACION_ENTERPRISE.md`
@@ -163,8 +163,8 @@ pip install networkx==3.2.1 psutil==5.9.6
 # Ejemplo: Tarea 1.1
 # 1. Abrir PROMPTS_TAREAS_INDIVIDUALES.md
 # 2. Copiar prompt de Tarea 1.1 completo
-# 3. Nuevo chat de Claude, pegar prompt
-# 4. Claude genera el código
+# 3. Nuevo chat del asistente, pegar prompt
+# 4. El asistente genera el código
 # 5. Copiar código a tu proyecto
 # 6. Ejecutar tests
 ```
@@ -241,10 +241,10 @@ gh issue create --title "Tarea 1.1: Dependency Graph Service" \
 
 ## 🐛 Troubleshooting
 
-### Problema: "El prompt es muy largo para Claude"
-**Solución**: Los prompts están diseñados para caber en el contexto de Claude. Si tienes problemas, divide en 2 partes: contexto + implementación.
+### Problema: "El prompt es muy largo para el asistente"
+**Solución**: Los prompts están diseñados para caber en el contexto del asistente. Si tienes problemas, divide en 2 partes: contexto + implementación.
 
-### Problema: "Claude genera código diferente al esperado"
+### Problema: "El asistente genera código diferente al esperado"
 **Solución**: El prompt tiene código de ejemplo. Compara con tus archivos existentes y adapta.
 
 ### Problema: "No entiendo qué hace esta tarea"

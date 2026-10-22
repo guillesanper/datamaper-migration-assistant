@@ -372,4 +372,3 @@ Por favor:
 
 **Fecha**: 2025-01-29
 **Versión**: 1.0
-**Autor**: Claude Code Assistant

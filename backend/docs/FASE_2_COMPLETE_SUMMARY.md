@@ -589,7 +589,6 @@ Usar Celery/RQ para tareas de larga duración:
 
 ## 👥 Contribuciones
 
-**Implementado por**: Claude Code Assistant
 **Fecha**: 2025-01-29
 **Versión**: 2.0.0
 
