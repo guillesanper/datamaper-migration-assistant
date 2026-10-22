@@ -11,6 +11,9 @@ Tests for SQLServerAdapter with mocked pyodbc:
 - Error handling
 """
 
+import os
+import subprocess
+import sys
 from unittest.mock import MagicMock, Mock, call, patch
 
 import pytest
@@ -23,7 +26,7 @@ from app.utils.db_adapters.exceptions import (
     DBQueryExecutionError,
     DBTimeoutError,
 )
-from app.utils.db_adapters.sqlserver_adapter import SQLServerAdapter
+from app.utils.db_adapters.sqlserver_adapter import SQLServerAdapter, pyodbc
 
 # ============================================================================
 # FIXTURES
@@ -53,6 +56,36 @@ def adapter(valid_config):
 # ============================================================================
 
 
+class TestMissingDriver:
+    """Sin pyodbc/unixODBC el resto de la app debe poder importarse"""
+
+    def test_adapters_import_and_sqlserver_fails_cleanly_without_pyodbc(self, valid_config):
+        # sys.modules["pyodbc"] = None hace que "import pyodbc" lance ImportError
+        code = (
+            "import sys; sys.modules['pyodbc'] = None\n"
+            "from app.utils.db_adapters import PostgreSQLAdapter, SQLServerAdapter\n"
+            "from app.utils.db_adapters.exceptions import DBConnectionError\n"
+            f"adapter = SQLServerAdapter({valid_config!r})\n"
+            "try:\n"
+            "    adapter.connect()\n"
+            "except DBConnectionError as e:\n"
+            "    assert 'pyodbc' in str(e), e\n"
+            "    print('ok')\n"
+        )
+        backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            cwd=backend_dir,
+            env={**os.environ, "PYTHONPATH": backend_dir},
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "ok"
+
+
 class TestConnection:
     """Tests for connection management"""
 
@@ -75,12 +108,24 @@ class TestConnection:
         assert "DATABASE=testdb" in conn_str
         assert "UID=testuser" in conn_str
         assert "PWD=testpass" in conn_str
+        # TLS verificado por defecto
+        assert "Encrypt=yes;TrustServerCertificate=no;" in conn_str
+
+    @patch("app.utils.db_adapters.sqlserver_adapter.pyodbc.connect")
+    def test_connection_string_values_cannot_inject_attributes(self, mock_connect, valid_config):
+        adapter = SQLServerAdapter(
+            {**valid_config, "password": "x};SAVEFILE=/tmp/pwn;TrustServerCertificate=yes;{"}
+        )
+
+        adapter.connect()
+
+        conn_str = mock_connect.call_args[0][0]
+        assert "PWD={x}};SAVEFILE=/tmp/pwn;TrustServerCertificate=yes;{};" in conn_str
+        assert "TrustServerCertificate=no;" in conn_str
 
     @patch("app.utils.db_adapters.sqlserver_adapter.pyodbc.connect")
     def test_connect_authentication_error(self, mock_connect, adapter):
         """Test authentication error raises DBAuthenticationError"""
-        import pyodbc
-
         mock_connect.side_effect = pyodbc.Error("18456", "Login failed for user")
 
         with pytest.raises(DBAuthenticationError) as exc_info:
@@ -91,8 +136,6 @@ class TestConnection:
     @patch("app.utils.db_adapters.sqlserver_adapter.pyodbc.connect")
     def test_connect_timeout_error(self, mock_connect, adapter):
         """Test connection timeout raises DBTimeoutError"""
-        import pyodbc
-
         mock_connect.side_effect = pyodbc.Error("Connection timeout exceeded")
 
         with pytest.raises(DBTimeoutError) as exc_info:
@@ -103,8 +146,6 @@ class TestConnection:
     @patch("app.utils.db_adapters.sqlserver_adapter.pyodbc.connect")
     def test_connect_generic_error(self, mock_connect, adapter):
         """Test generic connection error raises DBConnectionError"""
-        import pyodbc
-
         mock_connect.side_effect = pyodbc.Error("Network error")
 
         with pytest.raises(DBConnectionError) as exc_info:
@@ -202,8 +243,6 @@ class TestListSchemas:
     @patch("app.utils.db_adapters.sqlserver_adapter.pyodbc.connect")
     def test_list_schemas_query_error(self, mock_connect, adapter):
         """Test query error raises DBQueryExecutionError"""
-        import pyodbc
-
         mock_cursor = MagicMock()
         mock_cursor.execute.side_effect = pyodbc.Error("Query failed")
 
@@ -269,10 +308,27 @@ class TestListTables:
 
         assert tables == []
 
-    def test_list_tables_invalid_schema_name(self, adapter):
-        """Test get_tables validates schema name"""
+    @patch("app.utils.db_adapters.sqlserver_adapter.pyodbc.connect")
+    def test_list_tables_special_schema_name_is_bound_parameter(self, mock_connect, adapter):
+        """Nombres con caracteres especiales se aceptan y viajan como parámetro enlazado"""
+        mock_cursor = MagicMock()
+        mock_cursor.fetchall.return_value = []
+        mock_conn = MagicMock()
+        mock_conn.cursor.return_value = mock_cursor
+        mock_connect.return_value = mock_conn
+
+        adapter.connect()
+        name = "invalid; DROP TABLE users;"
+        adapter.get_tables(name)
+
+        query, params = mock_cursor.execute.call_args[0]
+        assert name not in query
+        assert params == (name,)
+
+    def test_list_tables_rejects_control_characters(self, adapter):
+        """Test get_tables rechaza nombres con caracteres de control"""
         with pytest.raises(ValueError):
-            adapter.get_tables("invalid; DROP TABLE users;")
+            adapter.get_tables("dbo\x00")
 
 
 # ============================================================================
@@ -360,12 +416,15 @@ class TestGetTableColumns:
         assert "not found" in str(exc_info.value)
 
     def test_get_table_columns_validates_names(self, adapter):
-        """Test get_columns validates schema and table names"""
+        """Test get_columns rechaza nombres vacíos o con caracteres de control"""
         with pytest.raises(ValueError):
-            adapter.get_columns("users", "invalid; DROP")
+            adapter.get_columns("users", "bad\x00schema")
 
         with pytest.raises(ValueError):
-            adapter.get_columns("invalid; DROP", "dbo")
+            adapter.get_columns("bad\ntable", "dbo")
+
+        with pytest.raises(ValueError):
+            adapter.get_columns("", "dbo")
 
 
 # ============================================================================
@@ -389,7 +448,7 @@ class TestGetPrimaryKeys:
         mock_connect.return_value = mock_conn
 
         adapter.connect()
-        pks = adapter.get_primary_keys("dbo", "users")
+        pks = adapter.get_primary_keys("users", "dbo")
 
         assert len(pks) == 1
         assert pks[0].constraint_name == "PK_users"
@@ -410,7 +469,7 @@ class TestGetPrimaryKeys:
         mock_connect.return_value = mock_conn
 
         adapter.connect()
-        pks = adapter.get_primary_keys("dbo", "order_items")
+        pks = adapter.get_primary_keys("order_items", "dbo")
 
         assert len(pks) == 1
         assert pks[0].constraint_name == "PK_order_items"
@@ -427,7 +486,7 @@ class TestGetPrimaryKeys:
         mock_connect.return_value = mock_conn
 
         adapter.connect()
-        pks = adapter.get_primary_keys("dbo", "logs")
+        pks = adapter.get_primary_keys("logs", "dbo")
 
         assert pks == []
 
@@ -463,7 +522,7 @@ class TestGetForeignKeys:
         mock_connect.return_value = mock_conn
 
         adapter.connect()
-        fks = adapter.get_foreign_keys("dbo", "products")
+        fks = adapter.get_foreign_keys("products", "dbo")
 
         assert len(fks) == 1
         assert fks[0].constraint_name == "FK_products_category"
@@ -508,7 +567,7 @@ class TestGetForeignKeys:
         mock_connect.return_value = mock_conn
 
         adapter.connect()
-        fks = adapter.get_foreign_keys("dbo", "order_items")
+        fks = adapter.get_foreign_keys("order_items", "dbo")
 
         assert len(fks) == 1
         assert fks[0].column_names == ["order_id", "line_number"]
@@ -526,7 +585,7 @@ class TestGetForeignKeys:
         mock_connect.return_value = mock_conn
 
         adapter.connect()
-        fks = adapter.get_foreign_keys("dbo", "categories")
+        fks = adapter.get_foreign_keys("categories", "dbo")
 
         assert fks == []
 
@@ -553,7 +612,7 @@ class TestGetUniqueConstraints:
         mock_connect.return_value = mock_conn
 
         adapter.connect()
-        uniques = adapter.get_unique_constraints("dbo", "users")
+        uniques = adapter.get_unique_constraints("users", "dbo")
 
         assert len(uniques) == 2
         assert uniques[0].constraint_name == "UQ_users_email"
@@ -584,7 +643,7 @@ class TestGetCheckConstraints:
         mock_connect.return_value = mock_conn
 
         adapter.connect()
-        checks = adapter.get_check_constraints("dbo", "users")
+        checks = adapter.get_check_constraints("users", "dbo")
 
         assert len(checks) == 2
         assert checks[0].constraint_name == "CK_users_age"
@@ -616,7 +675,7 @@ class TestGetIndexes:
         mock_connect.return_value = mock_conn
 
         adapter.connect()
-        indexes = adapter.get_indexes("dbo", "users")
+        indexes = adapter.get_indexes("users", "dbo")
 
         assert len(indexes) == 2
 
@@ -645,7 +704,7 @@ class TestGetIndexes:
         mock_connect.return_value = mock_conn
 
         adapter.connect()
-        indexes = adapter.get_indexes("dbo", "orders")
+        indexes = adapter.get_indexes("orders", "dbo")
 
         assert len(indexes) == 1
         assert indexes[0].column_names == ["user_id", "created_at"]
@@ -664,7 +723,7 @@ class TestGetIndexes:
         mock_connect.return_value = mock_conn
 
         adapter.connect()
-        indexes = adapter.get_indexes("dbo", "users")
+        indexes = adapter.get_indexes("users", "dbo")
 
         # Should only return non-PK index
         assert len(indexes) == 1
@@ -691,7 +750,7 @@ class TestGetTableStatistics:
         mock_connect.return_value = mock_conn
 
         adapter.connect()
-        stats = adapter.get_table_statistics("dbo", "users")
+        stats = adapter.get_table_statistics("users", "dbo")
 
         assert stats.table_name == "users"
         assert stats.row_count == 1000
@@ -710,7 +769,7 @@ class TestGetTableStatistics:
         mock_connect.return_value = mock_conn
 
         adapter.connect()
-        stats = adapter.get_table_statistics("dbo", "empty_table")
+        stats = adapter.get_table_statistics("empty_table", "dbo")
 
         assert stats.row_count == 0
         assert stats.total_size_bytes == 0

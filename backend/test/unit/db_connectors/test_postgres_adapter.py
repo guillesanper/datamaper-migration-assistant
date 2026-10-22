@@ -282,7 +282,7 @@ class TestGetPrimaryKeys:
         adapter.connection = mock_conn
         adapter._is_connected = True
 
-        pks = adapter.get_primary_keys("public", "users")
+        pks = adapter.get_primary_keys("users", "public")
 
         assert len(pks) == 1
         assert pks[0].name == "users_pkey"
@@ -302,7 +302,7 @@ class TestGetPrimaryKeys:
         adapter.connection = mock_conn
         adapter._is_connected = True
 
-        pks = adapter.get_primary_keys("public", "order_items")
+        pks = adapter.get_primary_keys("order_items", "public")
 
         assert len(pks) == 1
         assert pks[0].columns == ["order_id", "item_id"]
@@ -337,7 +337,7 @@ class TestGetForeignKeys:
         adapter.connection = mock_conn
         adapter._is_connected = True
 
-        fks = adapter.get_foreign_keys("public", "orders")
+        fks = adapter.get_foreign_keys("orders", "public")
 
         assert len(fks) == 1
         assert fks[0].name == "orders_user_id_fkey"
@@ -373,7 +373,7 @@ class TestGetIndexes:
         adapter.connection = mock_conn
         adapter._is_connected = True
 
-        indexes = adapter.get_indexes("public", "users")
+        indexes = adapter.get_indexes("users", "public")
 
         assert len(indexes) == 1
         assert indexes[0].name == "users_email_idx"
@@ -409,7 +409,7 @@ class TestGetTableStatistics:
         adapter.connection = mock_conn
         adapter._is_connected = True
 
-        stats = adapter.get_table_statistics("public", "users")
+        stats = adapter.get_table_statistics("users", "public")
 
         assert stats.row_count == 1000
         assert stats.size_bytes == 8192000
@@ -426,7 +426,7 @@ class TestGetTableStatistics:
         adapter.connection = mock_conn
         adapter._is_connected = True
 
-        stats = adapter.get_table_statistics("public", "new_table")
+        stats = adapter.get_table_statistics("new_table", "public")
 
         assert stats.row_count == 0
         assert stats.size_bytes == 0

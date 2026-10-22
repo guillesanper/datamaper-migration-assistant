@@ -16,12 +16,14 @@ from psycopg2 import InterfaceError, OperationalError, ProgrammingError
 from psycopg2.errors import InvalidPassword
 
 from app.models.db_metadata import (
+    CheckConstraintMetadata,
     ColumnMetadata,
-    DataType,
+    DatabaseMetadata,
     ForeignKeyMetadata,
     IndexMetadata,
     IndexType,
     PrimaryKeyMetadata,
+    SchemaMetadata,
     TableMetadata,
     TableStatistics,
     TableType,
@@ -33,13 +35,12 @@ from .exceptions import (
     DBAuthenticationError,
     DBConnectionError,
     DBMetadataNotFoundError,
-    DBPermissionError,
     DBQueryExecutionError,
     DBTLSError,
 )
 from .tls import is_tls_error, trust_file
 from .type_mappers import PostgreSQLTypeMapper
-from .validators import validate_schema_name, validate_table_name
+from .validators import validate_metadata_name
 
 logger = logging.getLogger(__name__)
 
@@ -119,19 +120,151 @@ class PostgreSQLAdapter(BaseDBAdapter):
 
     def test_connection(self) -> bool:
         """Valida credenciales sin mantener conexión"""
+        self.connect()
         try:
-            self.connect()
             # Test simple query
             with self.connection.cursor() as cursor:
                 cursor.execute("SELECT 1")
-            self.disconnect()
             return True
-        except (DBAuthenticationError, DBConnectionError):
-            raise
+        except Exception as e:
+            raise DBConnectionError(f"Connection test failed: {str(e)}")
+        finally:
+            # Desconectar siempre, también si falla la query (evita fugas de conexiones)
+            self.disconnect()
 
     # =============================================================================
     # METADATA INTROSPECTION
     # =============================================================================
+    #
+    # Todas las queries reciben schema/tabla como parámetros enlazados. Las de constraints
+    # e índices aceptan table=None para devolver el schema completo en una sola query
+    # (get_full_schema_metadata) y evitar N+1.
+
+    _COLUMNS_QUERY = """
+        SELECT
+            table_name,
+            column_name,
+            data_type,
+            udt_name,
+            is_nullable,
+            column_default,
+            is_identity,
+            character_maximum_length,
+            numeric_precision,
+            numeric_scale,
+            ordinal_position
+        FROM information_schema.columns
+        WHERE table_schema = %(schema)s
+          AND (%(table)s::text IS NULL OR table_name = %(table)s)
+        ORDER BY table_name, ordinal_position
+    """
+
+    # PK ('p') o UNIQUE ('u'); columnas en el orden de la constraint (conkey)
+    _KEY_CONSTRAINTS_QUERY = """
+        SELECT
+            rel.relname AS table_name,
+            con.conname AS constraint_name,
+            att.attname AS column_name
+        FROM pg_catalog.pg_constraint con
+        JOIN pg_catalog.pg_class rel ON rel.oid = con.conrelid
+        JOIN pg_catalog.pg_namespace nsp ON nsp.oid = rel.relnamespace
+        CROSS JOIN LATERAL unnest(con.conkey) WITH ORDINALITY AS k(attnum, ord)
+        JOIN pg_catalog.pg_attribute att
+            ON att.attrelid = con.conrelid AND att.attnum = k.attnum
+        WHERE con.contype = %(contype)s
+          AND nsp.nspname = %(schema)s
+          AND (%(table)s::text IS NULL OR rel.relname = %(table)s)
+        ORDER BY rel.relname, con.conname, k.ord
+    """
+
+    # conkey/confkey se recorren en paralelo para emparejar cada columna con la
+    # referenciada (el join con constraint_column_usage producía producto cartesiano
+    # en FKs compuestas)
+    _FOREIGN_KEYS_QUERY = """
+        SELECT
+            rel.relname AS table_name,
+            con.conname AS constraint_name,
+            att.attname AS column_name,
+            fnsp.nspname AS referenced_schema,
+            frel.relname AS referenced_table,
+            fatt.attname AS referenced_column,
+            CASE con.confupdtype
+                WHEN 'a' THEN 'NO ACTION' WHEN 'r' THEN 'RESTRICT' WHEN 'c' THEN 'CASCADE'
+                WHEN 'n' THEN 'SET NULL' WHEN 'd' THEN 'SET DEFAULT'
+            END AS update_rule,
+            CASE con.confdeltype
+                WHEN 'a' THEN 'NO ACTION' WHEN 'r' THEN 'RESTRICT' WHEN 'c' THEN 'CASCADE'
+                WHEN 'n' THEN 'SET NULL' WHEN 'd' THEN 'SET DEFAULT'
+            END AS delete_rule
+        FROM pg_catalog.pg_constraint con
+        JOIN pg_catalog.pg_class rel ON rel.oid = con.conrelid
+        JOIN pg_catalog.pg_namespace nsp ON nsp.oid = rel.relnamespace
+        JOIN pg_catalog.pg_class frel ON frel.oid = con.confrelid
+        JOIN pg_catalog.pg_namespace fnsp ON fnsp.oid = frel.relnamespace
+        CROSS JOIN LATERAL unnest(con.conkey, con.confkey)
+            WITH ORDINALITY AS k(attnum, ref_attnum, ord)
+        JOIN pg_catalog.pg_attribute att
+            ON att.attrelid = con.conrelid AND att.attnum = k.attnum
+        JOIN pg_catalog.pg_attribute fatt
+            ON fatt.attrelid = con.confrelid AND fatt.attnum = k.ref_attnum
+        WHERE con.contype = 'f'
+          AND nsp.nspname = %(schema)s
+          AND (%(table)s::text IS NULL OR rel.relname = %(table)s)
+        ORDER BY rel.relname, con.conname, k.ord
+    """
+
+    # Solo columnas clave del índice (no las INCLUDE), en el orden del índice. Los
+    # índices formados solo por expresiones no tienen columnas y se omiten.
+    _INDEXES_QUERY = """
+        SELECT
+            t.relname AS table_name,
+            i.relname AS index_name,
+            a.attname AS column_name,
+            ix.indisunique AS is_unique,
+            ix.indisprimary AS is_primary,
+            am.amname AS index_type
+        FROM pg_catalog.pg_index ix
+        JOIN pg_catalog.pg_class t ON t.oid = ix.indrelid
+        JOIN pg_catalog.pg_namespace n ON n.oid = t.relnamespace
+        JOIN pg_catalog.pg_class i ON i.oid = ix.indexrelid
+        JOIN pg_catalog.pg_am am ON am.oid = i.relam
+        CROSS JOIN LATERAL unnest(ix.indkey::int2[]) WITH ORDINALITY AS k(attnum, ord)
+        JOIN pg_catalog.pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum
+        WHERE n.nspname = %(schema)s
+          AND (%(table)s::text IS NULL OR t.relname = %(table)s)
+          AND k.ord <= ix.indnkeyatts
+        ORDER BY t.relname, i.relname, k.ord
+    """
+
+    _INDEX_TYPES = {
+        "BTREE": IndexType.BTREE,
+        "HASH": IndexType.HASH,
+        "GIN": IndexType.GIN,
+        "GIST": IndexType.GIST,
+        "BRIN": IndexType.BRIN,
+    }
+
+    def _fetch(self, query: str, params: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Ejecuta una query de metadata y devuelve las filas como dicts."""
+        with self.connection.cursor() as cursor:
+            cursor.execute(query, params)
+            return list(cursor.fetchall())
+
+    @staticmethod
+    def _group_rows(
+        rows: List[Dict[str, Any]], table: Optional[str], key: str
+    ) -> Dict[tuple, List[Dict[str, Any]]]:
+        """Agrupa filas por (tabla, key) manteniendo el orden de la query."""
+        grouped: Dict[tuple, List[Dict[str, Any]]] = {}
+        for row in rows:
+            grouped.setdefault((row.get("table_name", table), row[key]), []).append(row)
+        return grouped
+
+    def _resolve_names(self, table_name: str, schema: Optional[str]) -> tuple:
+        schema = schema or self._get_default_schema()
+        validate_metadata_name(table_name, "Table name")
+        validate_metadata_name(schema, "Schema name")
+        return table_name, schema
 
     def get_schemas(self) -> List[str]:
         """Lista todos los schemas (excepto pg_* y information_schema)"""
@@ -154,7 +287,7 @@ class PostgreSQLAdapter(BaseDBAdapter):
     def get_tables(self, schema: Optional[str] = None) -> List[TableMetadata]:
         """Lista todas las tablas de un schema"""
         schema = schema or self._get_default_schema()
-        validate_schema_name(schema)
+        validate_metadata_name(schema, "Schema name")
 
         query = """
             SELECT
@@ -174,10 +307,7 @@ class PostgreSQLAdapter(BaseDBAdapter):
 
                 tables = []
                 for row in results:
-                    # Mapear table_type
-                    if row["table_type"] == "BASE TABLE":
-                        table_type = TableType.BASE_TABLE
-                    elif row["table_type"] == "VIEW":
+                    if row["table_type"] == "VIEW":
                         table_type = TableType.VIEW
                     else:
                         table_type = TableType.BASE_TABLE
@@ -196,388 +326,231 @@ class PostgreSQLAdapter(BaseDBAdapter):
         except Exception as e:
             raise DBQueryExecutionError(f"Error getting tables: {str(e)}")
 
+    @staticmethod
+    def _build_column(row: Dict[str, Any]) -> ColumnMetadata:
+        """Convierte una fila de information_schema.columns en ColumnMetadata."""
+        # Usar udt_name (tipo interno) si data_type es "USER-DEFINED"
+        native_type = row["udt_name"] if row["data_type"] == "USER-DEFINED" else row["data_type"]
+
+        # Detectar auto-increment: SERIAL/BIGSERIAL (nextval en el default) e IDENTITY
+        # (que no tiene default, se marca con is_identity)
+        is_auto_increment = row.get("is_identity") == "YES"
+        if row["column_default"]:
+            default_lower = row["column_default"].lower()
+            is_auto_increment = is_auto_increment or "nextval(" in default_lower
+
+        return ColumnMetadata(
+            name=row["column_name"],
+            data_type=PostgreSQLTypeMapper.map_to_generic(native_type),
+            native_type=native_type.upper(),
+            is_nullable=(row["is_nullable"] == "YES"),
+            is_auto_increment=is_auto_increment,
+            default_value=row["column_default"],
+            max_length=row["character_maximum_length"],
+            numeric_precision=row["numeric_precision"],
+            numeric_scale=row["numeric_scale"],
+            ordinal_position=row["ordinal_position"],
+        )
+
     def get_columns(self, table_name: str, schema: Optional[str] = None) -> List[ColumnMetadata]:
         """Lista todas las columnas de una tabla"""
-        schema = schema or self._get_default_schema()
-        validate_table_name(table_name)
-        validate_schema_name(schema)
-
-        query = """
-            SELECT
-                column_name,
-                data_type,
-                udt_name,
-                is_nullable,
-                column_default,
-                character_maximum_length,
-                numeric_precision,
-                numeric_scale,
-                ordinal_position
-            FROM information_schema.columns
-            WHERE table_name = %s
-              AND table_schema = %s
-            ORDER BY ordinal_position
-        """
+        table_name, schema = self._resolve_names(table_name, schema)
 
         try:
-            with self.connection.cursor() as cursor:
-                cursor.execute(query, (table_name, schema))
-                results = cursor.fetchall()
-
-                if not results:
-                    raise DBMetadataNotFoundError(
-                        f"Table '{schema}.{table_name}' not found or has no columns"
-                    )
-
-                columns = []
-                for row in results:
-                    # Usar udt_name (tipo interno) si data_type es "USER-DEFINED"
-                    native_type = (
-                        row["udt_name"] if row["data_type"] == "USER-DEFINED" else row["data_type"]
-                    )
-
-                    # Mapear a tipo genérico
-                    generic_type = PostgreSQLTypeMapper.map_to_generic(native_type)
-
-                    # Detectar auto-increment (SERIAL, BIGSERIAL, IDENTITY)
-                    is_auto_increment = False
-                    if row["column_default"]:
-                        default_lower = row["column_default"].lower()
-                        is_auto_increment = (
-                            "nextval(" in default_lower or "generated" in default_lower
-                        )
-
-                    columns.append(
-                        ColumnMetadata(
-                            name=row["column_name"],
-                            data_type=generic_type,
-                            native_type=native_type.upper(),
-                            is_nullable=(row["is_nullable"] == "YES"),
-                            is_auto_increment=is_auto_increment,
-                            default_value=row["column_default"],
-                            max_length=row["character_maximum_length"],
-                            numeric_precision=row["numeric_precision"],
-                            numeric_scale=row["numeric_scale"],
-                            ordinal_position=row["ordinal_position"],
-                        )
-                    )
-
-                # Marcar columnas que son PK o FK
-                columns = self._mark_key_columns(columns, table_name, schema)
-
-                return columns
-
-        except DBMetadataNotFoundError:
-            raise
+            results = self._fetch(self._COLUMNS_QUERY, {"schema": schema, "table": table_name})
         except Exception as e:
             raise DBQueryExecutionError(f"Error getting columns: {str(e)}")
+
+        if not results:
+            raise DBMetadataNotFoundError(
+                f"Table '{schema}.{table_name}' not found or has no columns"
+            )
+
+        columns = [self._build_column(row) for row in results]
+
+        # Marcar columnas que son PK o FK
+        return self._mark_key_columns(columns, table_name, schema)
 
     def _mark_key_columns(
         self, columns: List[ColumnMetadata], table_name: str, schema: str
     ) -> List[ColumnMetadata]:
-        """
-        Marca columnas que son PK o FK.
-        Returns a new list with updated column metadata.
-        """
-        # Obtener PKs - note: get_primary_keys expects (schema, table) order
-        pks = self.get_primary_keys(schema, table_name)
-        pk_columns = set()
-        for pk in pks:
-            pk_columns.update(pk.columns)
+        """Marca columnas que son PK o FK (devuelve una lista nueva)."""
+        return self._apply_key_flags(
+            columns,
+            self.get_primary_keys(table_name, schema),
+            self.get_foreign_keys(table_name, schema),
+        )
 
-        # Obtener FKs - note: get_foreign_keys expects (schema, table) order
-        fks = self.get_foreign_keys(schema, table_name)
-        fk_columns = set()
-        for fk in fks:
-            fk_columns.update(fk.columns)
+    def _query_key_constraints(
+        self, contype: str, schema: str, table: Optional[str] = None
+    ) -> Dict[str, List[Any]]:
+        """PKs ('p') o UNIQUE ('u') agrupadas por tabla."""
+        rows = self._fetch(
+            self._KEY_CONSTRAINTS_QUERY, {"contype": contype, "schema": schema, "table": table}
+        )
+        model = PrimaryKeyMetadata if contype == "p" else UniqueConstraintMetadata
 
-        # Crear nuevas instancias con flags actualizados
-        updated_columns = []
-        for col in columns:
-            if col.name in pk_columns or col.name in fk_columns:
-                # Need to update - create new instance with updated fields
-                col_dict = col.model_dump()
-                if col.name in pk_columns:
-                    col_dict["is_primary_key"] = True
-                if col.name in fk_columns:
-                    col_dict["is_foreign_key"] = True
-                updated_columns.append(ColumnMetadata(**col_dict))
-            else:
-                # No changes needed
-                updated_columns.append(col)
+        by_table: Dict[str, List[Any]] = {}
+        for (tname, constraint_name), group in self._group_rows(
+            rows, table, "constraint_name"
+        ).items():
+            by_table.setdefault(tname, []).append(
+                model(
+                    constraint_name=constraint_name,
+                    column_names=[row["column_name"] for row in group],
+                    table_name=tname,
+                    schema=schema,
+                )
+            )
+        return by_table
 
-        return updated_columns
+    def _query_foreign_keys(
+        self, schema: str, table: Optional[str] = None
+    ) -> Dict[str, List[ForeignKeyMetadata]]:
+        """FKs agrupadas por tabla, con columnas locales y referenciadas emparejadas."""
+        rows = self._fetch(self._FOREIGN_KEYS_QUERY, {"schema": schema, "table": table})
 
-    def get_primary_keys(self, schema_or_table: str, table_name: Optional[str] = None) -> List[PrimaryKeyMetadata]:  # type: ignore[override]
-        """
-        Obtiene las primary keys de una tabla.
-        Supports both signatures: (schema, table) and (table, schema=None)
-        """
-        # Support both signatures: (schema, table) and (table, schema=None)
-        if table_name is not None:
-            # Called as (schema, table_name)
-            schema = schema_or_table
-            table = table_name
-        else:
-            # Called as (table_name, schema=None)
-            table = schema_or_table
-            schema = self._get_default_schema()
+        by_table: Dict[str, List[ForeignKeyMetadata]] = {}
+        for (tname, constraint_name), group in self._group_rows(
+            rows, table, "constraint_name"
+        ).items():
+            first = group[0]
+            by_table.setdefault(tname, []).append(
+                ForeignKeyMetadata(
+                    constraint_name=constraint_name,
+                    column_names=[row["column_name"] for row in group],
+                    referenced_table=first["referenced_table"],
+                    referenced_schema=first["referenced_schema"],
+                    referenced_columns=[row["referenced_column"] for row in group],
+                    on_delete=first["delete_rule"],
+                    on_update=first["update_rule"],
+                    table_name=tname,
+                    schema=schema,
+                )
+            )
+        return by_table
 
-        validate_table_name(table)
-        validate_schema_name(schema)
+    def _query_indexes(
+        self, schema: str, table: Optional[str] = None
+    ) -> Dict[str, List[IndexMetadata]]:
+        """Índices agrupados por tabla."""
+        rows = self._fetch(self._INDEXES_QUERY, {"schema": schema, "table": table})
 
-        query = """
-            SELECT
-                tc.constraint_name,
-                kcu.column_name
-            FROM information_schema.table_constraints tc
-            JOIN information_schema.key_column_usage kcu
-                ON tc.constraint_name = kcu.constraint_name
-                AND tc.table_schema = kcu.table_schema
-                AND tc.table_name = kcu.table_name
-            WHERE tc.constraint_type = 'PRIMARY KEY'
-              AND tc.table_name = %s
-              AND tc.table_schema = %s
-            ORDER BY kcu.ordinal_position
-        """
+        by_table: Dict[str, List[IndexMetadata]] = {}
+        for (tname, index_name), group in self._group_rows(rows, table, "index_name").items():
+            first = group[0]
+            by_table.setdefault(tname, []).append(
+                IndexMetadata(
+                    name=index_name,
+                    columns=[row["column_name"] for row in group],
+                    table_name=tname,
+                    schema=schema,
+                    is_unique=first["is_unique"],
+                    is_primary=first["is_primary"],
+                    index_type=self._INDEX_TYPES.get(
+                        first["index_type"].upper(), IndexType.UNKNOWN
+                    ),
+                )
+            )
+        return by_table
 
+    def get_primary_keys(
+        self, table_name: str, schema: Optional[str] = None
+    ) -> List[PrimaryKeyMetadata]:
+        """Obtiene las primary keys de una tabla"""
+        table_name, schema = self._resolve_names(table_name, schema)
         try:
-            with self.connection.cursor() as cursor:
-                cursor.execute(query, (table, schema))
-                results = cursor.fetchall()
-
-                if not results:
-                    return []
-
-                # Agrupar columnas por constraint_name
-                pk_dict: Dict[str, List[str]] = {}
-                for row in results:
-                    constraint_name = row["constraint_name"]
-                    if constraint_name not in pk_dict:
-                        pk_dict[constraint_name] = []
-                    pk_dict[constraint_name].append(row["column_name"])
-
-                # Crear objetos PrimaryKeyMetadata
-                primary_keys = []
-                for constraint_name, columns in pk_dict.items():
-                    primary_keys.append(
-                        PrimaryKeyMetadata(
-                            constraint_name=constraint_name,
-                            column_names=columns,
-                            table_name=table,
-                            schema=schema,
-                        )
-                    )
-
-                return primary_keys
-
+            return self._query_key_constraints("p", schema, table_name).get(table_name, [])
         except Exception as e:
             raise DBQueryExecutionError(f"Error getting primary keys: {str(e)}")
 
-    def get_foreign_keys(self, schema_or_table: str, table_name: Optional[str] = None) -> List[ForeignKeyMetadata]:  # type: ignore[override]
-        """
-        Obtiene las foreign keys de una tabla.
-        Supports both signatures: (schema, table) and (table, schema=None)
-        """
-        # Support both signatures: (schema, table) and (table, schema=None)
-        if table_name is not None:
-            # Called as (schema, table_name)
-            schema = schema_or_table
-            table = table_name
-        else:
-            # Called as (table_name, schema=None)
-            table = schema_or_table
-            schema = self._get_default_schema()
-
-        validate_table_name(table)
-        validate_schema_name(schema)
-
-        query = """
-            SELECT
-                tc.constraint_name,
-                kcu.column_name,
-                ccu.table_schema AS referenced_schema,
-                ccu.table_name AS referenced_table,
-                ccu.column_name AS referenced_column,
-                rc.update_rule,
-                rc.delete_rule
-            FROM information_schema.table_constraints tc
-            JOIN information_schema.key_column_usage kcu
-                ON tc.constraint_name = kcu.constraint_name
-                AND tc.table_schema = kcu.table_schema
-            JOIN information_schema.referential_constraints rc
-                ON tc.constraint_name = rc.constraint_name
-                AND tc.table_schema = rc.constraint_schema
-            JOIN information_schema.constraint_column_usage ccu
-                ON rc.unique_constraint_name = ccu.constraint_name
-                AND rc.unique_constraint_schema = ccu.constraint_schema
-            WHERE tc.constraint_type = 'FOREIGN KEY'
-              AND tc.table_name = %s
-              AND tc.table_schema = %s
-            ORDER BY tc.constraint_name, kcu.ordinal_position
-        """
-
+    def get_foreign_keys(
+        self, table_name: str, schema: Optional[str] = None
+    ) -> List[ForeignKeyMetadata]:
+        """Obtiene las foreign keys de una tabla"""
+        table_name, schema = self._resolve_names(table_name, schema)
         try:
-            with self.connection.cursor() as cursor:
-                cursor.execute(query, (table, schema))
-                results = cursor.fetchall()
-
-                if not results:
-                    return []
-
-                # Agrupar por constraint_name
-                fk_dict = {}
-                for row in results:
-                    constraint_name = row["constraint_name"]
-                    if constraint_name not in fk_dict:
-                        fk_dict[constraint_name] = {
-                            "columns": [],
-                            "referenced_schema": row["referenced_schema"],
-                            "referenced_table": row["referenced_table"],
-                            "referenced_columns": [],
-                            "on_update": row["update_rule"],
-                            "on_delete": row["delete_rule"],
-                        }
-                    fk_dict[constraint_name]["columns"].append(row["column_name"])
-                    fk_dict[constraint_name]["referenced_columns"].append(row["referenced_column"])
-
-                # Crear objetos ForeignKeyMetadata
-                foreign_keys = []
-                for constraint_name, fk_data in fk_dict.items():
-                    foreign_keys.append(
-                        ForeignKeyMetadata(
-                            constraint_name=constraint_name,
-                            column_names=fk_data["columns"],
-                            referenced_table=fk_data["referenced_table"],
-                            referenced_schema=fk_data["referenced_schema"],
-                            referenced_columns=fk_data["referenced_columns"],
-                            on_delete=fk_data["on_delete"],
-                            on_update=fk_data["on_update"],
-                            table_name=table,
-                            schema=schema,
-                        )
-                    )
-
-                return foreign_keys
-
+            return self._query_foreign_keys(schema, table_name).get(table_name, [])
         except Exception as e:
             raise DBQueryExecutionError(f"Error getting foreign keys: {str(e)}")
 
-    def get_indexes(self, schema_or_table: str, table_name: Optional[str] = None) -> List[IndexMetadata]:  # type: ignore[override]
-        """
-        Obtiene los índices de una tabla.
-        Supports both signatures: (schema, table) and (table, schema=None)
-        """
-        # Support both signatures: (schema, table) and (table, schema=None)
-        if table_name is not None:
-            # Called as (schema, table_name)
-            schema = schema_or_table
-            table = table_name
-        else:
-            # Called as (table_name, schema=None)
-            table = schema_or_table
-            schema = self._get_default_schema()
-
-        validate_table_name(table)
-        validate_schema_name(schema)
-
-        query = """
-            SELECT
-                i.relname AS index_name,
-                a.attname AS column_name,
-                ix.indisunique AS is_unique,
-                ix.indisprimary AS is_primary,
-                am.amname AS index_type
-            FROM pg_class t
-            JOIN pg_index ix ON t.oid = ix.indrelid
-            JOIN pg_class i ON i.oid = ix.indexrelid
-            JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = ANY(ix.indkey)
-            JOIN pg_namespace n ON n.oid = t.relnamespace
-            JOIN pg_am am ON am.oid = i.relam
-            WHERE t.relname = %s
-              AND n.nspname = %s
-            ORDER BY i.relname, a.attnum
-        """
-
+    def get_indexes(self, table_name: str, schema: Optional[str] = None) -> List[IndexMetadata]:
+        """Obtiene los índices de una tabla"""
+        table_name, schema = self._resolve_names(table_name, schema)
         try:
-            with self.connection.cursor() as cursor:
-                cursor.execute(query, (table, schema))
-                results = cursor.fetchall()
-
-                if not results:
-                    return []
-
-                # Agrupar por index_name
-                idx_dict = {}
-                for row in results:
-                    index_name = row["index_name"]
-                    if index_name not in idx_dict:
-                        # Mapear tipo de índice
-                        index_type_str = row["index_type"].upper()
-                        if index_type_str == "BTREE":
-                            index_type = IndexType.BTREE
-                        elif index_type_str == "HASH":
-                            index_type = IndexType.HASH
-                        elif index_type_str == "GIN":
-                            index_type = IndexType.GIN
-                        elif index_type_str == "GIST":
-                            index_type = IndexType.GIST
-                        elif index_type_str == "BRIN":
-                            index_type = IndexType.BRIN
-                        else:
-                            index_type = IndexType.UNKNOWN
-
-                        idx_dict[index_name] = {
-                            "columns": [],
-                            "is_unique": row["is_unique"],
-                            "is_primary": row["is_primary"],
-                            "index_type": index_type,
-                        }
-                    idx_dict[index_name]["columns"].append(row["column_name"])
-
-                # Crear objetos IndexMetadata
-                indexes = []
-                for index_name, idx_data in idx_dict.items():
-                    indexes.append(
-                        IndexMetadata(
-                            name=index_name,
-                            columns=idx_data["columns"],
-                            table_name=table,
-                            schema=schema,
-                            is_unique=idx_data["is_unique"],
-                            is_primary=idx_data["is_primary"],
-                            index_type=idx_data["index_type"],
-                        )
-                    )
-
-                return indexes
-
+            return self._query_indexes(schema, table_name).get(table_name, [])
         except Exception as e:
             raise DBQueryExecutionError(f"Error getting indexes: {str(e)}")
 
-    def get_table_statistics(self, schema_or_table: str, table_name: Optional[str] = None) -> TableStatistics:  # type: ignore[override]
+    def get_unique_constraints(
+        self, table_name: str, schema: Optional[str] = None
+    ) -> List[UniqueConstraintMetadata]:
+        """Obtiene las unique constraints de una tabla"""
+        table_name, schema = self._resolve_names(table_name, schema)
+        try:
+            return self._query_key_constraints("u", schema, table_name).get(table_name, [])
+        except Exception as e:
+            raise DBQueryExecutionError(f"Error getting unique constraints: {str(e)}")
+
+    def get_full_schema_metadata(self, schema: Optional[str] = None) -> SchemaMetadata:
+        """
+        Metadata completa de un schema con un número fijo de queries (no N+1).
+
+        Una tabla sin columnas visibles (permisos) se devuelve con columns=[] en lugar
+        de hacer fallar el schema completo.
+        """
+        schema = schema or self._get_default_schema()
+        validate_metadata_name(schema, "Schema name")
+        logger.info(f"Getting full schema metadata for schema '{schema}'")
+
+        tables = self.get_tables(schema)
+
+        try:
+            column_rows = self._fetch(self._COLUMNS_QUERY, {"schema": schema, "table": None})
+            pks_by_table = self._query_key_constraints("p", schema)
+            uniques_by_table = self._query_key_constraints("u", schema)
+            fks_by_table = self._query_foreign_keys(schema)
+            indexes_by_table = self._query_indexes(schema)
+        except Exception as e:
+            raise DBQueryExecutionError(f"Error getting schema metadata: {str(e)}")
+
+        columns_by_table: Dict[str, List[ColumnMetadata]] = {}
+        for row in column_rows:
+            columns_by_table.setdefault(row["table_name"], []).append(self._build_column(row))
+
+        primary_keys: List[PrimaryKeyMetadata] = []
+        foreign_keys: List[ForeignKeyMetadata] = []
+        unique_constraints: List[UniqueConstraintMetadata] = []
+        indexes: List[IndexMetadata] = []
+
+        for table in tables:
+            pks = pks_by_table.get(table.name, [])
+            fks = fks_by_table.get(table.name, [])
+            if table.name not in columns_by_table:
+                logger.warning(f"No visible columns for table '{schema}.{table.name}'")
+            table.columns = self._apply_key_flags(columns_by_table.get(table.name, []), pks, fks)
+
+            primary_keys.extend(pks)
+            foreign_keys.extend(fks)
+            unique_constraints.extend(uniques_by_table.get(table.name, []))
+            indexes.extend(indexes_by_table.get(table.name, []))
+
+        return self._build_schema_metadata(
+            schema, tables, primary_keys, foreign_keys, unique_constraints, indexes
+        )
+
+    def get_table_statistics(
+        self, table_name: str, schema: Optional[str] = None
+    ) -> TableStatistics:
         """
         Obtiene estadísticas de una tabla (aproximadas, NO ejecuta COUNT(*)).
 
         Usa pg_stat_user_tables y pg_class para obtener valores aproximados.
-
-        Args:
-            schema_or_table: Schema name if table_name is provided, otherwise table name
-            table_name: Table name (optional, for compatibility)
         """
-        # Support both signatures: (schema, table) and (table, schema=None)
-        if table_name is not None:
-            # Called as (schema, table_name)
-            schema = schema_or_table
-            table = table_name
-        else:
-            # Called as (table_name, schema=None)
-            table = schema_or_table
-            schema = self._get_default_schema()
+        table_name, schema = self._resolve_names(table_name, schema)
 
-        validate_table_name(table)
-        validate_schema_name(schema)
-
+        # pg_total_relation_size(relid): con schemaname||'.'||relname fallaban los nombres
+        # con mayúsculas o caracteres especiales
         query = """
             SELECT
                 schemaname,
@@ -588,7 +561,7 @@ class PostgreSQLAdapter(BaseDBAdapter):
                 last_autovacuum,
                 last_analyze,
                 last_autoanalyze,
-                pg_total_relation_size(schemaname||'.'||relname) AS total_size
+                pg_total_relation_size(relid) AS total_size
             FROM pg_stat_user_tables
             WHERE relname = %s
               AND schemaname = %s
@@ -596,13 +569,13 @@ class PostgreSQLAdapter(BaseDBAdapter):
 
         try:
             with self.connection.cursor() as cursor:
-                cursor.execute(query, (table, schema))
+                cursor.execute(query, (table_name, schema))
                 result = cursor.fetchone()
 
                 if not result:
                     # Tabla existe pero no tiene estadísticas aún
                     return TableStatistics(
-                        table_name=table,
+                        table_name=table_name,
                         schema=schema,
                         row_count=0,
                         size_bytes=0,
@@ -647,65 +620,9 @@ class PostgreSQLAdapter(BaseDBAdapter):
         """
         return self.get_columns(table_name, schema)
 
-    def get_unique_constraints(
-        self, schema: str, table_name: str
-    ) -> List[UniqueConstraintMetadata]:
-        """Obtiene las unique constraints de una tabla"""
-        validate_table_name(table_name)
-        validate_schema_name(schema)
-
-        query = """
-            SELECT
-                tc.constraint_name,
-                kcu.column_name
-            FROM information_schema.table_constraints tc
-            JOIN information_schema.key_column_usage kcu
-                ON tc.constraint_name = kcu.constraint_name
-                AND tc.table_schema = kcu.table_schema
-                AND tc.table_name = kcu.table_name
-            WHERE tc.constraint_type = 'UNIQUE'
-              AND tc.table_name = %s
-              AND tc.table_schema = %s
-            ORDER BY tc.constraint_name, kcu.ordinal_position
-        """
-
-        try:
-            with self.connection.cursor() as cursor:
-                cursor.execute(query, (table_name, schema))
-                results = cursor.fetchall()
-
-                if not results:
-                    return []
-
-                # Agrupar columnas por constraint_name
-                unique_dict: Dict[str, List[str]] = {}
-                for row in results:
-                    constraint_name = row["constraint_name"]
-                    if constraint_name not in unique_dict:
-                        unique_dict[constraint_name] = []
-                    unique_dict[constraint_name].append(row["column_name"])
-
-                # Crear objetos UniqueConstraintMetadata
-                unique_constraints = []
-                for constraint_name, columns in unique_dict.items():
-                    unique_constraints.append(
-                        UniqueConstraintMetadata(
-                            constraint_name=constraint_name,
-                            column_names=columns,
-                            table_name=table_name,
-                            schema=schema,
-                        )
-                    )
-
-                return unique_constraints
-
-        except Exception as e:
-            raise DBQueryExecutionError(f"Error getting unique constraints: {str(e)}")
-
-    def get_check_constraints(self, schema: str, table_name: str) -> List:
+    def get_check_constraints(self, table_name: str, schema: Optional[str] = None) -> List:
         """Obtiene las check constraints de una tabla"""
-        validate_table_name(table_name)
-        validate_schema_name(schema)
+        table_name, schema = self._resolve_names(table_name, schema)
 
         query = """
             SELECT
@@ -725,64 +642,37 @@ class PostgreSQLAdapter(BaseDBAdapter):
                 cursor.execute(query, (schema, table_name))
                 results = cursor.fetchall()
 
-                # Return as simple objects with constraint_name and check_clause
-                from app.models.db_metadata import CheckConstraintMetadata
-
-                check_constraints = []
-                for row in results:
-                    check_constraints.append(
-                        CheckConstraintMetadata(
-                            constraint_name=row["constraint_name"],
-                            check_clause=row["check_clause"],
-                            table_name=table_name,
-                            schema=schema,
-                        )
+                return [
+                    CheckConstraintMetadata(
+                        constraint_name=row["constraint_name"],
+                        check_clause=row["check_clause"],
+                        table_name=table_name,
+                        schema=schema,
                     )
-
-                return check_constraints
+                    for row in results
+                ]
 
         except Exception as e:
             raise DBQueryExecutionError(f"Error getting check constraints: {str(e)}")
 
-    def get_database_metadata(self):
-        """
-        Obtiene metadata completa de la base de datos.
-        Returns DatabaseMetadata object.
-        """
+    def get_database_metadata(self) -> DatabaseMetadata:
+        """Obtiene metadata completa de la base de datos (todos los schemas)."""
         try:
-            from app.models.db_metadata import DatabaseMetadata, SchemaMetadata
-
-            schemas = self.get_schemas()
-            database_name = self.connection_config["database"]
-
             schema_metadata_list = []
-            for schema_name in schemas:
-                tables = self.get_tables(schema_name)
+            for schema_name in self.get_schemas():
+                schema_obj = self.get_full_schema_metadata(schema_name)
 
-                # Para cada tabla, obtener información completa incluyendo índices
-                for table in tables:
-                    columns = self.get_columns(table.name, schema_name)
-                    table.columns = columns
-
-                    # Cargar índices de la tabla
-                    try:
-                        indexes = self.get_indexes(schema_name, table.name)
-                        # Asignar índices directamente al objeto tabla (usando __dict__ para bypass immutability)
-                        object.__setattr__(table, "_indexes", indexes)
-                    except Exception:
-                        # Si falla, dejar lista vacía
-                        object.__setattr__(table, "_indexes", [])
-
-                # Create SchemaMetadata object
-                schema_obj = SchemaMetadata(
-                    name=schema_name,
-                    tables=tables,
-                )
+                # Exponer los índices también en cada tabla (TableMetadata.indexes)
+                for table in schema_obj.tables:
+                    object.__setattr__(
+                        table,
+                        "_indexes",
+                        [idx for idx in schema_obj.indexes if idx.table_name == table.name],
+                    )
                 schema_metadata_list.append(schema_obj)
 
-            # Create DatabaseMetadata object
             return DatabaseMetadata(
-                name=database_name,
+                name=self.connection_config["database"],
                 dialect="postgresql",
                 schemas=schema_metadata_list,
             )

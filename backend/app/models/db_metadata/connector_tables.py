@@ -8,7 +8,7 @@ Los hashes SHA-256 identifican tablas/columnas en los mappings almacenados.
 
 from typing import List, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class ConnectorColumnResponse(BaseModel):
@@ -41,3 +41,5 @@ class ConnectorTablesResponse(BaseModel):
 
     session_id: str
     tables: List[ConnectorTableResponse]
+    # Schemas que no se pudieron leer (permisos, errores de la BD): sus tablas no aparecen
+    failed_schemas: List[str] = Field(default_factory=list)

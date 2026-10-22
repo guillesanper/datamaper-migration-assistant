@@ -114,6 +114,33 @@ def validate_identifier(name: str, identifier_type: str = "identifier") -> str:
     return name
 
 
+def validate_metadata_name(name: str, identifier_type: str = "identifier") -> str:
+    """
+    Valida un nombre de objeto que se usa en introspección (tabla, schema, BD, servicio).
+
+    A diferencia de validate_identifier(), no restringe el juego de caracteres: los nombres
+    llegan de la propia BD externa (p. ej. "Año", "order-items", "view", "ORCLPDB1.dominio")
+    y las queries de metadata siempre los pasan como parámetros enlazados, nunca
+    interpolados, así que una lista blanca ASCII no protege nada y rompe la introspección.
+    Solo se exige que sea texto no vacío, de longitud razonable y sin caracteres de control.
+
+    Raises:
+        DBValidationError: Si el nombre no es válido
+    """
+    if not isinstance(name, str) or not name.strip():
+        raise DBValidationError(f"{identifier_type} cannot be empty")
+
+    if len(name) > MAX_IDENTIFIER_LENGTH:
+        raise DBValidationError(
+            f"{identifier_type} exceeds maximum length of {MAX_IDENTIFIER_LENGTH} characters"
+        )
+
+    if any(not char.isprintable() for char in name):
+        raise DBValidationError(f"{identifier_type} contains control characters")
+
+    return name
+
+
 def validate_table_name(table_name: str) -> str:
     """
     Valida nombre de tabla.
@@ -335,8 +362,9 @@ def validate_connection_config(config: dict) -> dict:
     if not isinstance(port, int) or port < 1 or port > 65535:
         raise DBValidationError(f"Invalid port: {port}. Must be between 1 and 65535")
 
-    # Validar database name
-    validate_identifier(config["database"], "Database name")
+    # Validar database name (también se usa como service name en Oracle, p. ej.
+    # "ORCLPDB1.dominio"; los drivers lo reciben como parámetro, no interpolado)
+    validate_metadata_name(config["database"], "Database name")
 
     # Validar timeout si está presente
     if "timeout" in config:
