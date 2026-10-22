@@ -4,8 +4,10 @@ Tests unitarios para app.utils.cookies
 Módulo: Firma y verificación de cookies con itsdangerous
 """
 
+import hashlib
 import os
 import sys
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -190,3 +192,33 @@ class TestCookiesIntegration:
             verified = verify_signed_cookie(signed)
 
             assert verified == original_value, f"Failed for value: {original_value}"
+
+
+class TestGetSessionTokenHash:
+    """Tests para la función get_session_token_hash()"""
+
+    @staticmethod
+    def _hash_for(cookies):
+        """Ejecuta el helper con una request mínima: solo lee request.cookies"""
+        from app.utils.cookies import get_session_token_hash
+
+        return get_session_token_hash(SimpleNamespace(cookies=cookies))
+
+    def test_returns_sha256_of_the_signed_token(self):
+        """Test: Cookie firmada válida -> sha256 hex del token en claro"""
+        raw_token = "token-de-sesion-123"
+
+        result = self._hash_for({"session": sign_cookie(raw_token)})
+
+        assert result == hashlib.sha256(raw_token.encode()).hexdigest()
+
+    def test_returns_none_without_cookie(self):
+        """Test: Sin cookie (p. ej. autenticación por API key) -> None"""
+        assert self._hash_for({}) is None
+
+    def test_returns_none_for_invalid_or_tampered_signature(self):
+        """Test: Cookie con firma inválida o manipulada -> None"""
+        signed = sign_cookie("token-de-sesion-123")
+
+        assert self._hash_for({"session": "no.es.valida"}) is None
+        assert self._hash_for({"session": signed[:-1] + "X"}) is None

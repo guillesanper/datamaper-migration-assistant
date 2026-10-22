@@ -20,8 +20,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
-import psycopg2
-from psycopg2.extras import RealDictCursor
+from sqlalchemy import text
 
 from app.utils.db_adapters.base_adapter import BaseDBAdapter
 from utilities.migrations.validators import BackupManager
@@ -84,7 +83,7 @@ class ExecutionService:
         7. Actualizar execution_log con cada paso
 
         Args:
-            db_connection: psycopg2 connection (para migration_executions)
+            db_connection: Session de SQLAlchemy (para migration_executions)
             project_id: UUID del proyecto
             script: Script SQL a ejecutar
             dest_adapter: Adapter conectado a la BD destino
@@ -201,7 +200,7 @@ class ExecutionService:
         Crea registro en migration_executions, retorna execution_id.
 
         Args:
-            db_connection: psycopg2 connection
+            db_connection: Session de SQLAlchemy
             project_id: UUID del proyecto
             script: Script SQL completo
             user_id: UUID del usuario (opcional)
@@ -215,33 +214,34 @@ class ExecutionService:
         script_hash = hashlib.sha256(script.encode("utf-8")).hexdigest()
 
         # Insertar registro
-        cursor = db_connection.cursor()
-        try:
-            cursor.execute(
-                """
+        db_connection.execute(
+            text("""
                 INSERT INTO migration_executions (
                     id, project_id, status, script_hash, created_by,
                     started_at, created_at, updated_at
                 ) VALUES (
-                    %s, %s, 'running', %s, %s,
+                    :id, :project_id, 'running', :script_hash, :created_by,
                     NOW(), NOW(), NOW()
                 )
-            """,
-                (execution_id, project_id, script_hash, user_id),
-            )
+            """),
+            {
+                "id": execution_id,
+                "project_id": project_id,
+                "script_hash": script_hash,
+                "created_by": user_id,
+            },
+        )
 
-            db_connection.commit()
-            logger.info(f"Created execution record: {execution_id}")
-            return execution_id
-        finally:
-            cursor.close()
+        db_connection.commit()
+        logger.info(f"Created execution record: {execution_id}")
+        return execution_id
 
     def _create_backup(self, db_connection, project_id: str, script: Optional[str] = None) -> str:
         """
         Usa BackupManager para crear backup, retorna backup_id.
 
         Args:
-            db_connection: psycopg2 connection
+            db_connection: Session de SQLAlchemy
             project_id: UUID del proyecto
             script: Script SQL (para extraer tablas destino)
 
@@ -538,7 +538,7 @@ class ExecutionService:
         Actualiza registro en migration_executions.
 
         Args:
-            db_connection: psycopg2 connection
+            db_connection: Session de SQLAlchemy
             execution_id: UUID del execution record
             status: Nuevo status ('success', 'failed', 'dry_run_complete', etc.)
             rows_migrated: Total de filas migradas
@@ -551,36 +551,39 @@ class ExecutionService:
         # Convertir execution_log a JSON
         execution_log_json = json.dumps(execution_log) if execution_log else None
 
-        cursor = db_connection.cursor()
-        try:
-            cursor.execute(
-                """
+        db_connection.execute(
+            text("""
                 UPDATE migration_executions
-                SET status = %s,
+                SET status = :status,
                     completed_at = NOW(),
-                    rows_migrated = %s,
-                    backup_id = %s,
-                    execution_log = %s::jsonb,
-                    error_message = %s,
+                    rows_migrated = :rows_migrated,
+                    backup_id = :backup_id,
+                    execution_log = CAST(:execution_log AS jsonb),
+                    error_message = :error_message,
                     updated_at = NOW()
-                WHERE id = %s
-            """,
-                (status, rows_migrated, backup_id, execution_log_json, error_message, execution_id),
-            )
+                WHERE id = :execution_id
+            """),
+            {
+                "status": status,
+                "rows_migrated": rows_migrated,
+                "backup_id": backup_id,
+                "execution_log": execution_log_json,
+                "error_message": error_message,
+                "execution_id": execution_id,
+            },
+        )
 
-            db_connection.commit()
-            logger.info(
-                f"Updated execution record {execution_id}: status={status}, rows={rows_migrated}"
-            )
-        finally:
-            cursor.close()
+        db_connection.commit()
+        logger.info(
+            f"Updated execution record {execution_id}: status={status}, rows={rows_migrated}"
+        )
 
     def get_execution_status(self, db_connection, execution_id: str) -> Dict[str, Any]:
         """
         Consulta estado de una ejecución.
 
         Args:
-            db_connection: psycopg2 connection
+            db_connection: Session de SQLAlchemy
             execution_id: UUID del execution record
 
         Returns:
@@ -597,71 +600,69 @@ class ExecutionService:
         Raises:
             ExecutionServiceError: Si no se encuentra el execution record
         """
-        cursor = db_connection.cursor(cursor_factory=RealDictCursor)
-        try:
-            cursor.execute(
-                """
+        result = (
+            db_connection.execute(
+                text("""
                 SELECT id, project_id, status, rows_migrated,
                        started_at, completed_at, execution_log, error_message
                 FROM migration_executions
-                WHERE id = %s
-            """,
-                (execution_id,),
+                WHERE id = :execution_id
+            """),
+                {"execution_id": execution_id},
+            )
+            .mappings()
+            .fetchone()
+        )
+
+        if not result:
+            raise ExecutionServiceError(f"Execution record {execution_id} not found")
+
+        # Calcular progreso desde el log de ejecución
+        import json
+
+        log = []
+        if result["execution_log"]:
+            log = (
+                json.loads(result["execution_log"])
+                if isinstance(result["execution_log"], str)
+                else result["execution_log"]
             )
 
-            result = cursor.fetchone()
-
-            if not result:
-                raise ExecutionServiceError(f"Execution record {execution_id} not found")
-
-            # Calcular progreso desde el log de ejecución
-            import json
-
-            log = []
-            if result["execution_log"]:
-                log = (
-                    json.loads(result["execution_log"])
-                    if isinstance(result["execution_log"], str)
-                    else result["execution_log"]
-                )
-
-            exec_status = result["status"]
-            if exec_status in ("success", "failed", "dry_run_complete"):
-                progress_percent = 100
+        exec_status = result["status"]
+        if exec_status in ("success", "failed", "dry_run_complete"):
+            progress_percent = 100
+        else:
+            # Extraer total_statements del primer entry (metadata)
+            total_statements = None
+            for entry in log:
+                if entry.get("type") == "metadata":
+                    total_statements = entry.get("total_statements")
+                    break
+            completed = len(
+                [e for e in log if e.get("step", 0) > 0 and e.get("status") == "success"]
+            )
+            if total_statements and total_statements > 0:
+                progress_percent = min(int((completed / total_statements) * 100), 99)
             else:
-                # Extraer total_statements del primer entry (metadata)
-                total_statements = None
-                for entry in log:
-                    if entry.get("type") == "metadata":
-                        total_statements = entry.get("total_statements")
-                        break
-                completed = len(
-                    [e for e in log if e.get("step", 0) > 0 and e.get("status") == "success"]
-                )
-                if total_statements and total_statements > 0:
-                    progress_percent = min(int((completed / total_statements) * 100), 99)
-                else:
-                    progress_percent = 0
+                progress_percent = 0
 
-            # Determinar step actual del execution_log
-            current_step = "Initializing..."
-            if log:
-                step_entries = [e for e in log if e.get("step", 0) > 0]
-                if step_entries:
-                    last_step = step_entries[-1]
-                    current_step = f"Step {last_step['step']}: {last_step.get('table', 'Unknown')}"
+        # Determinar step actual del execution_log
+        current_step = "Initializing..."
+        if log:
+            step_entries = [e for e in log if e.get("step", 0) > 0]
+            if step_entries:
+                last_step = step_entries[-1]
+                current_step = f"Step {last_step['step']}: {last_step.get('table', 'Unknown')}"
 
-            return {
-                "execution_id": result["id"],
-                "status": result["status"],
-                "progress_percent": progress_percent,
-                "rows_migrated": result["rows_migrated"] or 0,
-                "started_at": result["started_at"].isoformat() if result["started_at"] else None,
-                "completed_at": (
-                    result["completed_at"].isoformat() if result["completed_at"] else None
-                ),
-                "current_step": current_step,
-                "error_message": result["error_message"],
-            }
-        finally:
-            cursor.close()
+        return {
+            "execution_id": str(result["id"]),
+            "status": result["status"],
+            "progress_percent": progress_percent,
+            "rows_migrated": result["rows_migrated"] or 0,
+            "started_at": result["started_at"].isoformat() if result["started_at"] else None,
+            "completed_at": (
+                result["completed_at"].isoformat() if result["completed_at"] else None
+            ),
+            "current_step": current_step,
+            "error_message": result["error_message"],
+        }

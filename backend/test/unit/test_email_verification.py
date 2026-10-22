@@ -7,12 +7,16 @@ Tests for email verification utilities:
 - Welcome notification creation
 """
 
+import importlib
+import logging
 import uuid
+from contextlib import ExitStack
 from datetime import datetime, timedelta
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import ANY, MagicMock, call, patch
 
 import pytest
 
+from app.config.security import security_settings
 from app.utils import email_verification
 
 # ============================================================================
@@ -45,6 +49,14 @@ def test_email():
 def test_user_id():
     """Provide a test user ID"""
     return "user_12345"
+
+
+def _configure_smtp_mock(mock_smtp):
+    """Configura el mock de smtplib.SMTP como gestor de contexto y devuelve la conexión simulada"""
+    mock_smtp_instance = MagicMock()
+    mock_smtp.return_value.__enter__ = MagicMock(return_value=mock_smtp_instance)
+    mock_smtp.return_value.__exit__ = MagicMock(return_value=False)
+    return mock_smtp_instance
 
 
 # ============================================================================
@@ -213,6 +225,188 @@ class TestSendVerificationCode:
 
 
 # ============================================================================
+# SMTP SIN AUTENTICACIÓN / SIN STARTTLS (servidor de desarrollo, p. ej. Mailpit)
+#
+# SMTP_USE_STARTTLS y SMTP_TIMEOUT_SECONDS se parchean con create=True porque aún
+# no existen en el módulo; sin ello @patch fallaría con AttributeError en lugar de
+# fallar por la aserción de comportamiento que se quiere comprobar.
+# ============================================================================
+
+
+class TestSendVerificationCodeSmtpModes:
+    """Tests for send_verification_code() with optional credentials and STARTTLS"""
+
+    @patch("app.crud.email_otp_crud.create_otp_orm")
+    @patch("app.utils.email_verification.smtplib.SMTP")
+    @patch("app.utils.email_verification.generate_numeric_code")
+    @patch("app.utils.email_verification.SMTP_USE_STARTTLS", False, create=True)
+    @patch("app.utils.email_verification.SMTP_SERVER", "mailpit")
+    @patch("app.utils.email_verification.SMTP_USER", None)
+    @patch("app.utils.email_verification.SMTP_PASS", None)
+    @patch("app.utils.email_verification.EMAIL_FROM", "no-reply@datamap.local")
+    def test_no_credentials_no_starttls_sends_without_auth(
+        self, mock_generate_code, mock_smtp, mock_create_otp, mock_db, test_email, test_user_id
+    ):
+        """Sin credenciales y sin STARTTLS: no se llama a starttls ni a login, pero sí se envía"""
+        mock_generate_code.return_value = "12345678"
+        mock_create_otp.return_value = {"user_id": test_user_id, "otp_code": "hashed"}
+        mock_smtp_instance = _configure_smtp_mock(mock_smtp)
+
+        email_verification.send_verification_code(mock_db, test_email, test_user_id)
+
+        mock_smtp_instance.starttls.assert_not_called()
+        mock_smtp_instance.login.assert_not_called()
+        mock_smtp_instance.send_message.assert_called_once()
+
+    @patch("app.crud.email_otp_crud.create_otp_orm")
+    @patch("app.utils.email_verification.smtplib.SMTP")
+    @patch("app.utils.email_verification.generate_numeric_code")
+    @patch("app.utils.email_verification.SMTP_USE_STARTTLS", False, create=True)
+    @patch("app.utils.email_verification.SMTP_SERVER", "smtp.example.com")
+    @patch("app.utils.email_verification.SMTP_USER", "user@example.com")
+    @patch("app.utils.email_verification.SMTP_PASS", "password")
+    @patch("app.utils.email_verification.EMAIL_FROM", "noreply@example.com")
+    def test_credentials_without_starttls_logs_in_only(
+        self, mock_generate_code, mock_smtp, mock_create_otp, mock_db, test_email, test_user_id
+    ):
+        """Con credenciales y sin STARTTLS: se llama a login pero no a starttls"""
+        mock_generate_code.return_value = "12345678"
+        mock_create_otp.return_value = {"user_id": test_user_id, "otp_code": "hashed"}
+        mock_smtp_instance = _configure_smtp_mock(mock_smtp)
+
+        email_verification.send_verification_code(mock_db, test_email, test_user_id)
+
+        mock_smtp_instance.starttls.assert_not_called()
+        mock_smtp_instance.login.assert_called_once_with("user@example.com", "password")
+        mock_smtp_instance.send_message.assert_called_once()
+
+    @patch("app.crud.email_otp_crud.create_otp_orm")
+    @patch("app.utils.email_verification.smtplib.SMTP")
+    @patch("app.utils.email_verification.generate_numeric_code")
+    @patch("app.utils.email_verification.SMTP_SERVER", "smtp.example.com")
+    @patch("app.utils.email_verification.SMTP_USER", "user@example.com")
+    @patch("app.utils.email_verification.SMTP_PASS", "password")
+    @patch("app.utils.email_verification.EMAIL_FROM", "noreply@example.com")
+    def test_credentials_default_starttls_keeps_current_behavior(
+        self, mock_generate_code, mock_smtp, mock_create_otp, mock_db, test_email, test_user_id
+    ):
+        """Regresión: con credenciales y STARTTLS por defecto se mantiene la secuencia actual"""
+        mock_generate_code.return_value = "12345678"
+        mock_create_otp.return_value = {"user_id": test_user_id, "otp_code": "hashed"}
+        mock_smtp_instance = _configure_smtp_mock(mock_smtp)
+
+        email_verification.send_verification_code(mock_db, test_email, test_user_id)
+
+        assert mock_smtp_instance.method_calls == [
+            call.ehlo(),
+            call.starttls(),
+            call.ehlo(),
+            call.login("user@example.com", "password"),
+            call.send_message(ANY),
+        ]
+
+    @patch("app.crud.email_otp_crud.create_otp_orm")
+    @patch("app.utils.email_verification.smtplib.SMTP")
+    @patch("app.utils.email_verification.generate_numeric_code")
+    @patch("app.utils.email_verification.SMTP_SERVER", "smtp.example.com")
+    @patch("app.utils.email_verification.SMTP_USER", "user@example.com")
+    @patch("app.utils.email_verification.SMTP_PASS", None)
+    @patch("app.utils.email_verification.EMAIL_FROM", "noreply@example.com")
+    def test_only_user_simulates_sending(
+        self,
+        mock_generate_code,
+        mock_smtp,
+        mock_create_otp,
+        mock_db,
+        test_email,
+        test_user_id,
+        capsys,
+    ):
+        """Con solo usuario (credenciales a medias) se simula el envío y no se abre conexión"""
+        mock_generate_code.return_value = "12345678"
+        mock_create_otp.return_value = {"user_id": test_user_id, "otp_code": "hashed"}
+
+        email_verification.send_verification_code(mock_db, test_email, test_user_id)
+
+        mock_create_otp.assert_called_once()
+        mock_smtp.assert_not_called()
+        captured = capsys.readouterr()
+        assert "simulando envío" in captured.out.lower()
+        assert "12345678" in captured.out
+
+    @patch("app.crud.email_otp_crud.create_otp_orm")
+    @patch("app.utils.email_verification.smtplib.SMTP")
+    @patch("app.utils.email_verification.generate_numeric_code")
+    @patch("app.utils.email_verification.SMTP_SERVER", "smtp.example.com")
+    @patch("app.utils.email_verification.SMTP_USER", None)
+    @patch("app.utils.email_verification.SMTP_PASS", "s3cret-pass")
+    @patch("app.utils.email_verification.EMAIL_FROM", "noreply@example.com")
+    def test_only_password_simulates_sending(
+        self,
+        mock_generate_code,
+        mock_smtp,
+        mock_create_otp,
+        mock_db,
+        test_email,
+        test_user_id,
+        capsys,
+    ):
+        """Con solo contraseña se simula el envío, no se abre conexión y no se imprime la clave"""
+        mock_generate_code.return_value = "12345678"
+        mock_create_otp.return_value = {"user_id": test_user_id, "otp_code": "hashed"}
+
+        email_verification.send_verification_code(mock_db, test_email, test_user_id)
+
+        mock_create_otp.assert_called_once()
+        mock_smtp.assert_not_called()
+        captured = capsys.readouterr()
+        assert "simulando envío" in captured.out.lower()
+        assert "12345678" in captured.out
+        assert "s3cret-pass" not in captured.out
+
+    @patch("app.crud.email_otp_crud.create_otp_orm")
+    @patch("app.utils.email_verification.smtplib.SMTP")
+    @patch("app.utils.email_verification.generate_numeric_code")
+    @patch("app.utils.email_verification.SMTP_SERVER", "smtp.example.com")
+    @patch("app.utils.email_verification.SMTP_USER", "user@example.com")
+    @patch("app.utils.email_verification.SMTP_PASS", "password")
+    @patch("app.utils.email_verification.EMAIL_FROM", "noreply@example.com")
+    def test_smtp_connection_uses_default_timeout(
+        self, mock_generate_code, mock_smtp, mock_create_otp, mock_db, test_email, test_user_id
+    ):
+        """smtplib.SMTP recibe timeout=10 (valor por defecto de SMTP_TIMEOUT_SECONDS)"""
+        mock_generate_code.return_value = "12345678"
+        mock_create_otp.return_value = {"user_id": test_user_id, "otp_code": "hashed"}
+        _configure_smtp_mock(mock_smtp)
+
+        email_verification.send_verification_code(mock_db, test_email, test_user_id)
+
+        mock_smtp.assert_called_once()
+        assert mock_smtp.call_args.kwargs.get("timeout") == 10
+
+    @patch("app.crud.email_otp_crud.create_otp_orm")
+    @patch("app.utils.email_verification.smtplib.SMTP")
+    @patch("app.utils.email_verification.generate_numeric_code")
+    @patch("app.utils.email_verification.SMTP_TIMEOUT_SECONDS", 7, create=True)
+    @patch("app.utils.email_verification.SMTP_SERVER", "smtp.example.com")
+    @patch("app.utils.email_verification.SMTP_USER", "user@example.com")
+    @patch("app.utils.email_verification.SMTP_PASS", "password")
+    @patch("app.utils.email_verification.EMAIL_FROM", "noreply@example.com")
+    def test_smtp_connection_timeout_comes_from_constant(
+        self, mock_generate_code, mock_smtp, mock_create_otp, mock_db, test_email, test_user_id
+    ):
+        """El timeout pasado a smtplib.SMTP se toma de SMTP_TIMEOUT_SECONDS, no está fijado"""
+        mock_generate_code.return_value = "12345678"
+        mock_create_otp.return_value = {"user_id": test_user_id, "otp_code": "hashed"}
+        _configure_smtp_mock(mock_smtp)
+
+        email_verification.send_verification_code(mock_db, test_email, test_user_id)
+
+        mock_smtp.assert_called_once()
+        assert mock_smtp.call_args.kwargs.get("timeout") == 7
+
+
+# ============================================================================
 # CREATE WELCOME NOTIFICATION TESTS
 # ============================================================================
 
@@ -303,6 +497,208 @@ class TestEnvironmentVariables:
         assert SMTP_PORT == 465
 
 
+class TestSmtpUseStarttlsEnvironment:
+    """Tests for SMTP_USE_STARTTLS parsing (valor no reconocido o vacío = STARTTLS activo)"""
+
+    @staticmethod
+    def _reload_with_env(env):
+        """Recarga el módulo con el entorno dado y lo deja recargado con el entorno real"""
+        try:
+            with patch.dict("os.environ", env, clear=True):
+                importlib.reload(email_verification)
+                return email_verification.SMTP_USE_STARTTLS
+        finally:
+            importlib.reload(email_verification)
+
+    def test_smtp_use_starttls_default(self):
+        """Sin la variable definida, STARTTLS está activo (comportamiento histórico)"""
+        assert self._reload_with_env({}) is True
+
+    @pytest.mark.parametrize("value", ["true", "TRUE", "1", "yes", "on"])
+    def test_smtp_use_starttls_enabled_values(self, value):
+        """Valores que activan STARTTLS"""
+        assert self._reload_with_env({"SMTP_USE_STARTTLS": value}) is True
+
+    @pytest.mark.parametrize("value", ["false", "False", "0", "no", "off"])
+    def test_smtp_use_starttls_disabled_values(self, value):
+        """Valores que desactivan STARTTLS"""
+        assert self._reload_with_env({"SMTP_USE_STARTTLS": value}) is False
+
+    @pytest.mark.parametrize("value", ["", "   ", "talvez", "2"])
+    def test_smtp_use_starttls_empty_or_invalid_keeps_default(self, value):
+        """Un valor vacío o no reconocido no desactiva STARTTLS (fallo hacia el lado seguro)"""
+        assert self._reload_with_env({"SMTP_USE_STARTTLS": value}) is True
+
+
+# ============================================================================
+# OTP FUERA DEL LOG (hallazgo 8)
+# ============================================================================
+
+_OTP = "12345678"
+_FULL_SMTP = {
+    "SMTP_SERVER": "smtp.example.com",
+    "SMTP_USER": "user@example.com",
+    "SMTP_PASS": "password",
+    "EMAIL_FROM": "noreply@example.com",
+}
+
+# Escenarios en los que el código no llega al usuario: configuración SMTP que se simula
+# (sin servidor, credenciales a medias) y error real al enviar.
+_UNDELIVERED_SCENARIOS = {
+    "smtp_not_configured": {**_FULL_SMTP, "SMTP_SERVER": None},
+    "only_user": {**_FULL_SMTP, "SMTP_PASS": None},
+    "only_password": {**_FULL_SMTP, "SMTP_USER": None},
+    "smtp_error": dict(_FULL_SMTP),
+    # El servidor devuelve en su error datos del mensaje: ni el destinatario ni el código
+    # pueden acabar en el log a través del texto de la excepción.
+    "smtp_error_echoes_message": dict(_FULL_SMTP),
+}
+
+
+def _send_code(scenario, development, mock_db, to_email, user_id):
+    """Ejecuta send_verification_code en un escenario y entorno; devuelve el mock del OTP"""
+    smtp_config = _UNDELIVERED_SCENARIOS.get(scenario, _FULL_SMTP)
+    with ExitStack() as stack:
+        mock_create_otp = stack.enter_context(patch("app.crud.email_otp_crud.create_otp_orm"))
+        stack.enter_context(
+            patch("app.utils.email_verification.generate_numeric_code", return_value=_OTP)
+        )
+        for name, value in smtp_config.items():
+            stack.enter_context(patch.object(email_verification, name, value))
+        stack.enter_context(patch.object(security_settings, "DEVELOPMENT_MODE", development))
+        mock_smtp = stack.enter_context(patch("app.utils.email_verification.smtplib.SMTP"))
+        _configure_smtp_mock(mock_smtp)
+        if scenario == "smtp_error":
+            mock_smtp.side_effect = Exception("SMTP connection failed")
+        elif scenario == "smtp_error_echoes_message":
+            mock_smtp.side_effect = Exception(f"550 rechazado {to_email} contenido {_OTP}")
+
+        email_verification.send_verification_code(mock_db, to_email, user_id)
+    return mock_create_otp
+
+
+class TestOtpNotLoggedOutsideDevelopment:
+    """El OTP en claro solo puede salir por stdout/log en desarrollo; fuera de él, nunca"""
+
+    @pytest.fixture(autouse=True)
+    def _enable_module_logger(self, monkeypatch):
+        """
+        El conftest ejecuta `alembic upgrade head` en el proceso con alembic.ini y su
+        fileConfig deshabilita los loggers ya creados; sin esto caplog no vería nada y los
+        tests de ausencia pasarían en vacío. En producción alembic corre en otro proceso.
+        """
+        monkeypatch.setattr(email_verification.logger, "disabled", False)
+
+    @pytest.mark.parametrize("scenario", list(_UNDELIVERED_SCENARIOS))
+    def test_code_absent_from_output_and_logs_in_production(
+        self, scenario, mock_db, test_email, test_user_id, capsys, caplog
+    ):
+        """Fuera de desarrollo el código no aparece ni en stdout, ni en stderr ni en logging"""
+        caplog.set_level(logging.DEBUG)
+
+        _send_code(scenario, False, mock_db, test_email, test_user_id)
+
+        captured = capsys.readouterr()
+        assert _OTP not in captured.out
+        assert _OTP not in captured.err
+        assert _OTP not in caplog.text
+
+    @pytest.mark.parametrize("scenario", list(_UNDELIVERED_SCENARIOS))
+    def test_failure_is_logged_with_masked_email_in_production(
+        self, scenario, mock_db, test_email, test_user_id, capsys, caplog
+    ):
+        """El fallo se registra (nivel ERROR) con el email enmascarado y el OTP queda guardado"""
+        caplog.set_level(logging.DEBUG)
+
+        mock_create_otp = _send_code(scenario, False, mock_db, test_email, test_user_id)
+
+        errors = [r for r in caplog.records if r.levelno >= logging.ERROR]
+        assert errors, "el fallo de entrega debe quedar registrado"
+        logged = "\n".join(r.getMessage() for r in errors)
+        assert test_email not in logged
+        assert test_email not in capsys.readouterr().out
+        assert "@example.com" in logged  # dominio visible para diagnosticar
+        mock_create_otp.assert_called_once()
+
+    @pytest.mark.parametrize("scenario", list(_UNDELIVERED_SCENARIOS))
+    def test_code_still_printed_in_development(
+        self, scenario, mock_db, test_email, test_user_id, capsys
+    ):
+        """En desarrollo se conserva el fallback: el código sale por stdout (como hasta ahora)"""
+        _send_code(scenario, True, mock_db, test_email, test_user_id)
+
+        assert _OTP in capsys.readouterr().out
+
+    @pytest.mark.parametrize("development", [True, False])
+    def test_successful_delivery_never_logs_code(
+        self, development, mock_db, test_email, test_user_id, capsys, caplog
+    ):
+        """Con envío correcto el código viaja solo en el correo, en cualquier entorno"""
+        caplog.set_level(logging.DEBUG)
+
+        _send_code("delivered", development, mock_db, test_email, test_user_id)
+
+        captured = capsys.readouterr()
+        assert _OTP not in captured.out + captured.err + caplog.text
+
+    @pytest.mark.parametrize("development", [True, False])
+    def test_fallback_helper_follows_development_mode(self, development):
+        """El helper lee DEVELOPMENT_MODE en tiempo de llamada (parcheable en tests)"""
+        with patch.object(security_settings, "DEVELOPMENT_MODE", development):
+            assert email_verification._log_code_fallback_allowed() is development
+
+
+class TestSmtpStartupWarning:
+    """validate_security_config avisa en producción si los códigos no podrán entregarse"""
+
+    @pytest.fixture
+    def production(self, monkeypatch):
+        """Producción con secretos válidos: la validación no debe elevar errores críticos"""
+        monkeypatch.setattr(security_settings, "DEVELOPMENT_MODE", False)
+        monkeypatch.setattr(security_settings, "CSRF_SECRET_KEY", "csrf-secret-de-prueba")
+        monkeypatch.setattr(security_settings, "IP_HASH_SALT", "ip-salt-de-prueba")
+        return monkeypatch
+
+    @pytest.mark.parametrize(
+        "smtp_server,email_from",
+        [(None, None), ("smtp.example.com", None), (None, "noreply@example.com")],
+    )
+    def test_warns_when_smtp_incomplete_in_production(
+        self, production, capsys, smtp_server, email_from
+    ):
+        from app.config.security import validate_security_config
+
+        for name, value in (("SMTP_SERVER", smtp_server), ("EMAIL_FROM", email_from)):
+            if value is None:
+                production.delenv(name, raising=False)
+            else:
+                production.setenv(name, value)
+
+        assert validate_security_config() is True  # es un aviso, no un error crítico
+        assert "no se entregarán" in capsys.readouterr().out
+
+    def test_no_warning_when_smtp_configured(self, production, capsys):
+        from app.config.security import validate_security_config
+
+        production.setenv("SMTP_SERVER", "smtp.example.com")
+        production.setenv("EMAIL_FROM", "noreply@example.com")
+
+        validate_security_config()
+
+        assert "no se entregarán" not in capsys.readouterr().out
+
+    def test_no_warning_in_development(self, production, capsys):
+        from app.config.security import validate_security_config
+
+        production.setattr(security_settings, "DEVELOPMENT_MODE", True)
+        production.delenv("SMTP_SERVER", raising=False)
+        production.delenv("EMAIL_FROM", raising=False)
+
+        validate_security_config()
+
+        assert "no se entregarán" not in capsys.readouterr().out
+
+
 # ============================================================================
 # INTEGRATION TESTS
 # ============================================================================
@@ -355,3 +751,220 @@ class TestEmailVerificationIntegration:
         assert call_kwargs["recipient_id"] == test_user_id
         assert call_kwargs["notification_kind"] == "system"
         assert call_kwargs["title"] == "¡Bienvenido!"
+
+
+# ============================================================================
+# EMISIÓN Y ENTREGA SEPARADAS (hallazgo 1)
+# ============================================================================
+
+
+class TestIssueAndDeliverSplit:
+    """
+    issue_verification_code (con BD) y deliver_verification_email (sin BD) por separado, para
+    poder entregar el correo en segundo plano; send_verification_code los compone.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _enable_module_logger(self, monkeypatch):
+        """Ver TestOtpNotLoggedOutsideDevelopment: el arnés deshabilita los loggers"""
+        monkeypatch.setattr(email_verification.logger, "disabled", False)
+
+    def test_issue_returns_the_code_and_stores_it_without_sending(self, mock_db, test_user_id):
+        from app.utils.email_verification import issue_verification_code
+
+        with ExitStack() as stack:
+            mock_create_otp = stack.enter_context(patch("app.crud.email_otp_crud.create_otp_orm"))
+            stack.enter_context(
+                patch("app.utils.email_verification.generate_numeric_code", return_value=_OTP)
+            )
+            mock_smtp = stack.enter_context(patch("app.utils.email_verification.smtplib.SMTP"))
+
+            code = issue_verification_code(mock_db, test_user_id)
+
+        assert code == _OTP
+        mock_create_otp.assert_called_once_with(
+            mock_db, user_id=test_user_id, otp_code=_OTP, expires_in_minutes=10
+        )
+        mock_smtp.assert_not_called()
+
+    def test_deliver_takes_no_database_session(self):
+        """La tarea de fondo no puede recibir db: la sesión se cierra al terminar la petición"""
+        import inspect
+
+        from app.utils.email_verification import deliver_verification_email
+
+        assert list(inspect.signature(deliver_verification_email).parameters) == [
+            "to_email",
+            "code",
+        ]
+
+    def test_deliver_sends_the_email_with_the_given_code(self, test_email):
+        from app.utils.email_verification import deliver_verification_email
+
+        with ExitStack() as stack:
+            for name, value in _FULL_SMTP.items():
+                stack.enter_context(patch.object(email_verification, name, value))
+            mock_smtp = stack.enter_context(patch("app.utils.email_verification.smtplib.SMTP"))
+            connection = _configure_smtp_mock(mock_smtp)
+
+            result = deliver_verification_email(test_email, _OTP)
+
+        assert result is None
+        connection.send_message.assert_called_once()
+        message = connection.send_message.call_args[0][0]
+        assert message["To"] == test_email
+        assert _OTP in message.get_content()
+
+    @pytest.mark.parametrize("scenario", list(_UNDELIVERED_SCENARIOS))
+    @pytest.mark.parametrize("development", [True, False])
+    def test_deliver_keeps_the_otp_policy(self, scenario, development, test_email, capsys, caplog):
+        """Mismo criterio que send_verification_code: el código solo sale en desarrollo"""
+        from app.utils.email_verification import deliver_verification_email
+
+        caplog.set_level(logging.DEBUG)
+        smtp_config = _UNDELIVERED_SCENARIOS[scenario]
+        with ExitStack() as stack:
+            for name, value in smtp_config.items():
+                stack.enter_context(patch.object(email_verification, name, value))
+            stack.enter_context(patch.object(security_settings, "DEVELOPMENT_MODE", development))
+            mock_smtp = stack.enter_context(patch("app.utils.email_verification.smtplib.SMTP"))
+            _configure_smtp_mock(mock_smtp)
+            if scenario == "smtp_error":
+                mock_smtp.side_effect = Exception("SMTP connection failed")
+            elif scenario == "smtp_error_echoes_message":
+                mock_smtp.side_effect = Exception(f"550 rechazado {test_email} contenido {_OTP}")
+
+            deliver_verification_email(test_email, _OTP)
+
+        captured = capsys.readouterr()
+        if development:
+            assert _OTP in captured.out
+        else:
+            assert _OTP not in captured.out
+            assert _OTP not in captured.err
+            assert _OTP not in caplog.text
+
+    def test_send_verification_code_is_issue_plus_deliver(self, mock_db, test_email, test_user_id):
+        """Compatibilidad: misma firma, mismo orden, no devuelve el código"""
+        manager = MagicMock()
+        with (
+            patch.object(
+                email_verification, "issue_verification_code", return_value=_OTP
+            ) as mock_issue,
+            patch.object(email_verification, "deliver_verification_email") as mock_deliver,
+        ):
+            manager.attach_mock(mock_issue, "issue")
+            manager.attach_mock(mock_deliver, "deliver")
+
+            result = email_verification.send_verification_code(mock_db, test_email, test_user_id)
+
+        assert result is None
+        assert manager.mock_calls == [
+            call.issue(mock_db, test_user_id),
+            call.deliver(test_email, _OTP),
+        ]
+
+    def test_send_verification_code_uses_the_injected_deliver(
+        self, mock_db, test_email, test_user_id
+    ):
+        deliver = MagicMock()
+        with (
+            patch.object(email_verification, "issue_verification_code", return_value=_OTP),
+            patch.object(email_verification, "deliver_verification_email") as mock_default,
+        ):
+            email_verification.send_verification_code(
+                mock_db, test_email, test_user_id, deliver=deliver
+            )
+
+        deliver.assert_called_once_with(test_email, _OTP)
+        mock_default.assert_not_called()
+
+
+# ============================================================================
+# CORREO «YA TIENES UNA CUENTA» (R3: register uniforme)
+# ============================================================================
+
+
+class TestAccountExistsNotice:
+    """
+    deliver_account_exists_email avisa a quien intentó registrarse con un email que ya tiene
+    cuenta verificada. Misma política que el código: sin BD, sin propagar errores y sin
+    email completo en los logs; además no lleva ningún secreto (ni código ni enlaces).
+    """
+
+    @pytest.fixture(autouse=True)
+    def _enable_module_logger(self, monkeypatch):
+        """Ver TestOtpNotLoggedOutsideDevelopment: el arnés deshabilita los loggers"""
+        monkeypatch.setattr(email_verification.logger, "disabled", False)
+
+    def _deliver(self, to_email, smtp_config, *, side_effect=None):
+        from app.utils.email_verification import deliver_account_exists_email
+
+        with ExitStack() as stack:
+            for name, value in smtp_config.items():
+                stack.enter_context(patch.object(email_verification, name, value))
+            mock_smtp = stack.enter_context(patch("app.utils.email_verification.smtplib.SMTP"))
+            connection = _configure_smtp_mock(mock_smtp)
+            if side_effect is not None:
+                mock_smtp.side_effect = side_effect
+            result = deliver_account_exists_email(to_email)
+        return result, connection
+
+    def test_takes_only_the_recipient(self):
+        """Es una tarea de fondo: ni sesión de BD ni código"""
+        import inspect
+
+        from app.utils.email_verification import deliver_account_exists_email
+
+        assert list(inspect.signature(deliver_account_exists_email).parameters) == ["to_email"]
+
+    def test_sends_a_notice_without_code_or_links(self, test_email):
+        result, connection = self._deliver(test_email, _FULL_SMTP)
+
+        assert result is None
+        connection.send_message.assert_called_once()
+        message = connection.send_message.call_args[0][0]
+        assert message["To"] == test_email
+        assert message["Subject"] == "Ya tienes una cuenta en DataMap Assistant"
+        content = message.get_content()
+        assert "http" not in content
+        assert "código de verificación" not in content.lower()
+
+    def test_does_not_use_the_verification_subject(self, test_email):
+        """El aviso no se confunde con un código (el frontend no debe pedirlo)"""
+        _, connection = self._deliver(test_email, _FULL_SMTP)
+
+        message = connection.send_message.call_args[0][0]
+        assert message["Subject"] != "Tu código de verificación"
+
+    @pytest.mark.parametrize("scenario", list(_UNDELIVERED_SCENARIOS))
+    @pytest.mark.parametrize("development", [True, False])
+    def test_failures_are_logged_with_a_masked_email_and_never_raised(
+        self, scenario, development, test_email, capsys, caplog
+    ):
+        caplog.set_level(logging.DEBUG)
+        side_effect = None
+        if scenario == "smtp_error":
+            side_effect = Exception("SMTP connection failed")
+        elif scenario == "smtp_error_echoes_message":
+            side_effect = Exception(f"550 rechazado {test_email}")
+
+        with patch.object(security_settings, "DEVELOPMENT_MODE", development):
+            result, _ = self._deliver(
+                test_email, _UNDELIVERED_SCENARIOS[scenario], side_effect=side_effect
+            )
+
+        assert result is None
+        errors = [r for r in caplog.records if r.levelno >= logging.ERROR]
+        assert errors, "el fallo de entrega debe quedar registrado"
+        logged = "\n".join(r.getMessage() for r in errors)
+        assert test_email not in logged
+        assert test_email not in capsys.readouterr().out
+        assert "@example.com" in logged
+
+    def test_success_logs_nothing_with_the_full_email(self, test_email, capsys, caplog):
+        caplog.set_level(logging.DEBUG)
+
+        self._deliver(test_email, _FULL_SMTP)
+
+        assert test_email not in capsys.readouterr().out + caplog.text

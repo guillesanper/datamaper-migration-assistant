@@ -1,5 +1,7 @@
 # Plan de Implementación: Sistema Enterprise de Generación y Ejecución de Scripts de Migración
 
+> Documento histórico: el SQL citado está archivado en `backend/docs/legacy_sql/`; el esquema sale de Alembic.
+
 **Fecha de creación**: 2025-01-16
 **Estado**: Pendiente de implementación
 **Prioridad**: Alta - Crítico para demos y lanzamiento
@@ -131,7 +133,7 @@ Convertir DataMap en una plataforma production-ready de migraciones de bases de 
 ## 🎯 Infraestructura Existente (Aprovechar)
 
 ✅ **TYPE_COMPATIBILITY_MATRIX** (`validators.py`) - 60+ reglas de compatibilidad listas
-✅ **BackupManager** (`rollback.py`) - Sistema de backup production-ready
+✅ **BackupManager** (`validators.py`) - Sistema de backup production-ready
 ✅ **TypeCompatibilityService** - Capa de servicio completa
 ✅ **4 Database Adapters** - PostgreSQL, MySQL, SQL Server, Oracle funcionando
 ✅ **Encriptación AES-256-GCM** - Sistema completo de encriptación
@@ -275,7 +277,7 @@ CREATE TABLE migration_executions (
 );
 ```
 
-**Migration file**: `backend/utilities/migrations/006_migration_execution_tables.sql`
+**Migration file**: `backend/docs/legacy_sql/migrations/006_migration_execution_tables.sql`
 
 **Test file**: `backend/test/unit/services/test_execution_service.py`
 
@@ -479,7 +481,7 @@ ALTER TABLE migration_executions ADD COLUMN checkpoint_data JSONB;
 7. `backend/app/services/parallel_execution_service.py`
 8. `backend/app/services/performance_monitor_service.py`
 9. `backend/app/routers/migration.py`
-10. `backend/utilities/migrations/006_migration_execution_tables.sql`
+10. `backend/docs/legacy_sql/migrations/006_migration_execution_tables.sql`
 11. `backend/utilities/migrations/007_validation_reports.sql`
 12. `backend/utilities/migrations/run_migration_006.py`
 13. `backend/utilities/migrations/run_migration_007.py`

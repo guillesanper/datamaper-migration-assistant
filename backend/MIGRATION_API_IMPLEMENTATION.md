@@ -1,14 +1,16 @@
 # Migration API Implementation
 
+> Documento histórico: el SQL citado está archivado en `backend/docs/legacy_sql/`; el esquema sale de Alembic.
+
 ## ✅ Status: COMPLETO
 
 Este documento describe la implementación de los endpoints de Migration API para DataMap, que permiten generación y ejecución de scripts SQL para migraciones de datos.
 
 ## Cambios Realizados
 
-- ✅ Router creado en `backend/app/routers/migration.py` (sin SQLAlchemy, usa psycopg2)
+- ✅ Router creado en `backend/app/routers/migration.py` (usa una Session de SQLAlchemy; `ExecutionService` y `BackupManager` también)
 - ✅ Tests de integración creados en `backend/test/integration/test_migration_api.py`
-- ✅ Schema SQL para tablas en `backend/utilities/migrations/002_migration_tables.sql`
+- ✅ Schema SQL para tablas en `backend/docs/legacy_sql/migrations/002_migration_tables.sql`
 - ✅ Router registrado en `backend/main.py`
 - ✅ Sintaxis validada y tests corregidos
 
@@ -43,7 +45,7 @@ Comprehensive integration tests covering:
 - ✅ test_get_dependency_graph
 - ✅ test_get_dependency_graph_empty_project
 
-### 3. Database Migration: `backend/utilities/migrations/002_migration_tables.sql`
+### 3. Database Migration: `backend/docs/legacy_sql/migrations/002_migration_tables.sql`
 
 SQL schema for two new tables:
 
@@ -315,13 +317,14 @@ curl -X GET "http://localhost:8000/api/projects/{project_id}/migration/dependenc
 
 ## Database Setup
 
-Run the migration to create required tables:
+The required tables (`migration_scripts`, `migration_executions`) are part of the Alembic schema. Create them with:
 
 ```bash
-psql -U your_user -d your_database -f backend/utilities/migrations/002_migration_tables.sql
+cd backend
+alembic upgrade head
 ```
 
-Or if using automated migrations, the tables will be created automatically.
+With Docker Compose the `backend` service already runs this on startup.
 
 ## Testing
 

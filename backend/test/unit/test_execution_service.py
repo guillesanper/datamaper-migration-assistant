@@ -23,7 +23,7 @@ from utilities.migrations.validators import BackupManager
 
 @pytest.fixture
 def mock_db_connection():
-    """Mock de psycopg2 connection"""
+    """Mock de la Session de SQLAlchemy"""
     connection = Mock()
     mock_cursor = Mock()
     mock_cursor.execute = Mock()

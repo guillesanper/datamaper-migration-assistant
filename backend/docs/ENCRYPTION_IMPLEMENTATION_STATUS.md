@@ -1,5 +1,7 @@
 # 📋 Estado de Implementación del Sistema de Cifrado
 
+> Documento histórico: el SQL citado está archivado en `backend/docs/legacy_sql/`; el esquema sale de Alembic. El script `utilities/migrate_to_encryption.py` citado se eliminó (lo sustituye `EncryptionService.encrypt_existing_project_data`).
+
 **Última actualización**: 2025-01-31
 **Versión**: Nivel 1 - Cifrado por defecto con master key + Sistema de Sesiones
 **Estado general**: ✅ **COMPLETADO - Sistema funcional con sesiones de 3 horas**
@@ -18,13 +20,13 @@
 - ✅ `backend/requirements.txt` - Dependencia argon2-cffi agregada
 
 ### 3. Base de Datos
-- ✅ `backend/migrations/003_encryption_infrastructure.sql` - Migración completa
+- ✅ `backend/docs/legacy_sql/migrations/003_encryption_infrastructure.sql` - Migración completa
 - ✅ Tabla `project_encryption` definida
 - ✅ Columnas cifradas en 5 tablas: `tables`, `columns`, `mappings`, `entity_versions`, `comments`
 - ✅ Funciones SQL auxiliares
 
 ### 4. Scripts de Migración
-- ✅ `backend/utilities/migrate_to_encryption.py` - Script completo con dry-run
+- ✅ `backend/utilities/migrate_to_encryption.py` - Script completo con dry-run (eliminado)
 
 ### 5. Servicios
 - ✅ `backend/app/services/encryption_service.py` - Lógica de negocio
@@ -81,7 +83,7 @@ app.include_router(encryption.router)
 
 ### 2. ✅ Ejecutar Migración SQL - COMPLETADO
 
-**Migración**: `backend/migrations/003_encryption_infrastructure.sql`
+**Migración**: `backend/docs/legacy_sql/migrations/003_encryption_infrastructure.sql`
 
 **Estado**: ✅ Ejecutada por el usuario
 
@@ -220,11 +222,9 @@ backend/
 │       ├── encryption.py ✅ (nuevo)
 │       ├── encryption_session_cache.py ✅ (nuevo - cache de sesiones)
 │       └── security_logger.py (usado en encryption.py)
-├── migrations/
+├── docs/legacy_sql/migrations/
 │   ├── 003_encryption_infrastructure.sql ✅ (ejecutado)
 │   └── 002_*.sql
-├── utilities/
-│   └── migrate_to_encryption.py ✅ (nuevo)
 ├── main.py ✅ (middleware registrado)
 ├── requirements.txt ✅ (argon2-cffi incluido)
 └── .env ✅ (variables de ENCRYPTION configuradas)
@@ -501,7 +501,7 @@ Necesito ayuda con: [tu tarea específica]
 2. **Estado actual**: Este archivo
 3. **Implementación core**: `backend/app/utils/encryption.py`
 4. **Ejemplo de integración**: Ver sección "4. Actualizar CRUDs Existentes" arriba
-5. **Schema de BD**: `backend/migrations/003_encryption_infrastructure.sql`
+5. **Schema de BD**: `backend/docs/legacy_sql/migrations/003_encryption_infrastructure.sql` (hoy en `backend/alembic/versions/0001_baseline.py`)
 
 ---
 

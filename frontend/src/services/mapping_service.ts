@@ -1,5 +1,6 @@
 // src/services/mapping_service.ts
 import { apiService } from './api.service';
+import type { ApiErrorResponse } from './api.service';
 import type {
   Mapping,
   TableWithColumns,
@@ -71,9 +72,24 @@ class MappingService {
     });
 
     if (!response.ok) {
-      const errorText = await response.text();
-      console.error('Import error response:', errorText);
-      throw new Error(`Import failed: ${response.status} ${response.statusText}`);
+      // Conservar código/params/detail del backend: sin ellos el modal solo podría
+      // mostrar "Import failed: 400 Bad Request" y el usuario no sabría qué corregir.
+      const body = await response.json().catch(() => null);
+      const detail = body?.detail;
+      const hasCode = detail && typeof detail === 'object' && 'code' in detail;
+      const code: string | undefined = hasCode ? detail.code : undefined;
+
+      const apiError: ApiErrorResponse = {
+        success: false,
+        code: code ?? 'request_failed',
+        error: code ?? 'request_failed',
+        params: hasCode ? detail.params : undefined,
+        // Solo texto del servidor (ya traducido por el backend); vacío si no hay.
+        message: typeof detail === 'string' ? detail : '',
+        status: response.status,
+      };
+      console.error('Import error response:', body);
+      throw apiError;
     }
 
     return await response.json();

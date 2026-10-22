@@ -19,10 +19,16 @@ from app.crud.subscription_crud import (
 from app.crud.subscription_crud import get_subscription_plans_orm as get_subscription_plans
 from app.crud.subscription_crud import get_user_subscription_orm as get_user_subscription
 from app.crud.subscription_crud import update_subscription_orm as update_subscription
-from app.database.database import get_db
+from app.database import session as db_session_module
 
 # Configurar logging
 logger = logging.getLogger(__name__)
+
+
+def get_db():
+    """Abre una sesión SQLAlchemy nueva; quien la llama debe cerrarla (db.close())."""
+    return db_session_module.SessionLocal()
+
 
 # URL base para redirects
 BASE_URL = os.getenv("BASE_URL", "http://localhost:8000")

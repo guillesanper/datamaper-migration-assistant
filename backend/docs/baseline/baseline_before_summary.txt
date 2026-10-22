@@ -1,0 +1,59 @@
+total=1546 passed=1495 failed=19 error=31 skipped=1
+
+## failed
+test.integration.test_csrf_protection_middleware.TestCSRFMiddleware::test_csrf_middleware_missing_token  | AssertionError: assert 'inválido o expirado' in {'code': 'security.csrf_token_invalid'}
+test.integration.test_db_connection_flow.TestConnectionValidation::test_mysql_connection_invalid_credentials  | AssertionError: assert 'connection' == 'authentication'
+test.integration.test_db_connection_flow.TestConnectionValidation::test_mysql_connection_success  | assert False is True
+test.integration.test_db_connection_flow.TestConnectionValidation::test_postgres_connection_invalid_credentials  | AssertionError: assert 'connection' == 'authentication'
+test.integration.test_db_connection_flow.TestConnectionValidation::test_postgres_connection_success  | AssertionError: assert False is True
+test.integration.test_db_connection_flow.TestSessionExpiration::test_expired_session_removed_from_list  | app.services.db_connection_service.DBConnectionServiceError: Connection test failed: Cannot connect to PostgreSQL: connection to server at "localhost" (::1), po
+test.integration.test_db_connection_flow.TestSessionExpiration::test_session_expires_after_ttl  | app.services.db_connection_service.DBConnectionServiceError: Connection test failed: Cannot connect to PostgreSQL: connection to server at "localhost" (::1), po
+test.integration.test_db_connection_flow.TestSessionLifecycle::test_create_session_mysql  | app.services.db_connection_service.DBConnectionServiceError: Connection test failed: Cannot connect to MySQL: (2003, "Can't connect to MySQL server on 'localhos
+test.integration.test_db_connection_flow.TestSessionLifecycle::test_create_session_postgres  | app.services.db_connection_service.DBConnectionServiceError: Connection test failed: Cannot connect to PostgreSQL: connection to server at "localhost" (::1), po
+test.integration.test_db_connection_flow.TestSessionLifecycle::test_credential_encryption  | app.services.db_connection_service.DBConnectionServiceError: Connection test failed: Cannot connect to PostgreSQL: connection to server at "localhost" (::1), po
+test.integration.test_db_connection_flow.TestSessionLifecycle::test_delete_session  | app.services.db_connection_service.DBConnectionServiceError: Connection test failed: Cannot connect to PostgreSQL: connection to server at "localhost" (::1), po
+test.integration.test_db_connection_flow.TestSessionLifecycle::test_list_user_sessions  | app.services.db_connection_service.DBConnectionServiceError: Connection test failed: Cannot connect to PostgreSQL: connection to server at "localhost" (::1), po
+test.integration.test_db_connection_flow.TestSessionLifecycle::test_refresh_session  | app.services.db_connection_service.DBConnectionServiceError: Connection test failed: Cannot connect to PostgreSQL: connection to server at "localhost" (::1), po
+test.integration.test_db_connection_flow.TestSessionLifecycle::test_ttl_validation  | app.services.db_connection_service.DBConnectionServiceError: Connection test failed: Cannot connect to PostgreSQL: connection to server at "localhost" (::1), po
+test.integration.test_tags_crud_integration.TestTagsCrudIntegration::test_create_and_get_tag  | AssertionError: assert 'nuevo_48b661e3' == 'testuser'
+test.integration.test_tags_crud_integration.TestTagsCrudIntegration::test_get_tags_by_project  | AssertionError: assert 'nuevo_48b661e3' == 'testuser'
+test.unit.test_project_service.TestDeleteProject::test_delete_project_cannot_delete_with_members  | Failed: DID NOT RAISE <class 'fastapi.exceptions.HTTPException'>
+test.unit.test_schema_service.TestValidateTableName::test_validate_table_name_empty  | AssertionError: assert 'obligatorio' in {'code': 'schema.table_name_required'}
+test.unit.test_schema_service.TestValidateTableType::test_validate_table_type_invalid  | AssertionError: assert 'inválido' in {'code': 'schema.table_type_invalid'}
+
+## error
+test.integration.test_db_connection_flow.TestMySQLIntrospection::test_get_database_metadata  | failed on setup with "app.utils.db_adapters.exceptions.DBConnectionError: Cannot connect to MySQL: (2003, "Can't connect to MySQL server on 'localhost' ([Errno 
+test.integration.test_db_connection_flow.TestMySQLIntrospection::test_get_foreign_keys  | failed on setup with "app.utils.db_adapters.exceptions.DBConnectionError: Cannot connect to MySQL: (2003, "Can't connect to MySQL server on 'localhost' ([Errno 
+test.integration.test_db_connection_flow.TestMySQLIntrospection::test_get_table_columns_user_profiles  | failed on setup with "app.utils.db_adapters.exceptions.DBConnectionError: Cannot connect to MySQL: (2003, "Can't connect to MySQL server on 'localhost' ([Errno 
+test.integration.test_db_connection_flow.TestMySQLIntrospection::test_get_table_columns_users  | failed on setup with "app.utils.db_adapters.exceptions.DBConnectionError: Cannot connect to MySQL: (2003, "Can't connect to MySQL server on 'localhost' ([Errno 
+test.integration.test_db_connection_flow.TestMySQLIntrospection::test_list_tables  | failed on setup with "app.utils.db_adapters.exceptions.DBConnectionError: Cannot connect to MySQL: (2003, "Can't connect to MySQL server on 'localhost' ([Errno 
+test.integration.test_db_connection_flow.TestPostgreSQLIntrospection::test_get_check_constraints  | failed on setup with "app.utils.db_adapters.exceptions.DBConnectionError: Cannot connect to PostgreSQL: connection to server at "localhost" (::1), port 5433 fai
+test.integration.test_db_connection_flow.TestPostgreSQLIntrospection::test_get_database_metadata  | failed on setup with "app.utils.db_adapters.exceptions.DBConnectionError: Cannot connect to PostgreSQL: connection to server at "localhost" (::1), port 5433 fai
+test.integration.test_db_connection_flow.TestPostgreSQLIntrospection::test_get_foreign_keys  | failed on setup with "app.utils.db_adapters.exceptions.DBConnectionError: Cannot connect to PostgreSQL: connection to server at "localhost" (::1), port 5433 fai
+test.integration.test_db_connection_flow.TestPostgreSQLIntrospection::test_get_indexes  | failed on setup with "app.utils.db_adapters.exceptions.DBConnectionError: Cannot connect to PostgreSQL: connection to server at "localhost" (::1), port 5433 fai
+test.integration.test_db_connection_flow.TestPostgreSQLIntrospection::test_get_primary_keys  | failed on setup with "app.utils.db_adapters.exceptions.DBConnectionError: Cannot connect to PostgreSQL: connection to server at "localhost" (::1), port 5433 fai
+test.integration.test_db_connection_flow.TestPostgreSQLIntrospection::test_get_table_columns_audit_logs  | failed on setup with "app.utils.db_adapters.exceptions.DBConnectionError: Cannot connect to PostgreSQL: connection to server at "localhost" (::1), port 5433 fai
+test.integration.test_db_connection_flow.TestPostgreSQLIntrospection::test_get_table_columns_users  | failed on setup with "app.utils.db_adapters.exceptions.DBConnectionError: Cannot connect to PostgreSQL: connection to server at "localhost" (::1), port 5433 fai
+test.integration.test_db_connection_flow.TestPostgreSQLIntrospection::test_get_table_statistics  | failed on setup with "app.utils.db_adapters.exceptions.DBConnectionError: Cannot connect to PostgreSQL: connection to server at "localhost" (::1), port 5433 fai
+test.integration.test_db_connection_flow.TestPostgreSQLIntrospection::test_get_unique_constraints  | failed on setup with "app.utils.db_adapters.exceptions.DBConnectionError: Cannot connect to PostgreSQL: connection to server at "localhost" (::1), port 5433 fai
+test.integration.test_db_connection_flow.TestPostgreSQLIntrospection::test_list_schemas  | failed on setup with "app.utils.db_adapters.exceptions.DBConnectionError: Cannot connect to PostgreSQL: connection to server at "localhost" (::1), port 5433 fai
+test.integration.test_db_connection_flow.TestPostgreSQLIntrospection::test_list_tables_public_schema  | failed on setup with "app.utils.db_adapters.exceptions.DBConnectionError: Cannot connect to PostgreSQL: connection to server at "localhost" (::1), port 5433 fai
+test.integration.test_db_connection_flow.TestPostgreSQLIntrospection::test_list_tables_sales_schema  | failed on setup with "app.utils.db_adapters.exceptions.DBConnectionError: Cannot connect to PostgreSQL: connection to server at "localhost" (::1), port 5433 fai
+test.integration.test_migration_api.TestDependencyGraph::test_get_dependency_graph  | failed on setup with "ModuleNotFoundError: No module named 'conftest'"
+test.integration.test_migration_api.TestDependencyGraph::test_get_dependency_graph_empty_project  | failed on setup with "ModuleNotFoundError: No module named 'conftest'"
+test.integration.test_migration_api.TestExecuteMigration::test_execute_migration_dry_run  | failed on setup with "ModuleNotFoundError: No module named 'conftest'"
+test.integration.test_migration_api.TestExecuteMigration::test_execute_migration_unauthorized  | failed on setup with "ModuleNotFoundError: No module named 'conftest'"
+test.integration.test_migration_api.TestExecuteMigration::test_execute_migration_with_script_id  | failed on setup with "ModuleNotFoundError: No module named 'conftest'"
+test.integration.test_migration_api.TestGenerateScript::test_generate_script_invalid_dialect  | failed on setup with "ModuleNotFoundError: No module named 'conftest'"
+test.integration.test_migration_api.TestGenerateScript::test_generate_script_project_not_found  | failed on setup with "ModuleNotFoundError: No module named 'conftest'"
+test.integration.test_migration_api.TestGenerateScript::test_generate_script_success  | failed on setup with "ModuleNotFoundError: No module named 'conftest'"
+test.integration.test_migration_api.TestGenerateScript::test_generate_script_unauthorized  | failed on setup with "ModuleNotFoundError: No module named 'conftest'"
+test.integration.test_migration_api.TestGetExecutionStatus::test_get_execution_status  | failed on setup with "ModuleNotFoundError: No module named 'conftest'"
+test.integration.test_migration_api.TestGetExecutionStatus::test_get_execution_status_not_found  | failed on setup with "ModuleNotFoundError: No module named 'conftest'"
+test.integration.test_migration_api.TestListExecutions::test_list_executions  | failed on setup with "ModuleNotFoundError: No module named 'conftest'"
+test.integration.test_migration_api.TestListExecutions::test_list_executions_pagination  | failed on setup with "ModuleNotFoundError: No module named 'conftest'"
+test.integration.test_migration_api.TestListExecutions::test_list_executions_with_filters  | failed on setup with "ModuleNotFoundError: No module named 'conftest'"
+
+## skipped
+test.integration.test_mappings_crud_with_encryption::test_update_mapping_with_transformation_logic  | update_mapping_transformation no está implementada aún
+

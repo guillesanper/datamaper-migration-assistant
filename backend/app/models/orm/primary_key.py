@@ -17,7 +17,7 @@ Esta tabla reemplaza el campo is_primary de la tabla columns como fuente de verd
 import uuid
 from typing import Any
 
-from sqlalchemy import CheckConstraint, Column, DateTime, ForeignKey, Index, String
+from sqlalchemy import CheckConstraint, Column, DateTime, ForeignKey, Index, String, text
 from sqlalchemy.dialects.postgresql import ARRAY, UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -58,7 +58,9 @@ class PrimaryKeyConstraint(Base):
 
     __tablename__ = "primary_key_constraints"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id = Column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, server_default=text("gen_random_uuid()")
+    )
 
     # Relación con tabla
     table_id = Column(

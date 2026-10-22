@@ -5,7 +5,6 @@ from typing import Annotated, List, Literal, Optional
 
 from fastapi import APIRouter, Body, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, RedirectResponse
-from psycopg2.extras import Json, RealDictCursor
 from pydantic import (
     UUID4,
     AnyUrl,

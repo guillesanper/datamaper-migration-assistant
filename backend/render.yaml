@@ -1,93 +1,122 @@
+# NOTA: este fichero vive en backend/, no en la raíz del repo. Al crear el Blueprint en
+# Render hay que indicar "Blueprint Path" = backend/render.yaml (por defecto Render busca
+# render.yaml en la raíz). Los servicios frontend/landing usan rutas desde la raíz del repo
+# y el backend usa rootDir: backend.
+#
+# SECRETOS: este fichero NO contiene valores sensibles.
+#   - sync: false      -> Render pide el valor en el panel al crear el Blueprint
+#   - generateValue    -> Render genera un valor aleatorio (base64, 256 bits) una sola vez
 services:
   - type: web
     name: datamap-backend
     runtime: python
+    rootDir: backend  # buildCommand/startCommand se ejecutan desde backend/ (donde está alembic.ini)
     buildCommand: pip install -r requirements.txt
-    startCommand: sh start.sh
+    # Aplica las migraciones y arranca gunicorn; si alembic falla (&&) el servicio no arranca.
+    # Workers/timeout/reciclado salen de las variables definidas más abajo. Sin --reload (solo desarrollo).
+    startCommand: alembic upgrade head && gunicorn main:app -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT --workers $WEB_CONCURRENCY --timeout $GUNICORN_TIMEOUT --max-requests $GUNICORN_MAX_REQUESTS
+    healthCheckPath: /health
     envVars:
       # === CONFIGURACIÓN GENERAL ===
       - key: ENV
         value: production
+      - key: PYTHON_VERSION  # Render usa por defecto una versión más nueva; el proyecto se prueba con 3.11
+        value: "3.11.17"
       - key: SECRET_KEY
-        value: tu_clave_secreta_super_segura_aqui_12345
-      - key: BASE_URL
-        value: https://your-app-name.onrender.com
-      
+        generateValue: true
+      - key: BASE_URL  # URL pública que usa Stripe para success/cancel (rellenar en el panel)
+        sync: false
+
       # === BASE DE DATOS POSTGRESQL ===
+      # Leídas por app/database/session.py y alembic/env.py. Se rellenan en el panel
+      # (BD externa); si se define un recurso `databases:` en este blueprint, usar fromDatabase.
       - key: DB_HOST
-        value: your-production-db-hostname
+        sync: false
       - key: DB_PORT
-        value: 5432
+        value: "5432"
       - key: DB_NAME
         value: datamap
       - key: DB_USER
-        value: your-production-db-user
+        sync: false
       - key: DB_PASSWORD
-        value: your-production-db-password
-      
+        sync: false
+
       # === STRIPE CONFIGURACIÓN ===
-      - key: STRIPE_PUBLISHABLE_KEY
-        value: pk_test_51RxOgbFjhQs3O1fhkoJPGAKeCHAOs6c6FFfg881GOULNPjKkjVHUYXXiKwPQErXlvneXq4Hj8qy4EeSJroOq9Adh00Ei6s3rNn
+      # (STRIPE_PUBLISHABLE_KEY no la lee el backend, se retira)
       - key: STRIPE_SECRET_KEY
-        value: sk_test_51RxOgbFjhQs3O1fhqKimkDnywhvQjm8Ehc2ZS4eTnQ61xN1szzADbqYKkZDQuulBhmxUzRpFgDCgSvJgTrM4akwB00XhzqP7V1
+        sync: false
       - key: STRIPE_WEBHOOK_SECRET
-        value: whsec_your_webhook_secret
-      
+        sync: false
+      - key: STRIPE_PRICE_ID_MONTHLY
+        sync: false
+
       # === CONFIGURACIÓN SMTP ===
       - key: EMAIL_FROM
         value: alerts@sesecpro.es
       - key: SMTP_SERVER
         value: smtp.protonmail.ch
       - key: SMTP_PORT
-        value: 587
+        value: "587"
       - key: SMTP_USER
-        value: alerts@sesecpro.es
+        sync: false
       - key: SMTP_PASS
-        value: VPU989XP32GUWACD
+        sync: false
 
       # === CONFIGURACIÓN CSRF ===
       - key: CSRF_SECRET_KEY
-        value: csrf_prod_key_2025_render_alejandro_app_secure_random_string_xyz789
+        generateValue: true
       - key: CSRF_TOKEN_EXPIRY
-        value: 3600  
+        value: "3600"
       - key: DISABLE_CSRF_IN_DEV
-        value: false  # Mantener CSRF habilitado en producción
-     
+        value: "false"  # Mantener CSRF habilitado en producción
+
       # === CONFIGURACIÓN DE SEGURIDAD ===
       - key: HASH_IP_ADDRESSES
-        value: true
+        value: "true"
       - key: IP_HASH_SALT
-        value: tu_ip_hash_salt_super_seguro_aqui_12345
+        generateValue: true
 
       # === REDIS - ENCRYPTION SESSION CACHE ===
-      # Render.com proporciona REDIS_URL automáticamente cuando agregas Redis interno
+      # REDIS_URL la lee app/utils/redis_client.py (con redis:// no hace falta REDIS_SSL;
+      # el TLS se decide por el esquema rediss://). REDIS_HOST/REDIS_PORT los lee solo
+      # app/routers/db_connections.py, que no usa REDIS_URL.
       - key: REDIS_URL
         fromService:
           type: redis
           name: datamap-redis
           property: connectionString
-      - key: REDIS_SSL
-        value: true
+      - key: REDIS_HOST
+        fromService:
+          type: redis
+          name: datamap-redis
+          property: host
+      - key: REDIS_PORT
+        fromService:
+          type: redis
+          name: datamap-redis
+          property: port
 
       # === ENCRYPTION SESSION CONFIGURATION ===
       - key: ENCRYPTION_ENABLED
-        value: true
+        value: "true"
+      - key: ENCRYPTION_MASTER_KEY  # 32 bytes en base64 (p. ej. `openssl rand -base64 32`); guardar copia: sin ella no se descifran las credenciales guardadas
+        sync: false
       - key: ENCRYPTION_SESSION_TIMEOUT
-        value: 10800  # 3 horas
+        value: "10800"  # 3 horas
       - key: ARGON2_MEMORY_COST
-        value: 65536  # 64 MiB
+        value: "65536"  # 64 MiB
       - key: ARGON2_TIME_COST
-        value: 3
+        value: "3"
       - key: ARGON2_PARALLELISM
-        value: 1
+        value: "1"
 
       # === GUNICORN CONFIGURATION ===
       - key: WEB_CONCURRENCY
-        value: 2  # Workers (Render maneja esto automáticamente)
+        value: "2"  # Workers (--workers en startCommand)
       - key: GUNICORN_TIMEOUT
-        value: 120
+        value: "120"
       - key: GUNICORN_MAX_REQUESTS
-        value: 1000
+        value: "1000"
 
   # === FRONTEND (React + Vite) ===
   - type: web

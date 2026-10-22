@@ -27,6 +27,12 @@ class ErrorCode:
     FILENAME_REQUIRED       = "mapping.filename_required"
     UNSUPPORTED_FORMAT      = "mapping.unsupported_format"
 
+    # Mappings — importación de estructura (JSON no cumple el esquema)
+    IMPORT_MISSING_FIELD    = "mapping.import_missing_field"    # params: field, where
+    IMPORT_UNKNOWN_FIELD    = "mapping.import_unknown_field"    # params: field, where
+    IMPORT_INVALID_VALUE    = "mapping.import_invalid_value"    # params: field, where, value, allowed
+    IMPORT_SCHEMA_INVALID   = "mapping.import_schema_invalid"   # params: where, reason
+
     # Billing
     BILLING_NOT_OWNER       = "billing.not_owner"
     BILLING_INVALID_EMAIL   = "billing.invalid_email"

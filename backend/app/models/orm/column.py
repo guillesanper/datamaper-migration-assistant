@@ -20,7 +20,7 @@ La lógica de cifrado/descifrado se maneja en la capa de servicio.
 
 import uuid
 
-from sqlalchemy import Boolean, CheckConstraint, Column, DateTime, ForeignKey, Index, String, Text
+from sqlalchemy import Boolean, CheckConstraint, Column, DateTime, ForeignKey, Index, String, Text, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -71,7 +71,7 @@ class TableColumn(Base):
     data_type_nonce = Column(Text)
 
     # Flag de encriptación
-    is_encrypted = Column(Boolean, default=False, nullable=False, index=True)
+    is_encrypted = Column(Boolean, default=False, server_default=text("false"), nullable=False, index=True)
 
     # Tipo de tabla (redundante con table.type, pero útil para queries)
     table_type = Column(String(50), nullable=False)  # 'origin' o 'destination'

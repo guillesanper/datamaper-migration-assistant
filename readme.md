@@ -40,6 +40,33 @@ docker-compose logs -f
 docker-compose down
 ```
 
+Servicios que levanta [`docker-compose.yml`](docker-compose.yml):
+
+| Servicio | Contenedor | Puerto en el host | Uso |
+|----------|------------|-------------------|-----|
+| backend | `datamap-backend` | 8000 | API FastAPI con hot reload |
+| postgres | `datamap-postgres` | 5432 | Base de datos |
+| redis | `datamap-redis` | 6379 | Caché de sesiones |
+| mailpit | `datamap-mailpit` | 8025 (web), 1025 (SMTP) | Servidor SMTP de **desarrollo**, solo en `127.0.0.1` |
+
+#### Correos de verificación en desarrollo (Mailpit)
+
+En desarrollo el backend envía los correos a Mailpit, que no los reenvía a ningún buzón real: se leen en **http://localhost:8025**.
+
+1. `docker-compose up -d`
+2. Registrar un usuario (`POST /api/auth/register`, o desde el frontend).
+3. Abrir http://localhost:8025 y copiar el código de 8 caracteres del correo «Tu código de verificación» (válido 10 minutos).
+4. Introducirlo en la verificación (`POST /api/auth/verify-code`).
+
+Cosas a tener en cuenta:
+
+- Los correos son **efímeros**: Mailpit no tiene volumen y los pierde al parar, reiniciar o recrear el contenedor.
+- El correo se entrega **en segundo plano**: el `201` del registro no garantiza que haya salido; el resultado del envío aparece en el log del backend unos segundos después.
+- Si el envío falla (Mailpit parado, SMTP mal configurado) el registro no falla, pero el código solo aparece en el log del backend: `docker logs datamap-backend` (línea «Código de verificación para …»). Esto ocurre **solo con `ENV=development`** (lo que usa el compose): fuera de desarrollo el código no se imprime nunca.
+- Un reenvío (`POST /api/auth/resend-code`) sustituye al código anterior y solo envía a cuentas sin verificar. El código de recuperación de contraseña se pide con `POST /api/auth/forgot` (API: el frontend aún no tiene pantalla) y se usa en `POST /api/auth/reset`.
+- Cada código admite 5 comprobaciones erróneas (`OTP_MAX_ATTEMPTS`); al llegar se invalida y hay que pedir otro. Las rutas de autenticación tienen límite de peticiones (429 con `Retry-After`): en desarrollo es permisivo; valores y variables en [Autenticación: límites y variables](#autenticación-límites-y-variables).
+- Mailpit solo es para desarrollo; en producción se usa un SMTP real (ver [`backend/docs/DEPLOYMENT_GUIDE.md`](backend/docs/DEPLOYMENT_GUIDE.md)).
+
 ## 🏗️ Arquitectura
 
 ```
@@ -60,6 +87,8 @@ docker-compose down
     │  :5432   │   │  :6379   │
     └──────────┘   └──────────┘
 ```
+
+En desarrollo con Docker Compose, el backend también envía los correos (códigos de verificación) a Mailpit (SMTP `:1025`, interfaz web `:8025`).
 
 ## 🧪 Testing
 
@@ -245,8 +274,38 @@ ENCRYPTION_ENABLED=true
 
 # External Services
 STRIPE_SECRET_KEY=your-stripe-key
-EMAIL_FROM=your-email@example.com
+
+# Email (desarrollo: Mailpit, ver «Correos de verificación en desarrollo»)
+EMAIL_FROM=no-reply@datamap.local
+# Con el backend fuera de Docker: SMTP_SERVER=localhost
+SMTP_SERVER=mailpit
+SMTP_PORT=1025
+SMTP_USER=
+SMTP_PASS=
+SMTP_USE_STARTTLS=false
 ```
+
+Con Docker Compose basta con no definir las variables `SMTP_*`: el compose ya usa `mailpit:1025` (no pongas `SMTP_SERVER=localhost` en el `.env` que lee el compose, porque dentro del contenedor `localhost` es el propio backend). Con el backend fuera de Docker, levanta solo Mailpit (`docker-compose up -d mailpit`) y exporta `SMTP_SERVER=localhost` en tu shell: `load_dotenv` no pisa las variables ya definidas.
+
+Para un SMTP real (Gmail o ProtonMail con contraseña de aplicación) usa `SMTP_PORT=587`, `SMTP_USER`, `SMTP_PASS` y **`SMTP_USE_STARTTLS=true`**: el valor por defecto del compose es `false`. Los detalles están en [`.env.example`](.env.example) y en [`backend/docs/DEPLOYMENT_GUIDE.md`](backend/docs/DEPLOYMENT_GUIDE.md).
+
+### Autenticación: límites y variables
+
+Valores por defecto del código (todas opcionales; la tabla completa, la lectura de los logs y el troubleshooting están en [`backend/docs/DEPLOYMENT_GUIDE.md`](backend/docs/DEPLOYMENT_GUIDE.md#autenticación-límites-intentos-y-respuestas)):
+
+| Variable | Por defecto | Efecto |
+|----------|-------------|--------|
+| `ENV` | sin definir = producción | Solo `development`/`dev`/`debug` activan el modo desarrollo (límites permisivos, OTP en el log si el envío falla) |
+| `SESSION_LIFETIME_HOURS` | `24` | Vigencia de la sesión y de su cookie |
+| `OTP_MAX_ATTEMPTS` | `5` | Comprobaciones erróneas por código |
+| `TRUSTED_PROXY_HOPS` | `0` | Proxies de confianza delante de la app: IP del cliente = entrada N-ésima desde la derecha de `X-Forwarded-For` (con `0`, la IP del socket) |
+| `RATE_LIMIT_<RUTA>_ATTEMPTS` / `_WINDOW` (s) | `LOGIN` 5/900, `REGISTER` 3/3600, `VERIFY` 10/3600, `RESEND` 3/600, `RESET` 5/3600, `FORGOT` 3/3600 | Límite por IP y por ruta; `register`, `resend-code` y `forgot` cuentan además por email. En `login` cuentan solo los **fallos** de credenciales (los logins correctos, el 423 y el 403 no) |
+
+> ⚠️ **Despliegue**: `TRUSTED_PROXY_HOPS` no está en `backend/render.yaml` y su valor correcto **no se ha medido** (aún no hay despliegue). Con `0` detrás de un proxy todos los usuarios comparten IP y los límites por IP bloquean el sitio entero tras unos pocos intentos (5 logins fallidos en 15 minutos entre todos). La aplicación lo avisa (al arrancar en Render con `0` y con una línea de log `TRUSTED_PROXY_HOPS=0 pero llegan peticiones con X-Forwarded-For`, enmascarada y una vez por worker) y esa línea sirve para calibrarlo: el procedimiento está en la [guía](backend/docs/DEPLOYMENT_GUIDE.md#trusted_proxy_hops). Ante la duda, un valor menor es lo seguro: uno mayor que los proxies reales permite suplantar la IP.
+
+Respuestas: `verify-code` y `reset` devuelven siempre `400 «Código inválido o expirado»`, y `resend-code` / `forgot` un `200` idéntico exista o no la cuenta (el motivo real queda en `security_logs`). `register` responde `201` con el mismo cuerpo exista o no una cuenta con ese email (a quien ya la tiene le llega un aviso «Ya tienes una cuenta», o un código nuevo si no la había verificado); solo el `409 username_taken` por un username ocupado es explícito. Riesgos residuales (enumeración de usernames y pre-secuestro de una cuenta sin verificar): ver la [guía](backend/docs/DEPLOYMENT_GUIDE.md#riesgos-residuales-decisiones-explícitas-no-defectos-pendientes-de-arreglar-en-esta-fase).
+
+La migración `0003` (`email_otps.failed_attempts`) la aplica el compose al arrancar el backend; si la BD de desarrollo sigue en `0002`: `docker-compose exec backend alembic upgrade head`.
 
 ### Frontend (`.env`)
 ```env

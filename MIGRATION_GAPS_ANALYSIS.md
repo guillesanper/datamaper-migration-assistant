@@ -533,8 +533,7 @@ def bulk_create_mappings_orm(db, mappings: List[Dict]) -> List[Dict[str, Any]]:
 Estos archivos tienen queries directos LEGÍTIMOS que NO deben migrarse:
 
 - ✅ `backend/app/utils/db_adapters/*.py` - Adapters de diferentes BD (postgres, mysql, oracle, sqlserver)
-- ✅ `backend/app/crud/*.py` - Funciones antiguas (psycopg2) - mantener para compatibilidad
-- ✅ Tests que prueban funciones antiguas
+- ✅ `backend/app/crud/*.py` - Solo quedan las funciones `*_orm` (SQLAlchemy); las variantes psycopg2 se retiraron
 
 ### Patrones de Refactorización
 

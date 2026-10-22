@@ -32,7 +32,6 @@ def test_full_encryption_workflow(e2e_encryption_setup):
     test_user = e2e_encryption_setup["user"]
     test_project = e2e_encryption_setup["project"]
     clean_db = e2e_encryption_setup["db"]
-    raw_db = e2e_encryption_setup["raw_db"]
     project_id = test_project["id"]
     passphrase = "SecurePass123!@#"
 
@@ -63,14 +62,14 @@ def test_full_encryption_workflow(e2e_encryption_setup):
     # 4. CREAR DATOS: Crear tabla encriptada
     encryption_key = EncryptionService.get_encryption_key(clean_db, project_id, passphrase)
 
-    table = schemas_crud.create_table(
-        raw_db, project_id, "users", "origin", test_user["id"], encryption_key
+    table = schemas_crud.create_table_orm(
+        clean_db, project_id, "users", "origin", test_user["id"], encryption_key
     )
     assert table["is_encrypted"] is True
 
     # 5. CREAR COLUMNAS: Crear columnas encriptadas
-    col1 = schemas_crud.create_column(
-        raw_db,
+    col1 = schemas_crud.create_column_orm(
+        clean_db,
         table["id"],
         "id",
         "INTEGER",
@@ -81,8 +80,8 @@ def test_full_encryption_workflow(e2e_encryption_setup):
         test_user["id"],
         encryption_key,
     )
-    col2 = schemas_crud.create_column(
-        raw_db,
+    col2 = schemas_crud.create_column_orm(
+        clean_db,
         table["id"],
         "email",
         "VARCHAR(255)",
@@ -98,8 +97,8 @@ def test_full_encryption_workflow(e2e_encryption_setup):
     assert col2["is_encrypted"] is True
 
     # 6. CREAR MAPPING: Crear mapping encriptado
-    mapping = mappings_crud.create_mapping(
-        raw_db,
+    mapping = mappings_crud.create_mapping_orm(
+        clean_db,
         project_id,
         "users",
         "id",
@@ -111,14 +110,14 @@ def test_full_encryption_workflow(e2e_encryption_setup):
     assert mapping["is_encrypted"] is True
 
     # 7. LEER DATOS: Verificar que se pueden leer encriptados
-    tables = schemas_crud.get_tables_by_project(raw_db, project_id, "origin", encryption_key)
+    tables = schemas_crud.get_tables_by_project_orm(clean_db, project_id, "origin", encryption_key)
     assert len(tables) == 1
     assert tables[0]["name"] == "users"
 
-    columns = schemas_crud.get_columns_by_table(raw_db, table["id"], encryption_key)
+    columns = schemas_crud.get_columns_by_table_orm(clean_db, table["id"], encryption_key)
     assert len(columns) == 2
 
-    mappings = mappings_crud.get_mappings_by_project(raw_db, project_id, encryption_key)
+    mappings = mappings_crud.get_mappings_by_project_orm(clean_db, project_id, encryption_key)
     assert len(mappings) == 1
 
     # 8. STATS: Verificar estadísticas
@@ -137,7 +136,7 @@ def test_full_flow_without_session_fails(e2e_encryption_setup):
     authenticated_client = e2e_encryption_setup["client"]
     test_user = e2e_encryption_setup["user"]
     test_project = e2e_encryption_setup["project"]
-    raw_db = e2e_encryption_setup["raw_db"]
+    clean_db = e2e_encryption_setup["db"]
     project_id = test_project["id"]
     passphrase = "SecurePass123!@#"
 
@@ -152,8 +151,8 @@ def test_full_flow_without_session_fails(e2e_encryption_setup):
     from fastapi import HTTPException
 
     with pytest.raises(HTTPException) as exc_info:
-        schemas_crud.create_table(
-            raw_db, project_id, "users", "origin", test_user["id"], encryption_key=None
+        schemas_crud.create_table_orm(
+            clean_db, project_id, "users", "origin", test_user["id"], encryption_key=None
         )
 
     assert exc_info.value.status_code == 403
@@ -208,7 +207,6 @@ def test_disable_enable_workflow(e2e_encryption_setup):
     test_user = e2e_encryption_setup["user"]
     test_project = e2e_encryption_setup["project"]
     clean_db = e2e_encryption_setup["db"]
-    raw_db = e2e_encryption_setup["raw_db"]
     project_id = test_project["id"]
     passphrase = "SecurePass123!@#"
 
@@ -225,8 +223,8 @@ def test_disable_enable_workflow(e2e_encryption_setup):
     # 3. Crear datos
     encryption_key = EncryptionService.get_encryption_key(clean_db, project_id, passphrase)
 
-    schemas_crud.create_table(
-        raw_db, project_id, "users", "origin", test_user["id"], encryption_key
+    schemas_crud.create_table_orm(
+        clean_db, project_id, "users", "origin", test_user["id"], encryption_key
     )
 
     # 4. Disable encryption
@@ -284,15 +282,16 @@ def test_multiple_users_same_project(test_environment_setup, worker_id):
     cursor.close()
 
     # Crear proyecto para usuario 1
-    test_project = ProjectCRUD.create_project(
-        db=clean_db,
-        owner_id=user1["user_id"],
-        name=f"Multi User Test Project {worker_id}",
-        description="Project for multi-user encryption tests",
-        origin_db="PostgreSQL",
-        destination_db="MySQL",
-        status="active",
-    )
+    with SessionLocal() as session:
+        test_project = ProjectCRUD.create_project_orm(
+            db=session,
+            owner_id=user1["user_id"],
+            name=f"Multi User Test Project {worker_id}",
+            description="Project for multi-user encryption tests",
+            origin_db="PostgreSQL",
+            destination_db="MySQL",
+            status="active",
+        )
     project_id = test_project["id"]
     passphrase = "SecurePass123!@#"
 
@@ -384,15 +383,16 @@ def test_session_hijacking_prevention(test_environment_setup, worker_id):
     cursor.close()
 
     # Crear proyecto para usuario 1
-    test_project = ProjectCRUD.create_project(
-        db=clean_db,
-        owner_id=user1["user_id"],
-        name=f"Hijacking Test Project {worker_id}",
-        description="Project for session hijacking tests",
-        origin_db="PostgreSQL",
-        destination_db="MySQL",
-        status="active",
-    )
+    with SessionLocal() as session:
+        test_project = ProjectCRUD.create_project_orm(
+            db=session,
+            owner_id=user1["user_id"],
+            name=f"Hijacking Test Project {worker_id}",
+            description="Project for session hijacking tests",
+            origin_db="PostgreSQL",
+            destination_db="MySQL",
+            status="active",
+        )
     project_id = test_project["id"]
     passphrase = "SecurePass123!@#"
 
@@ -490,7 +490,6 @@ def test_create_table_read_without_session(e2e_encryption_setup):
     test_user = e2e_encryption_setup["user"]
     test_project = e2e_encryption_setup["project"]
     clean_db = e2e_encryption_setup["db"]
-    raw_db = e2e_encryption_setup["raw_db"]
     project_id = test_project["id"]
     passphrase = "SecurePass123!@#"
 
@@ -506,12 +505,14 @@ def test_create_table_read_without_session(e2e_encryption_setup):
     # Crear tabla con encryption_key
     encryption_key = EncryptionService.get_encryption_key(clean_db, project_id, passphrase)
 
-    schemas_crud.create_table(
-        raw_db, project_id, "users", "origin", test_user["id"], encryption_key
+    schemas_crud.create_table_orm(
+        clean_db, project_id, "users", "origin", test_user["id"], encryption_key
     )
 
     # Leer SIN encryption_key
-    tables = schemas_crud.get_tables_by_project(raw_db, project_id, "origin", encryption_key=None)
+    tables = schemas_crud.get_tables_by_project_orm(
+        clean_db, project_id, "origin", encryption_key=None
+    )
 
     assert len(tables) == 1
     assert tables[0]["name"] is None  # Nombre cifrado
@@ -527,7 +528,6 @@ def test_full_flow_with_unicode_data(e2e_encryption_setup):
     test_user = e2e_encryption_setup["user"]
     test_project = e2e_encryption_setup["project"]
     clean_db = e2e_encryption_setup["db"]
-    raw_db = e2e_encryption_setup["raw_db"]
     project_id = test_project["id"]
     passphrase = "Contraseña123!@#Ñ"
 
@@ -545,14 +545,14 @@ def test_full_flow_with_unicode_data(e2e_encryption_setup):
     # Crear tabla con nombre Unicode
     encryption_key = EncryptionService.get_encryption_key(clean_db, project_id, passphrase)
 
-    table = schemas_crud.create_table(
-        raw_db, project_id, "Usuarios_Españoles", "origin", test_user["id"], encryption_key
+    table = schemas_crud.create_table_orm(
+        clean_db, project_id, "Usuarios_Españoles", "origin", test_user["id"], encryption_key
     )
 
     assert table["name"] == "Usuarios_Españoles"
 
     # Leer de vuelta
-    tables = schemas_crud.get_tables_by_project(raw_db, project_id, "origin", encryption_key)
+    tables = schemas_crud.get_tables_by_project_orm(clean_db, project_id, "origin", encryption_key)
 
     assert tables[0]["name"] == "Usuarios_Españoles"
 

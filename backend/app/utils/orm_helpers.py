@@ -3,7 +3,7 @@ ORM Helper Utilities
 
 Este módulo proporciona funciones de utilidad para trabajar con modelos ORM de SQLAlchemy.
 Principalmente se enfoca en convertir modelos ORM a diccionarios para mantener la interfaz
-de retorno consistente con las funciones CRUD antiguas que usan psycopg2.
+de retorno consistente con el que tenían las funciones CRUD antiguas (ya retiradas).
 
 Funciones principales:
 - model_to_dict: Convierte un modelo ORM individual a diccionario

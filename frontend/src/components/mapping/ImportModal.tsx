@@ -4,8 +4,11 @@ import { useTranslation } from 'react-i18next';
 import { useDropzone } from 'react-dropzone';
 import { Upload, FileText, Table, FileSpreadsheet, X, AlertCircle } from '../icons';
 import { mappingService } from '../../services/mapping_service';
+import type { ApiErrorResponse } from '../../services/api.service';
+import { getApiError } from '../../utils/apiError';
 import { toast } from '../../utils/toast';
 import styles from '../../styles/mapping/mapping.module.css';
+import { buildImportExample } from './importExamples';
 
 interface ImportModalProps {
   isOpen: boolean;
@@ -20,7 +23,8 @@ export const ImportModal: React.FC<ImportModalProps> = ({
   projectId,
   onSuccess
 }) => {
-  const { t } = useTranslation(['mapping', 'common']);
+  const { t, i18n } = useTranslation(['mapping', 'common']);
+  const { t: tCommon } = useTranslation('common');
   const [selectedFormat, setSelectedFormat] = useState<'json' | 'csv' | 'excel'>('json');
   const [file, setFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -51,6 +55,18 @@ export const ImportModal: React.FC<ImportModalProps> = ({
     maxFiles: 1,
     maxSize: 15 * 1024 * 1024
   });
+
+  // Código conocido → traducción (con params: campo, ubicación...). Sin código pero con
+  // texto del servidor 4xx (tamaño, extensión, encriptación...) → ese texto. Resto → genérico.
+  const getImportErrorMessage = (error: unknown): string => {
+    const err = error as Partial<ApiErrorResponse>;
+    if (error instanceof TypeError) return tCommon('errors.network');
+    if (err?.code && i18n.exists(`common:errors.${err.code}`)) {
+      return getApiError(error, tCommon);
+    }
+    if (err?.status && err.status < 500 && err.message) return err.message;
+    return getApiError(error, tCommon);
+  };
 
   const handleImport = async () => {
     if (!file) {
@@ -84,7 +100,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
       handleClose();
     } catch (error: unknown) {
       console.error('Import error:', error);
-      toast.error(error instanceof Error ? error.message : t('common:errors.generic'));
+      toast.error(getImportErrorMessage(error));
     } finally {
       setIsUploading(false);
     }
@@ -100,21 +116,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
 
   if (!isOpen) return null;
 
-  const formatExamples = {
-    json: `{
-  "tables": [
-    {
-      "name": "customers",
-      "type": "origin",
-      "columns": [...]
-    }
-  ]
-}`,
-    csv: `table_name,type,column_name,data_type
-customers,origin,id,INTEGER
-customers,origin,name,TEXT`,
-    excel: t('import.example.excelHint' as any)
-  };
+  const formatExample = buildImportExample(selectedFormat, importType);
 
   return (
     <div className={styles.modalOverlay}>
@@ -164,6 +166,7 @@ customers,origin,name,TEXT`,
                 <span>{t('import.type.both' as any)}</span>
               </label>
             </div>
+            <p className="text-xs text-muted-foreground mt-1.5">{t('import.type.hint')}</p>
           </div>
 
           {/* Manejo de Duplicados */}
@@ -275,9 +278,16 @@ customers,origin,name,TEXT`,
           {/* Format example */}
           <div>
             <label className="text-sm font-medium mb-2 block">{t('import.example.label' as any)}</label>
-            <pre className="bg-muted p-3 rounded-lg text-xs overflow-x-auto">
-              {formatExamples[selectedFormat]}
+            <p className="text-xs mb-1.5">{t(`import.example.hint.${importType}`)}</p>
+            {selectedFormat === 'excel' && (
+              <p className="text-xs text-muted-foreground mb-1.5">
+                {t('import.example.excelHint')}
+              </p>
+            )}
+            <pre className="bg-muted border border-border p-3 rounded-lg text-xs font-mono leading-relaxed overflow-x-auto">
+              {formatExample}
             </pre>
+            <p className="text-xs text-muted-foreground mt-1.5">{t('import.example.required')}</p>
           </div>
 
           {/* Info alert */}

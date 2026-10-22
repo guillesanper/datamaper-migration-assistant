@@ -1027,7 +1027,11 @@ declare module 'i18next' {
             skip: string; skipHint: string;
           };
           error: { noFile: string };
-          example: { excelHint: string; label: string };
+          example: {
+            excelHint: string;
+            hint: { both: string; destination: string; origin: string };
+            label: string; required: string;
+          };
           file: { dropHint: string; dropTitle: string; label: string };
           footer: { empty: string; ready: string };
           format: { compatible: string; label: string; recommended: string; simple: string };
@@ -1046,7 +1050,7 @@ declare module 'i18next' {
           submit: string;
           success: string;
           title: string;
-          type: { both: string; destOnly: string; label: string; originOnly: string };
+          type: { both: string; destOnly: string; hint: string; label: string; originOnly: string };
         };
         migration: {
           alert: {

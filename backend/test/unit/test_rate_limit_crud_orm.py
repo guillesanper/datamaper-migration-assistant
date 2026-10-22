@@ -581,3 +581,170 @@ def test_cleanup_orm_custom_days(db_session: Session):
     # Verify record was deleted
     info = rate_limit_crud.get_info_orm(db_session, f"user20_{unique_id}@example.com", "/api/test")
     assert info is None
+
+
+# ============================================================================
+# TESTS: PEEK Y REGISTRO DE FALLOS (login: solo cuentan los fallos)
+# ============================================================================
+
+
+def _failure_keys() -> dict:
+    """Claves únicas de un contador de fallos (identifier == ip_address, como en el limitador)"""
+    unique_id = str(uuid.uuid4())[:8]
+    return {
+        "identifier": f"ip_{unique_id}",
+        "ip_address": f"ip_{unique_id}",
+        "endpoint": "/api/test/login",
+    }
+
+
+def _record_failure(db_session: Session, keys: dict, max_failures: int = 5) -> dict:
+    return rate_limit_crud.record_failure_orm(
+        db_session,
+        **keys,
+        max_failures=max_failures,
+        window_minutes=15,
+        block_duration_minutes=15,
+    )
+
+
+def _peek(db_session: Session, keys: dict) -> dict:
+    return rate_limit_crud.peek_limit_orm(
+        db_session, identifier=keys["identifier"], endpoint=keys["endpoint"]
+    )
+
+
+def test_peek_limit_orm_without_record_is_not_blocked_and_creates_nothing(db_session: Session):
+    keys = _failure_keys()
+
+    result = _peek(db_session, keys)
+
+    assert result["is_allowed"] is True
+    assert result["is_blocked"] is False
+    assert result["blocked_until"] is None
+    assert rate_limit_crud.get_info_orm(db_session, keys["identifier"], keys["endpoint"]) is None
+
+
+def test_peek_limit_orm_never_counts(db_session: Session):
+    keys = _failure_keys()
+    _record_failure(db_session, keys)
+
+    for _ in range(10):
+        _peek(db_session, keys)
+
+    info = rate_limit_crud.get_info_orm(db_session, keys["identifier"], keys["endpoint"])
+    assert info["request_count"] == 1
+
+
+def test_record_failure_orm_first_failure_creates_the_record(db_session: Session):
+    keys = _failure_keys()
+
+    result = _record_failure(db_session, keys)
+
+    assert result["is_allowed"] is True
+    assert result["is_blocked"] is False
+    assert result["request_count"] == 1
+    assert result["remaining"] == 4
+    assert result["blocked_until"] is None
+
+
+def test_record_failure_orm_failures_below_the_maximum_do_not_block(db_session: Session):
+    keys = _failure_keys()
+
+    for failure in range(1, 5):
+        result = _record_failure(db_session, keys, max_failures=5)
+
+        assert result["is_blocked"] is False
+        assert result["request_count"] == failure
+
+    assert _peek(db_session, keys)["is_blocked"] is False
+
+
+def test_record_failure_orm_blocks_on_reaching_the_maximum(db_session: Session):
+    """El fallo número `max` ya bloquea: la siguiente petición (aunque sea buena) se rechaza"""
+    keys = _failure_keys()
+
+    for _ in range(4):
+        _record_failure(db_session, keys, max_failures=5)
+    result = _record_failure(db_session, keys, max_failures=5)
+
+    assert result["is_blocked"] is True
+    assert result["is_allowed"] is False
+    assert result["request_count"] == 5
+    assert result["blocked_until"] is not None
+    peeked = _peek(db_session, keys)
+    assert peeked["is_blocked"] is True
+    assert peeked["blocked_until"] == result["blocked_until"]
+
+
+def test_record_failure_orm_with_maximum_one_blocks_on_the_first_failure(db_session: Session):
+    keys = _failure_keys()
+
+    result = _record_failure(db_session, keys, max_failures=1)
+
+    assert result["is_blocked"] is True
+    assert _peek(db_session, keys)["is_blocked"] is True
+
+
+def test_record_failure_orm_does_not_count_while_blocked(db_session: Session):
+    keys = _failure_keys()
+    for _ in range(5):
+        blocked = _record_failure(db_session, keys, max_failures=5)
+
+    again = _record_failure(db_session, keys, max_failures=5)
+
+    assert again["is_blocked"] is True
+    assert again["request_count"] == 5
+    assert again["blocked_until"] == blocked["blocked_until"]
+
+
+def test_record_failure_orm_restarts_the_count_when_the_window_expires(db_session: Session):
+    keys = _failure_keys()
+    for _ in range(3):
+        _record_failure(db_session, keys, max_failures=5)
+    rate_limit = (
+        db_session.query(SecurityRateLimit)
+        .filter(
+            SecurityRateLimit.identifier == keys["identifier"],
+            SecurityRateLimit.endpoint == keys["endpoint"],
+        )
+        .first()
+    )
+    rate_limit.window_start = datetime.now(timezone.utc) - timedelta(minutes=16)
+    db_session.commit()
+
+    result = _record_failure(db_session, keys, max_failures=5)
+
+    assert result["is_blocked"] is False
+    assert result["request_count"] == 1
+
+
+def test_peek_limit_orm_ignores_a_block_that_already_expired(db_session: Session):
+    keys = _failure_keys()
+    for _ in range(5):
+        _record_failure(db_session, keys, max_failures=5)
+    rate_limit = (
+        db_session.query(SecurityRateLimit)
+        .filter(
+            SecurityRateLimit.identifier == keys["identifier"],
+            SecurityRateLimit.endpoint == keys["endpoint"],
+        )
+        .first()
+    )
+    rate_limit.blocked_until = datetime.now(timezone.utc) - timedelta(minutes=1)
+    db_session.commit()
+
+    result = _peek(db_session, keys)
+
+    assert result["is_allowed"] is True
+    assert result["is_blocked"] is False
+
+
+def test_record_failure_orm_is_separate_per_endpoint(db_session: Session):
+    keys = _failure_keys()
+    for _ in range(5):
+        _record_failure(db_session, keys, max_failures=5)
+    other = {**keys, "endpoint": "/api/test/other"}
+
+    assert _peek(db_session, keys)["is_blocked"] is True
+    assert _peek(db_session, other)["is_blocked"] is False

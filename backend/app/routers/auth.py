@@ -1,19 +1,37 @@
 # app/routers/auth.py
-from datetime import datetime
-from typing import Annotated, Any, Dict, Optional
+from datetime import date, datetime
+from typing import Annotated, Any, Callable, Dict, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, EmailStr, Field, ValidationError, field_validator
+from starlette.concurrency import run_in_threadpool
+
+from app.config.security import security_settings
 
 # CRUDs ORM
-from app.crud import session_crud, user_crud
+from app.crud import email_otp_crud, session_crud, user_crud
 from app.database.session import get_db_session as get_db
-from app.middleware.rate_limiting import rate_limit
+from app.middleware.rate_limiting import (
+    check_rate_limit_only,
+    enforce_rate_limit,
+    rate_limit,
+    record_failure,
+)
 from app.routers.dependencies import get_current_user, get_current_user_optional
-from app.services.auth_service import AuthenticationError, AuthService, DatabaseError
-from app.utils.cookies import SESSION_COOKIE_CONFIG, sign_cookie
-from app.utils.email_verification import send_verification_code
+from app.services.auth_service import (
+    REGISTRATION_CREATED,
+    AuthenticationError,
+    AuthService,
+    DatabaseError,
+    UsernameTakenError,
+)
+from app.utils.cookies import SESSION_COOKIE_CONFIG, get_session_token_hash, sign_cookie
+from app.utils.email_verification import (
+    deliver_account_exists_email,
+    deliver_verification_email,
+    send_verification_code,
+)
 from app.utils.security import SecurityUtils
 from app.utils.security_logger import (
     SecurityLogger,
@@ -24,6 +42,42 @@ from app.utils.security_logger import (
 )
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+# Límite por IP de cada ruta sensible: (máximo de peticiones, ventana en segundos), de
+# security_settings (ajustables por entorno con RATE_LIMIT_*). En login el máximo es de
+# FALLOS por ventana: los logins correctos no cuentan
+LOGIN_LIMIT = (
+    security_settings.RATE_LIMIT_LOGIN_ATTEMPTS,
+    security_settings.RATE_LIMIT_LOGIN_WINDOW,
+)
+REGISTER_LIMIT = (
+    security_settings.RATE_LIMIT_REGISTER_ATTEMPTS,
+    security_settings.RATE_LIMIT_REGISTER_WINDOW,
+)
+VERIFY_LIMIT = (
+    security_settings.RATE_LIMIT_VERIFY_ATTEMPTS,
+    security_settings.RATE_LIMIT_VERIFY_WINDOW,
+)
+RESEND_LIMIT = (
+    security_settings.RATE_LIMIT_RESEND_ATTEMPTS,
+    security_settings.RATE_LIMIT_RESEND_WINDOW,
+)
+RESET_LIMIT = (
+    security_settings.RATE_LIMIT_RESET_ATTEMPTS,
+    security_settings.RATE_LIMIT_RESET_WINDOW,
+)
+FORGOT_LIMIT = (
+    security_settings.RATE_LIMIT_FORGOT_ATTEMPTS,
+    security_settings.RATE_LIMIT_FORGOT_WINDOW,
+)
+
+# Respuesta única de verify-code y reset ante cualquier fallo de cuenta o de código: el motivo
+# real (cuenta inexistente, ya verificada, OTP ausente, caducado o erróneo) solo va al log de
+# seguridad, para que la respuesta no permita enumerar cuentas
+INVALID_CODE_MESSAGE = "Código inválido o expirado"
+# Respuestas neutras de resend-code y forgot: iguales exista o no la cuenta
+RESEND_CODE_MESSAGE = "Código reenviado correctamente"
+FORGOT_PASSWORD_MESSAGE = "Si la cuenta existe y está verificada, recibirás un código en tu correo"
 
 
 # Modelos Pydantic
@@ -93,46 +147,112 @@ def create_error_response(message: str, error_code: str, status_code: int = 400)
     )
 
 
+# Campos del usuario que devuelve verify-code: los mismos que login, sin datos internos
+# (totp_secret, last_login_ip, failed_login_attempts...) en una respuesta previa a la sesión
+VERIFIED_USER_FIELDS = ("id", "username", "email", "is_verified", "created_at")
+
+
 def serialize_user(user_dict: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     """
-    Convierte campos datetime a strings para serialización JSON
-    Necesario porque JSON.dumps no puede serializar objetos datetime
+    Convierte los campos datetime/date a strings para serialización JSON
+    Necesario porque JSON.dumps no puede serializar objetos datetime. Se recorren todos los
+    valores (no una lista fija) para que un campo nuevo de la tabla users no rompa la respuesta.
     """
     if not user_dict:
         return None
 
     serialized = dict(user_dict)
 
-    datetime_fields = ["created_at", "updated_at", "last_login_at", "locked_until"]
-
-    for field in datetime_fields:
-        if serialized.get(field):
-            if isinstance(serialized[field], datetime):
-                serialized[field] = serialized[field].isoformat()
+    for field, value in serialized.items():
+        if isinstance(value, (datetime, date)):
+            serialized[field] = value.isoformat()
 
     return serialized
+
+
+def deliver_in_background(background_tasks: BackgroundTasks) -> Callable[[str, str], None]:
+    """
+    Entrega del código de verificación después de responder, sin bloquear el event loop.
+
+    La tarea recibe solo destinatario y código: la sesión de BD de la petición ya está cerrada
+    cuando se ejecuta. El código no puede llegar a la respuesta: solo viaja a la tarea.
+    """
+
+    def deliver(to_email: str, code: str) -> None:
+        background_tasks.add_task(deliver_verification_email, to_email, code)
+
+    return deliver
+
+
+def notify_account_exists_in_background(
+    background_tasks: BackgroundTasks,
+) -> Callable[[str], None]:
+    """Entrega del aviso «ya tienes una cuenta» después de responder (misma regla que el código)"""
+
+    def notify(to_email: str) -> None:
+        background_tasks.add_task(deliver_account_exists_email, to_email)
+
+    return notify
 
 
 # Endpoints
 
 
 @router.post("/register", response_model=StandardResponse, status_code=201)
-async def register(request: Request, data: RegisterRequest, db=Depends(get_db)):
-    """Registro de nuevo usuario"""
+@rate_limit(*REGISTER_LIMIT)
+async def register(
+    request: Request,
+    data: RegisterRequest,
+    background_tasks: BackgroundTasks,
+    db=Depends(get_db),
+):
+    """
+    Registro de nuevo usuario.
+
+    Responde 201 con el mismo cuerpo exista o no una cuenta con ese email (verificada, sin
+    verificar o borrada): quien ya la tiene recibe un correo distinto, no una respuesta
+    distinta. El único 409 explícito es el de un username ocupado, con independencia del email.
+    """
 
     auth_service = AuthService(db)
 
+    # Además de por IP, por cuenta: quien reparte las peticiones entre IPs no puede llenar de
+    # correos (código o aviso) a una víctima. Cuenta el email pedido exista o no, así que el 429
+    # no revela nada. Va antes del try (el 429 no debe acabar en el except general)
+    email = SecurityUtils.sanitize_email(data.email)
+    await enforce_rate_limit(request, *REGISTER_LIMIT, account=email)
+
     try:
-        result = auth_service.create_user(
-            username=data.username, email=data.email, password=data.password
+        # En el threadpool: bcrypt y las consultas síncronas no deben bloquear el event loop
+        result = await run_in_threadpool(
+            auth_service.create_user,
+            username=data.username,
+            email=data.email,
+            password=data.password,
+            deliver=deliver_in_background(background_tasks),
+            notify_existing=notify_account_exists_in_background(background_tasks),
         )
 
-        await log_registration_success(
-            request, result["username"], result["email"], result["user_id"]
-        )
+        outcome = getattr(result, "outcome", REGISTRATION_CREATED)
+        if outcome == REGISTRATION_CREATED:
+            await log_registration_success(
+                request, result["username"], result["email"], result["user_id"]
+            )
+        else:
+            # El motivo real solo va al log. El user_id de la respuesta es aleatorio (no
+            # cumpliría la FK de security_logs): se registra el de la cuenta real
+            await SecurityLogger.log_event(
+                event_type="registration_duplicate_email",
+                request=request,
+                username=result["username"],
+                user_id=result.account_id,
+                details={"email_attempted": result["email"], "reason": outcome},
+                severity="info",
+                endpoint="/register",
+            )
 
         return create_success_response(
-            message="Usuario registrado exitosamente", data=result, status_code=201
+            message="Usuario registrado exitosamente", data=dict(result), status_code=201
         )
 
     except ValueError as e:
@@ -140,6 +260,10 @@ async def register(request: Request, data: RegisterRequest, db=Depends(get_db)):
             request, data.username, data.email, f"weak_password: {str(e)}"
         )
         return create_error_response(message=str(e), error_code="weak_password", status_code=400)
+
+    except UsernameTakenError as e:
+        await log_registration_failed(request, data.username, data.email, "username_taken")
+        return create_error_response(message=str(e), error_code="username_taken", status_code=409)
 
     except AuthenticationError as e:
         await log_registration_failed(request, data.username, data.email, str(e))
@@ -163,12 +287,19 @@ async def login(request: Request, data: LoginRequest, db=Depends(get_db)):
     import secrets
     from datetime import datetime, timedelta, timezone
 
+    # El límite por IP cuenta solo los fallos de credenciales: aquí solo se comprueba (429 si
+    # la IP está bloqueada); el fallo se anota abajo, en la rama 401
+    await check_rate_limit_only(request, *LOGIN_LIMIT)
+
     auth_service = AuthService(db)
     client_ip = SecurityUtils.get_client_ip(request)
 
     try:
-        user = auth_service.authenticate_user(
-            identifier=data.identifier, password=data.password, client_ip=client_ip
+        user = await run_in_threadpool(
+            auth_service.authenticate_user,
+            identifier=data.identifier,
+            password=data.password,
+            client_ip=client_ip,
         )
 
         await log_login_success(request, user["username"], user["id"])
@@ -226,6 +357,10 @@ async def login(request: Request, data: LoginRequest, db=Depends(get_db)):
             status_code = 401
             error_code = "invalid_credentials"
             response_data = None
+            # Usuario inexistente o contraseña errónea: lo único que gasta cupo. El 423 (el
+            # bloqueo de cuenta se comprueba antes de la contraseña) y el 403 (solo ocurre con la
+            # contraseña acertada) no son intentos de adivinarla
+            await record_failure(request, *LOGIN_LIMIT)
 
         return JSONResponse(
             status_code=status_code,
@@ -245,6 +380,7 @@ async def login(request: Request, data: LoginRequest, db=Depends(get_db)):
 
 
 @router.post("/verify-code")
+@rate_limit(*VERIFY_LIMIT)
 async def verify_code(request: Request, db=Depends(get_db)):
     """Verificación de código OTP con login automático"""
 
@@ -257,13 +393,19 @@ async def verify_code(request: Request, db=Depends(get_db)):
 
         # Llamar al servicio
         auth_service = AuthService(db)
-        result = auth_service.verify_email_code(email=data.email, code=data.code)
+        result = await run_in_threadpool(
+            auth_service.verify_email_code, email=data.email, code=data.code
+        )
 
         # Obtener datos del usuario usando CRUD ORM
         user = user_crud.get_user_by_id_orm(db, result["user_id"])
 
-        # Serializar usuario
-        user_data = serialize_user(user)
+        # Serializar usuario (solo los campos públicos)
+        user_data = serialize_user(
+            {field: user[field] for field in VERIFIED_USER_FIELDS if field in user}
+            if user
+            else None
+        )
 
         # Log de seguridad
         await SecurityLogger.log_email_verification_attempt(
@@ -306,17 +448,13 @@ async def verify_code(request: Request, db=Depends(get_db)):
         )
 
     except AuthenticationError as e:
+        # El motivo real va al log; al cliente siempre lo mismo
         await SecurityLogger.log_email_verification_attempt(
             request, body.get("email", ""), False, failure_reason=str(e)
         )
 
-        if "no encontrado" in str(e).lower():
-            status_code = 404
-        else:
-            status_code = 400
-
         return create_error_response(
-            message=str(e), error_code="verification_failed", status_code=status_code
+            message=INVALID_CODE_MESSAGE, error_code="verification_failed", status_code=400
         )
 
     except Exception as e:
@@ -331,24 +469,50 @@ async def verify_code(request: Request, db=Depends(get_db)):
 
 
 @router.post("/resend-code", response_model=StandardResponse)
-@rate_limit(3, 600)
-async def resend_code(request: Request, data: ResendCodeRequest, db=Depends(get_db)):
+@rate_limit(*RESEND_LIMIT)
+async def resend_code(
+    request: Request,
+    data: ResendCodeRequest,
+    background_tasks: BackgroundTasks,
+    db=Depends(get_db),
+):
     """Reenvío de código de verificación"""
 
     email = SecurityUtils.sanitize_email(data.email)
+
+    # Además de por IP, por cuenta: quien reparte las peticiones entre IPs no puede llenar de
+    # correos a una víctima. Va antes del try (el 429 no debe acabar en el except general)
+    await enforce_rate_limit(request, *RESEND_LIMIT, account=email)
 
     try:
         # Obtener usuario usando CRUD ORM
         user = user_crud.get_user_by_email_orm(db, email)
 
-        if not user:
-            return create_error_response(
-                message="Usuario no encontrado", error_code="user_not_found", status_code=404
+        if user and not user["is_verified"]:
+            await run_in_threadpool(
+                send_verification_code,
+                db,
+                email,
+                user["id"],
+                deliver=deliver_in_background(background_tasks),
+            )
+        else:
+            # Sin cuenta, borrada o ya verificada: no se envía nada y la respuesta es la misma.
+            # El reenvío solo sirve para verificar; el OTP de reset se pide con /forgot.
+            await run_in_threadpool(email_otp_crud.simulate_otp_check)
+            await SecurityLogger.log_event(
+                event_type="resend_code_ignored",
+                request=request,
+                user_id=user["id"] if user else None,
+                details={
+                    "email_attempted": email,
+                    "reason": "account_already_verified" if user else "user_not_found",
+                },
+                severity="info",
+                endpoint="/resend-code",
             )
 
-        send_verification_code(db, email, user["id"])
-
-        return create_success_response(message="Código reenviado correctamente")
+        return create_success_response(message=RESEND_CODE_MESSAGE)
 
     except Exception as e:
         await SecurityLogger.log_suspicious_activity(
@@ -359,16 +523,76 @@ async def resend_code(request: Request, data: ResendCodeRequest, db=Depends(get_
         )
 
 
+@router.post("/forgot", response_model=StandardResponse)
+@rate_limit(*FORGOT_LIMIT)
+async def forgot_password(
+    request: Request,
+    data: ForgotPasswordRequest,
+    background_tasks: BackgroundTasks,
+    db=Depends(get_db),
+):
+    """
+    Solicitud de recuperación de contraseña: emite un OTP para /reset.
+
+    Responde 200 con el mismo mensaje exista o no la cuenta. Solo emite el código si la cuenta
+    existe, está verificada y no está borrada; el motivo real queda en el log de seguridad.
+    """
+
+    email = SecurityUtils.sanitize_email(data.email)
+
+    # Contador por cuenta además del de IP (como resend-code); va antes del try para que el
+    # 429 no acabe en el except general. Cuenta el email pedido, exista o no.
+    await enforce_rate_limit(request, *FORGOT_LIMIT, account=email)
+
+    try:
+        user = user_crud.get_user_by_email_orm(db, email)
+
+        if user and user["is_verified"]:
+            await run_in_threadpool(
+                send_verification_code,
+                db,
+                email,
+                user["id"],
+                deliver=deliver_in_background(background_tasks),
+            )
+            await SecurityLogger.log_password_reset_attempt(
+                request, email, True, user["id"], stage="request"
+            )
+        else:
+            # Sin cuenta, borrada o sin verificar: no se emite nada. Se gasta el mismo bcrypt
+            # que la emisión real (mejor esfuerzo contra la enumeración por tiempo).
+            await run_in_threadpool(email_otp_crud.simulate_otp_check)
+            await SecurityLogger.log_password_reset_attempt(
+                request,
+                email,
+                False,
+                user["id"] if user else None,
+                stage="request",
+                failure_reason="Cuenta sin verificar" if user else "Usuario no encontrado",
+            )
+
+        return create_success_response(message=FORGOT_PASSWORD_MESSAGE)
+
+    except Exception as e:
+        await SecurityLogger.log_suspicious_activity(request, "forgot_error", {"error": str(e)})
+        return create_error_response(
+            message="Error interno del servidor", error_code="internal_error", status_code=500
+        )
+
+
 @router.post("/reset", response_model=StandardResponse)
-@rate_limit(5, 600)
+@rate_limit(*RESET_LIMIT)
 async def reset_password(request: Request, data: ResetPasswordRequest, db=Depends(get_db)):
     """Reset de contraseña con código OTP"""
 
     auth_service = AuthService(db)
 
     try:
-        auth_service.reset_password(
-            email=data.email, code=data.code, new_password=data.new_password
+        await run_in_threadpool(
+            auth_service.reset_password,
+            email=data.email,
+            code=data.code,
+            new_password=data.new_password,
         )
 
         await SecurityLogger.log_password_reset_attempt(
@@ -381,24 +605,32 @@ async def reset_password(request: Request, data: ResetPasswordRequest, db=Depend
         return create_error_response(message=str(e), error_code="weak_password", status_code=400)
 
     except AuthenticationError as e:
-        return create_error_response(message=str(e), error_code="reset_failed", status_code=400)
+        # El motivo real va al log; al cliente siempre lo mismo
+        await SecurityLogger.log_password_reset_attempt(
+            request, data.email, False, None, stage="reset", failure_reason=str(e)  # type: ignore[arg-type]
+        )
+        return create_error_response(
+            message=INVALID_CODE_MESSAGE, error_code="reset_failed", status_code=400
+        )
+
+    except DatabaseError as e:
+        await SecurityLogger.log_suspicious_activity(
+            request, "reset_password_error", {"error": str(e)}
+        )
+        return create_error_response(
+            message="Error interno del servidor", error_code="internal_error", status_code=500
+        )
 
 
 @router.post("/logout", response_model=StandardResponse)
-async def logout(current_user=Depends(get_current_user), db=Depends(get_db)):
+async def logout(request: Request, current_user=Depends(get_current_user), db=Depends(get_db)):
     """Cierre de sesión (solo actual dispositivo)"""
     try:
-        # Obtener cookie firmada
-        import hashlib
-
-        from fastapi import Request
-
-        from app.utils.cookies import verify_signed_cookie
-
-        # Revocar la sesión actual usando CRUD ORM
-        session_cookie = current_user.get("session_token")
-        if session_cookie:
-            hashed_token = hashlib.sha256(session_cookie.encode()).hexdigest()
+        # Revocar la sesión actual usando CRUD ORM. El token sale de la cookie firmada de la
+        # petición: current_user no lo incluye (y no debe, porque /me devuelve ese diccionario).
+        # Con autenticación por API key no hay cookie y no hay sesión que revocar.
+        hashed_token = get_session_token_hash(request)
+        if hashed_token:
             session_crud.revoke_session_orm(db, hashed_token, reason="user_logout")
 
         response = create_success_response("Sesión cerrada exitosamente")
