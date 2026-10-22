@@ -55,7 +55,7 @@ class TestValidateTableName:
             SchemaService.validate_table_name("")
 
         assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST
-        assert "obligatorio" in exc_info.value.detail
+        assert exc_info.value.detail == {"code": "schema.table_name_required"}
 
     def test_validate_table_name_whitespace(self):
         """Test validation fails for whitespace-only name"""
@@ -125,7 +125,7 @@ class TestValidateTableType:
             SchemaService.validate_table_type("invalid")
 
         assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST
-        assert "inválido" in exc_info.value.detail
+        assert exc_info.value.detail == {"code": "schema.table_type_invalid"}
 
     def test_validate_table_type_empty(self):
         """Test validation fails for empty type"""

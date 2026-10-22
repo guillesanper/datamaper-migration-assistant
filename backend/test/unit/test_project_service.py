@@ -641,21 +641,29 @@ class TestDeleteProject:
         assert "Solo el propietario" in exc_info.value.detail
 
     @patch("app.services.project_service.ProjectCRUD")
-    def test_delete_project_cannot_delete_with_members(
+    def test_delete_project_with_members_removes_them_first(
         self, mock_crud, mock_db, mock_cursor, project_data
     ):
-        """No puede eliminar proyecto con miembros"""
+        """Eliminar un proyecto con miembros los quita en cascada antes de borrarlo"""
         # Arrange
         mock_db.cursor.return_value = mock_cursor
         mock_crud.get_project_by_id_orm.return_value = project_data
-        mock_crud.get_project_members_orm.return_value = [{"user_id": "member-1", "role": "editor"}]
+        mock_crud.get_project_members_orm.return_value = [
+            {"user_id": "member-1", "role": "editor"},
+            {"user_id": "member-2", "role": "viewer"},
+        ]
+        mock_crud.delete_project_orm.return_value = True
 
-        # Act & Assert
-        with pytest.raises(HTTPException) as exc_info:
-            ProjectService.delete_project(mock_db, "project-123", "user-abc")
+        # Act
+        ProjectService.delete_project(mock_db, "project-123", "user-abc")
 
-        assert exc_info.value.status_code == 400
-        assert "con miembros" in exc_info.value.detail
+        # Assert
+        assert mock_crud.remove_project_member_orm.call_args_list == [
+            call(mock_db, "project-123", "member-1"),
+            call(mock_db, "project-123", "member-2"),
+        ]
+        mock_crud.delete_project_orm.assert_called_once_with(mock_db, "project-123")
+        mock_db.commit.assert_called_once()
 
     @patch("app.services.project_service.ProjectCRUD")
     def test_delete_project_deletes_tables_and_columns(

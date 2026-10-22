@@ -198,6 +198,8 @@ jobs:
           SECRET_KEY: test-secret-key-for-ci
           ENV: development
           ENCRYPTION_ENABLED: "false"
+          # docker-compose.test.yml está levantado: no omitir los tests de MySQL/PostgreSQL externos
+          REQUIRE_TEST_DATABASES: "1"
         run: |
           pytest test/integration/ -v --tb=short --maxfail=5 -n auto --dist=loadfile
 
