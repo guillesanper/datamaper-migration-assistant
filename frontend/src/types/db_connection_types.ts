@@ -211,6 +211,8 @@ export interface ConnectorTable {
 export interface ConnectorTablesResponse {
   session_id: string;
   tables: Array<Omit<ConnectorTable, 'id' | 'type' | 'session_id' | 'is_connector'>>;
+  /** Schemas que no se pudieron leer (permisos, errores de la BD); sus tablas no aparecen */
+  failed_schemas?: string[];
 }
 
 /**

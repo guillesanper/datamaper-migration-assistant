@@ -442,3 +442,83 @@ class TestGetAdapter:
 
         with pytest.raises(DBConnectionServiceError, match="Unsupported dialect"):
             service._get_adapter(config)
+
+
+# ============================================================================
+# TEST: Redis real (fakeredis) con y sin decode_responses
+# ============================================================================
+
+
+class TestRedisClientCompatibility:
+    """
+    El router de migración usa el cliente compartido (decode_responses=True) y el de
+    conexiones uno sin decodificar; el servicio debe funcionar con ambos.
+    """
+
+    @pytest.mark.parametrize("decode_responses", [False, True])
+    def test_session_roundtrip(self, decode_responses, encryption_key):
+        import fakeredis
+
+        redis_client = fakeredis.FakeRedis(decode_responses=decode_responses)
+        service = DBConnectionService(redis_client, encryption_key)
+        config = DBConnectionConfig(
+            dialect="oracle",
+            host="db.example.com",
+            port=1521,
+            database="ORCLPDB1.dominio",
+            user="scott",
+            password="tiger",
+            service_name="ORCLPDB1.dominio",
+        )
+
+        with patch("app.services.db_connection_service.validate_connection_host"):
+            session = service.create_session("user-1", config, test_connection=False)
+
+        restored = service.get_session("user-1", session.session_id)
+        decrypted = service.get_decrypted_config(restored)
+
+        assert decrypted.service_name == "ORCLPDB1.dominio"
+        assert decrypted.to_adapter_config()["service_name"] == "ORCLPDB1.dominio"
+        assert [s.session_id for s in service.list_user_sessions("user-1")] == [session.session_id]
+
+
+class TestOracleConnectionTarget:
+    """service_name/sid se conservan (antes Pydantic los descartaba)"""
+
+    def test_service_name_and_sid_reach_adapter_config(self):
+        config = DBConnectionConfig(
+            dialect="oracle",
+            host="db.example.com",
+            port=1521,
+            database="ORCL",
+            user="scott",
+            password="tiger",
+            sid="ORCL1",
+        )
+        adapter_config = config.to_adapter_config()
+        assert adapter_config["sid"] == "ORCL1"
+        assert "service_name" not in adapter_config
+
+    def test_blank_values_are_ignored(self):
+        config = DBConnectionConfig(
+            dialect="oracle",
+            host="db.example.com",
+            port=1521,
+            database="ORCL",
+            user="scott",
+            password="tiger",
+            service_name="  ",
+        )
+        assert config.service_name is None
+
+    def test_control_characters_rejected(self):
+        with pytest.raises(ValueError):
+            DBConnectionConfig(
+                dialect="oracle",
+                host="db.example.com",
+                port=1521,
+                database="ORCL",
+                user="scott",
+                password="tiger",
+                service_name="ORCL)(HOST=evil\n",
+            )

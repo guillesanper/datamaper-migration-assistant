@@ -296,10 +296,27 @@ class TestListTables:
 
         assert tables == []
 
-    def test_list_tables_invalid_schema_name(self, adapter):
-        """Test get_tables validates schema name"""
+    @patch("app.utils.db_adapters.sqlserver_adapter.pyodbc.connect")
+    def test_list_tables_special_schema_name_is_bound_parameter(self, mock_connect, adapter):
+        """Nombres con caracteres especiales se aceptan y viajan como parámetro enlazado"""
+        mock_cursor = MagicMock()
+        mock_cursor.fetchall.return_value = []
+        mock_conn = MagicMock()
+        mock_conn.cursor.return_value = mock_cursor
+        mock_connect.return_value = mock_conn
+
+        adapter.connect()
+        name = "invalid; DROP TABLE users;"
+        adapter.get_tables(name)
+
+        query, params = mock_cursor.execute.call_args[0]
+        assert name not in query
+        assert params == (name,)
+
+    def test_list_tables_rejects_control_characters(self, adapter):
+        """Test get_tables rechaza nombres con caracteres de control"""
         with pytest.raises(ValueError):
-            adapter.get_tables("invalid; DROP TABLE users;")
+            adapter.get_tables("dbo\x00")
 
 
 # ============================================================================
@@ -387,12 +404,15 @@ class TestGetTableColumns:
         assert "not found" in str(exc_info.value)
 
     def test_get_table_columns_validates_names(self, adapter):
-        """Test get_columns validates schema and table names"""
+        """Test get_columns rechaza nombres vacíos o con caracteres de control"""
         with pytest.raises(ValueError):
-            adapter.get_columns("users", "invalid; DROP")
+            adapter.get_columns("users", "bad\x00schema")
 
         with pytest.raises(ValueError):
-            adapter.get_columns("invalid; DROP", "dbo")
+            adapter.get_columns("bad\ntable", "dbo")
+
+        with pytest.raises(ValueError):
+            adapter.get_columns("", "dbo")
 
 
 # ============================================================================
@@ -416,7 +436,7 @@ class TestGetPrimaryKeys:
         mock_connect.return_value = mock_conn
 
         adapter.connect()
-        pks = adapter.get_primary_keys("dbo", "users")
+        pks = adapter.get_primary_keys("users", "dbo")
 
         assert len(pks) == 1
         assert pks[0].constraint_name == "PK_users"
@@ -437,7 +457,7 @@ class TestGetPrimaryKeys:
         mock_connect.return_value = mock_conn
 
         adapter.connect()
-        pks = adapter.get_primary_keys("dbo", "order_items")
+        pks = adapter.get_primary_keys("order_items", "dbo")
 
         assert len(pks) == 1
         assert pks[0].constraint_name == "PK_order_items"
@@ -454,7 +474,7 @@ class TestGetPrimaryKeys:
         mock_connect.return_value = mock_conn
 
         adapter.connect()
-        pks = adapter.get_primary_keys("dbo", "logs")
+        pks = adapter.get_primary_keys("logs", "dbo")
 
         assert pks == []
 
@@ -490,7 +510,7 @@ class TestGetForeignKeys:
         mock_connect.return_value = mock_conn
 
         adapter.connect()
-        fks = adapter.get_foreign_keys("dbo", "products")
+        fks = adapter.get_foreign_keys("products", "dbo")
 
         assert len(fks) == 1
         assert fks[0].constraint_name == "FK_products_category"
@@ -535,7 +555,7 @@ class TestGetForeignKeys:
         mock_connect.return_value = mock_conn
 
         adapter.connect()
-        fks = adapter.get_foreign_keys("dbo", "order_items")
+        fks = adapter.get_foreign_keys("order_items", "dbo")
 
         assert len(fks) == 1
         assert fks[0].column_names == ["order_id", "line_number"]
@@ -553,7 +573,7 @@ class TestGetForeignKeys:
         mock_connect.return_value = mock_conn
 
         adapter.connect()
-        fks = adapter.get_foreign_keys("dbo", "categories")
+        fks = adapter.get_foreign_keys("categories", "dbo")
 
         assert fks == []
 
@@ -580,7 +600,7 @@ class TestGetUniqueConstraints:
         mock_connect.return_value = mock_conn
 
         adapter.connect()
-        uniques = adapter.get_unique_constraints("dbo", "users")
+        uniques = adapter.get_unique_constraints("users", "dbo")
 
         assert len(uniques) == 2
         assert uniques[0].constraint_name == "UQ_users_email"
@@ -611,7 +631,7 @@ class TestGetCheckConstraints:
         mock_connect.return_value = mock_conn
 
         adapter.connect()
-        checks = adapter.get_check_constraints("dbo", "users")
+        checks = adapter.get_check_constraints("users", "dbo")
 
         assert len(checks) == 2
         assert checks[0].constraint_name == "CK_users_age"
@@ -643,7 +663,7 @@ class TestGetIndexes:
         mock_connect.return_value = mock_conn
 
         adapter.connect()
-        indexes = adapter.get_indexes("dbo", "users")
+        indexes = adapter.get_indexes("users", "dbo")
 
         assert len(indexes) == 2
 
@@ -672,7 +692,7 @@ class TestGetIndexes:
         mock_connect.return_value = mock_conn
 
         adapter.connect()
-        indexes = adapter.get_indexes("dbo", "orders")
+        indexes = adapter.get_indexes("orders", "dbo")
 
         assert len(indexes) == 1
         assert indexes[0].column_names == ["user_id", "created_at"]
@@ -691,7 +711,7 @@ class TestGetIndexes:
         mock_connect.return_value = mock_conn
 
         adapter.connect()
-        indexes = adapter.get_indexes("dbo", "users")
+        indexes = adapter.get_indexes("users", "dbo")
 
         # Should only return non-PK index
         assert len(indexes) == 1
@@ -718,7 +738,7 @@ class TestGetTableStatistics:
         mock_connect.return_value = mock_conn
 
         adapter.connect()
-        stats = adapter.get_table_statistics("dbo", "users")
+        stats = adapter.get_table_statistics("users", "dbo")
 
         assert stats.table_name == "users"
         assert stats.row_count == 1000
@@ -737,7 +757,7 @@ class TestGetTableStatistics:
         mock_connect.return_value = mock_conn
 
         adapter.connect()
-        stats = adapter.get_table_statistics("dbo", "empty_table")
+        stats = adapter.get_table_statistics("empty_table", "dbo")
 
         assert stats.row_count == 0
         assert stats.total_size_bytes == 0

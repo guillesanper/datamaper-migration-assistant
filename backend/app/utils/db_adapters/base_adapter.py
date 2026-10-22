@@ -26,6 +26,7 @@ from app.models.db_metadata import (
 from .exceptions import (
     DBAuthenticationError,
     DBConnectionError,
+    DBMetadataNotFoundError,
     DBPermissionError,
     DBQueryExecutionError,
 )
@@ -282,11 +283,24 @@ class BaseDBAdapter(ABC):
     # HIGH-LEVEL OPERATIONS
     # =============================================================================
 
+    def get_unique_constraints(
+        self, table_name: str, schema: Optional[str] = None
+    ) -> List[UniqueConstraintMetadata]:
+        """
+        Obtiene las unique constraints de una tabla.
+
+        Implementación por defecto vacía para los dialectos que no la soportan todavía.
+        """
+        return []
+
     def get_full_schema_metadata(self, schema: Optional[str] = None) -> SchemaMetadata:
         """
         Obtiene metadata completa de un schema (tablas, columnas, constraints, índices).
 
-        Este método orquesta llamadas a múltiples métodos de introspección.
+        Implementación genérica tabla a tabla; los adapters pueden sobrescribirla con
+        queries por schema (ver PostgreSQLAdapter). Una tabla cuyas columnas no son
+        visibles (permisos) o que desaparece durante la introspección no tumba el schema
+        entero: se devuelve sin columnas y se registra un aviso.
 
         Args:
             schema: Nombre del schema (None = schema por defecto)
@@ -294,47 +308,93 @@ class BaseDBAdapter(ABC):
         Returns:
             SchemaMetadata con toda la información del schema
         """
+        schema = schema or self._get_default_schema()
         logger.info(f"Getting full schema metadata for schema '{schema}'")
 
-        # Obtener tablas
         tables = self.get_tables(schema)
 
-        # Para cada tabla, obtener detalles
-        for table in tables:
-            # Columnas
-            table.columns = self.get_columns(table.name, schema)
-
-        # Obtener constraints e índices
-        primary_keys = []
-        foreign_keys = []
-        indexes = []
+        primary_keys: List[PrimaryKeyMetadata] = []
+        foreign_keys: List[ForeignKeyMetadata] = []
+        unique_constraints: List[UniqueConstraintMetadata] = []
+        indexes: List[IndexMetadata] = []
 
         for table in tables:
+            try:
+                table.columns = self.get_columns(table.name, schema)
+            except DBMetadataNotFoundError:
+                logger.warning(f"No visible columns for table '{schema}.{table.name}'")
+                table.columns = []
+
             pks = self.get_primary_keys(table.name, schema)
             fks = self.get_foreign_keys(table.name, schema)
-            idxs = self.get_indexes(table.name, schema)
+            # No todos los dialectos marcan PK/FK en get_columns()
+            table.columns = self._apply_key_flags(table.columns, pks, fks)
 
             primary_keys.extend(pks)
             foreign_keys.extend(fks)
-            indexes.extend(idxs)
+            unique_constraints.extend(self.get_unique_constraints(table.name, schema))
+            indexes.extend(self.get_indexes(table.name, schema))
 
-        schema_metadata = SchemaMetadata(
-            name=schema or self._get_default_schema(),
-            tables=tables,
-            primary_keys=primary_keys,
-            foreign_keys=foreign_keys,
-            indexes=indexes,
+        return self._build_schema_metadata(
+            schema, tables, primary_keys, foreign_keys, unique_constraints, indexes
         )
 
+    @staticmethod
+    def _build_schema_metadata(
+        schema: str,
+        tables: List[TableMetadata],
+        primary_keys: List[PrimaryKeyMetadata],
+        foreign_keys: List[ForeignKeyMetadata],
+        unique_constraints: List[UniqueConstraintMetadata],
+        indexes: List[IndexMetadata],
+    ) -> SchemaMetadata:
+        """Construye el SchemaMetadata y registra un resumen."""
         logger.info(
             f"Schema '{schema}' metadata: "
             f"{len(tables)} tables, "
             f"{sum(len(t.columns) for t in tables)} columns, "
+            f"{len(primary_keys)} primary keys, "
             f"{len(foreign_keys)} foreign keys, "
             f"{len(indexes)} indexes"
         )
+        return SchemaMetadata(
+            name=schema,
+            tables=tables,
+            primary_keys=primary_keys,
+            foreign_keys=foreign_keys,
+            unique_constraints=unique_constraints,
+            indexes=indexes,
+        )
 
-        return schema_metadata
+    @staticmethod
+    def _apply_key_flags(
+        columns: List[ColumnMetadata],
+        primary_keys: List[PrimaryKeyMetadata],
+        foreign_keys: List[ForeignKeyMetadata],
+    ) -> List[ColumnMetadata]:
+        """
+        Marca las columnas que forman parte de una PK o FK.
+
+        Returns:
+            Nueva lista; las columnas sin cambios se reutilizan tal cual.
+        """
+        pk_columns = {name for pk in primary_keys for name in pk.columns}
+        fk_columns = {name for fk in foreign_keys for name in fk.columns}
+
+        updated_columns = []
+        for col in columns:
+            is_pk = col.name in pk_columns
+            is_fk = col.name in fk_columns
+            if is_pk or is_fk:
+                col_dict = col.model_dump()
+                if is_pk:
+                    col_dict["is_primary_key"] = True
+                if is_fk:
+                    col_dict["is_foreign_key"] = True
+                updated_columns.append(ColumnMetadata(**col_dict))
+            else:
+                updated_columns.append(col)
+        return updated_columns
 
     @abstractmethod
     def _get_default_schema(self) -> str:

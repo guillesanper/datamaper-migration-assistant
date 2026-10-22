@@ -44,6 +44,19 @@ from app.utils.encryption import DecryptionError, EncryptionManager
 logger = logging.getLogger(__name__)
 
 
+def _decode_hash(data: Dict[Any, Any]) -> Dict[str, str]:
+    """
+    Normaliza un HGETALL a dict de str.
+
+    El cliente compartido (app.utils.redis_client) usa decode_responses=True y devuelve
+    str; un cliente sin decodificar devuelve bytes. El servicio acepta ambos.
+    """
+    return {
+        (k.decode() if isinstance(k, bytes) else k): (v.decode() if isinstance(v, bytes) else v)
+        for k, v in data.items()
+    }
+
+
 class DBConnectionServiceError(Exception):
     """Base exception for DBConnectionService"""
 
@@ -351,9 +364,7 @@ class DBConnectionService:
                 f"Session not found: user_id={user_id}, session_id={session_id}"
             )
 
-        # Deserializar (Redis devuelve bytes)
-        data_str = {k.decode(): v.decode() for k, v in data.items()}  # type: ignore[union-attr]
-        session = DBConnectionSession.from_redis_dict(data_str)
+        session = DBConnectionSession.from_redis_dict(_decode_hash(data))
 
         # Verificar expiración
         if session.is_expired():
@@ -483,15 +494,13 @@ class DBConnectionService:
             Lista de DBConnectionSession
         """
         pattern = f"{self.REDIS_KEY_PREFIX}:{user_id}:*"
-        keys = self.redis.keys(pattern)
-
         sessions = []
-        for key in keys:  # type: ignore[union-attr]
+        # scan_iter en lugar de KEYS: KEYS recorre todo Redis bloqueándolo
+        for key in self.redis.scan_iter(match=pattern):
             data = self.redis.hgetall(key)
             if data:
-                data_str = {k.decode(): v.decode() for k, v in data.items()}  # type: ignore[union-attr]
                 try:
-                    session = DBConnectionSession.from_redis_dict(data_str)
+                    session = DBConnectionSession.from_redis_dict(_decode_hash(data))
                     if not session.is_expired():
                         sessions.append(session)
                     else:

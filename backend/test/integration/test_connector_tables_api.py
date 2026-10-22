@@ -299,6 +299,24 @@ class TestGetConnectorTablesCornerCases:
             data = response.json()
             assert len(data["tables"]) == 1
             assert data["tables"][0]["name"] == "products"
+            # El schema fallido no se omite en silencio
+            assert data["failed_schemas"] == ["broken_schema"]
+        finally:
+            app.dependency_overrides.pop(get_user_session, None)
+            app.dependency_overrides.pop(get_db_connection_service, None)
+
+    @pytest.mark.integration
+    def test_explicit_schema_failure_is_reported(self, authenticated_client):
+        """Si se pide un schema concreto y falla, se devuelve error en vez de lista vacía."""
+        adapter = _make_adapter({"broken_schema": RuntimeError("introspection failed")})
+        mock_service = _make_service(adapter)
+        app.dependency_overrides[get_user_session] = lambda: _mock_session()
+        app.dependency_overrides[get_db_connection_service] = lambda: mock_service
+        try:
+            response = authenticated_client.get(f"{ENDPOINT}?schema=broken_schema")
+            assert response.status_code == 500
+            # Sin detalles del driver en la respuesta
+            assert "introspection failed" not in response.text
         finally:
             app.dependency_overrides.pop(get_user_session, None)
             app.dependency_overrides.pop(get_db_connection_service, None)
@@ -318,6 +336,7 @@ class TestGetConnectorTablesCornerCases:
             response = authenticated_client.get(ENDPOINT)
             assert response.status_code == 200
             assert response.json()["tables"] == []
+            assert response.json()["failed_schemas"] == ["schema_a", "schema_b"]
         finally:
             app.dependency_overrides.pop(get_user_session, None)
             app.dependency_overrides.pop(get_db_connection_service, None)

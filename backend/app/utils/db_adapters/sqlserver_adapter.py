@@ -43,7 +43,7 @@ from .exceptions import (
     DBTimeoutError,
 )
 from .type_mappers import SQLServerTypeMapper
-from .validators import validate_schema_name, validate_table_name
+from .validators import validate_metadata_name
 
 logger = logging.getLogger(__name__)
 
@@ -210,7 +210,7 @@ class SQLServerAdapter(BaseDBAdapter):
             schema = self._get_default_schema()
 
         schema_name = schema
-        validate_schema_name(schema_name)
+        validate_metadata_name(schema_name, "Schema name")
 
         query = """
         SELECT
@@ -222,7 +222,7 @@ class SQLServerAdapter(BaseDBAdapter):
         LEFT JOIN sys.tables st ON t.TABLE_NAME = st.name AND SCHEMA_NAME(st.schema_id) = t.TABLE_SCHEMA
         LEFT JOIN sys.partitions p ON st.object_id = p.object_id AND p.index_id IN (0, 1)
         WHERE t.TABLE_SCHEMA = ?
-          AND t.TABLE_TYPE = 'BASE TABLE'
+          AND t.TABLE_TYPE IN ('BASE TABLE', 'VIEW')
         ORDER BY t.TABLE_NAME
         """
 
@@ -238,7 +238,7 @@ class SQLServerAdapter(BaseDBAdapter):
                     TableMetadata(
                         name=row[1],
                         schema=row[0],
-                        table_type=TableType.TABLE,
+                        table_type=(TableType.VIEW if row[2] == "VIEW" else TableType.BASE_TABLE),
                     )
                 )
 
@@ -264,8 +264,8 @@ class SQLServerAdapter(BaseDBAdapter):
             schema = self._get_default_schema()
 
         schema_name = schema
-        validate_schema_name(schema_name)
-        validate_table_name(table_name)
+        validate_metadata_name(schema_name, "Schema name")
+        validate_metadata_name(table_name, "Table name")
 
         query = """
         SELECT
@@ -280,7 +280,11 @@ class SQLServerAdapter(BaseDBAdapter):
             -- Check if column is primary key
             CASE WHEN pk.COLUMN_NAME IS NOT NULL THEN 1 ELSE 0 END AS is_primary_key,
             -- Check if column is identity (auto-increment)
-            COLUMNPROPERTY(OBJECT_ID(c.TABLE_SCHEMA + '.' + c.TABLE_NAME), c.COLUMN_NAME, 'IsIdentity') AS is_identity
+            -- QUOTENAME: sin citar, OBJECT_ID fallaba con nombres con espacios, puntos, etc.
+            COLUMNPROPERTY(
+                OBJECT_ID(QUOTENAME(c.TABLE_SCHEMA) + '.' + QUOTENAME(c.TABLE_NAME)),
+                c.COLUMN_NAME, 'IsIdentity'
+            ) AS is_identity
         FROM INFORMATION_SCHEMA.COLUMNS c
         LEFT JOIN (
             SELECT ku.TABLE_SCHEMA, ku.TABLE_NAME, ku.COLUMN_NAME
@@ -350,19 +354,22 @@ class SQLServerAdapter(BaseDBAdapter):
                 f"Failed to get columns for '{schema_name}.{table_name}': {str(e)}"
             )
 
-    def get_primary_keys(self, schema_name: str, table_name: str) -> List[PrimaryKeyMetadata]:  # type: ignore[override]
+    def get_primary_keys(
+        self, table_name: str, schema: Optional[str] = None
+    ) -> List[PrimaryKeyMetadata]:
         """
         Obtiene claves primarias de una tabla.
 
         Args:
-            schema_name: Nombre del schema
             table_name: Nombre de la tabla
+            schema: Nombre del schema. Si es None, usa el schema por defecto.
 
         Returns:
             Lista de PrimaryKeyMetadata (usualmente 1 elemento)
         """
-        validate_schema_name(schema_name)
-        validate_table_name(table_name)
+        schema_name = schema or self._get_default_schema()
+        validate_metadata_name(schema_name, "Schema name")
+        validate_metadata_name(table_name, "Table name")
 
         query = """
         SELECT
@@ -406,6 +413,7 @@ class SQLServerAdapter(BaseDBAdapter):
                     PrimaryKeyMetadata(
                         constraint_name=constraint_name,
                         table_name=table_name,
+                        schema=schema_name,
                         column_names=columns,
                     )
                 )
@@ -417,19 +425,22 @@ class SQLServerAdapter(BaseDBAdapter):
                 f"Failed to get primary keys for '{schema_name}.{table_name}': {str(e)}"
             )
 
-    def get_foreign_keys(self, schema_name: str, table_name: str) -> List[ForeignKeyMetadata]:  # type: ignore[override]
+    def get_foreign_keys(
+        self, table_name: str, schema: Optional[str] = None
+    ) -> List[ForeignKeyMetadata]:
         """
         Obtiene claves foráneas de una tabla.
 
         Args:
-            schema_name: Nombre del schema
             table_name: Nombre de la tabla
+            schema: Nombre del schema. Si es None, usa el schema por defecto.
 
         Returns:
             Lista de ForeignKeyMetadata
         """
-        validate_schema_name(schema_name)
-        validate_table_name(table_name)
+        schema_name = schema or self._get_default_schema()
+        validate_metadata_name(schema_name, "Schema name")
+        validate_metadata_name(table_name, "Table name")
 
         query = """
         SELECT
@@ -493,6 +504,7 @@ class SQLServerAdapter(BaseDBAdapter):
                     ForeignKeyMetadata(
                         constraint_name=constraint_name,
                         table_name=table_name,
+                        schema=schema_name,
                         column_names=data["columns"],
                         referenced_table=data["referenced_table"],
                         referenced_columns=data["referenced_columns"],
@@ -509,20 +521,21 @@ class SQLServerAdapter(BaseDBAdapter):
             )
 
     def get_unique_constraints(
-        self, schema_name: str, table_name: str
+        self, table_name: str, schema: Optional[str] = None
     ) -> List[UniqueConstraintMetadata]:
         """
         Obtiene constraints de unicidad de una tabla.
 
         Args:
-            schema_name: Nombre del schema
             table_name: Nombre de la tabla
+            schema: Nombre del schema. Si es None, usa el schema por defecto.
 
         Returns:
             Lista de UniqueConstraintMetadata
         """
-        validate_schema_name(schema_name)
-        validate_table_name(table_name)
+        schema_name = schema or self._get_default_schema()
+        validate_metadata_name(schema_name, "Schema name")
+        validate_metadata_name(table_name, "Table name")
 
         query = """
         SELECT
@@ -566,6 +579,7 @@ class SQLServerAdapter(BaseDBAdapter):
                     UniqueConstraintMetadata(
                         constraint_name=constraint_name,
                         table_name=table_name,
+                        schema=schema_name,
                         column_names=columns,
                     )
                 )
@@ -578,20 +592,21 @@ class SQLServerAdapter(BaseDBAdapter):
             )
 
     def get_check_constraints(
-        self, schema_name: str, table_name: str
+        self, table_name: str, schema: Optional[str] = None
     ) -> List[CheckConstraintMetadata]:
         """
         Obtiene check constraints de una tabla.
 
         Args:
-            schema_name: Nombre del schema
             table_name: Nombre de la tabla
+            schema: Nombre del schema. Si es None, usa el schema por defecto.
 
         Returns:
             Lista de CheckConstraintMetadata
         """
-        validate_schema_name(schema_name)
-        validate_table_name(table_name)
+        schema_name = schema or self._get_default_schema()
+        validate_metadata_name(schema_name, "Schema name")
+        validate_metadata_name(table_name, "Table name")
 
         query = """
         SELECT
@@ -618,6 +633,7 @@ class SQLServerAdapter(BaseDBAdapter):
                     CheckConstraintMetadata(
                         constraint_name=row[0],
                         table_name=table_name,
+                        schema=schema_name,
                         check_clause=row[1],
                     )
                 )
@@ -629,19 +645,20 @@ class SQLServerAdapter(BaseDBAdapter):
                 f"Failed to get check constraints for '{schema_name}.{table_name}': {str(e)}"
             )
 
-    def get_indexes(self, schema_name: str, table_name: str) -> List[IndexMetadata]:  # type: ignore[override]
+    def get_indexes(self, table_name: str, schema: Optional[str] = None) -> List[IndexMetadata]:
         """
         Obtiene índices de una tabla.
 
         Args:
-            schema_name: Nombre del schema
             table_name: Nombre de la tabla
+            schema: Nombre del schema. Si es None, usa el schema por defecto.
 
         Returns:
             Lista de IndexMetadata
         """
-        validate_schema_name(schema_name)
-        validate_table_name(table_name)
+        schema_name = schema or self._get_default_schema()
+        validate_metadata_name(schema_name, "Schema name")
+        validate_metadata_name(table_name, "Table name")
 
         query = """
         SELECT
@@ -701,6 +718,7 @@ class SQLServerAdapter(BaseDBAdapter):
                     IndexMetadata(
                         name=index_name,
                         table_name=table_name,
+                        schema=schema_name,
                         columns=data["columns"],
                         is_unique=data["is_unique"],
                         index_type=index_type,
@@ -714,19 +732,22 @@ class SQLServerAdapter(BaseDBAdapter):
                 f"Failed to get indexes for '{schema_name}.{table_name}': {str(e)}"
             )
 
-    def get_table_statistics(self, schema_name: str, table_name: str) -> TableStatistics:  # type: ignore[override]
+    def get_table_statistics(
+        self, table_name: str, schema: Optional[str] = None
+    ) -> TableStatistics:
         """
         Obtiene estadísticas de una tabla.
 
         Args:
-            schema_name: Nombre del schema
             table_name: Nombre de la tabla
+            schema: Nombre del schema. Si es None, usa el schema por defecto.
 
         Returns:
             TableStatistics con row count y tamaño
         """
-        validate_schema_name(schema_name)
-        validate_table_name(table_name)
+        schema_name = schema or self._get_default_schema()
+        validate_metadata_name(schema_name, "Schema name")
+        validate_metadata_name(table_name, "Table name")
 
         query = """
         SELECT
@@ -752,12 +773,14 @@ class SQLServerAdapter(BaseDBAdapter):
             if not row:
                 return TableStatistics(
                     table_name=table_name,
+                    schema=schema_name,
                     row_count=0,
                     size_bytes=0,
                 )
 
             return TableStatistics(
                 table_name=table_name,
+                schema=schema_name,
                 row_count=row[0] if row[0] else 0,
                 size_bytes=row[1] if row[1] else 0,
                 index_size_bytes=row[2] if row[2] else 0,
@@ -769,39 +792,8 @@ class SQLServerAdapter(BaseDBAdapter):
             )
 
     def get_schema_metadata(self, schema_name: str) -> SchemaMetadata:
-        """
-        Obtiene metadata completa de un schema (tablas + columnas + constraints).
-
-        Args:
-            schema_name: Nombre del schema
-
-        Returns:
-            SchemaMetadata con todas las tablas y sus metadatos
-        """
-        validate_schema_name(schema_name)
-
-        tables = self.get_tables(schema_name)
-
-        # Para cada tabla, obtener metadata completa
-        all_pks: List[PrimaryKeyMetadata] = []
-        all_fks: List[ForeignKeyMetadata] = []
-        all_unique: List[UniqueConstraintMetadata] = []
-        all_indexes: List[IndexMetadata] = []
-        for table in tables:
-            table.columns = self.get_columns(table.table_name, schema_name)
-            all_pks.extend(self.get_primary_keys(schema_name, table.table_name))
-            all_fks.extend(self.get_foreign_keys(schema_name, table.table_name))
-            all_unique.extend(self.get_unique_constraints(schema_name, table.table_name))
-            all_indexes.extend(self.get_indexes(schema_name, table.table_name))
-
-        return SchemaMetadata(
-            name=schema_name,
-            tables=tables,
-            primary_keys=all_pks,
-            foreign_keys=all_fks,
-            unique_constraints=all_unique,
-            indexes=all_indexes,
-        )
+        """Alias de get_full_schema_metadata() (tablas + columnas + constraints + índices)."""
+        return self.get_full_schema_metadata(schema_name)
 
     def get_database_metadata(self) -> DatabaseMetadata:
         """

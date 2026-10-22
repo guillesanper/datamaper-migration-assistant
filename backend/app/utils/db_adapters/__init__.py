@@ -51,6 +51,7 @@ from .validators import (
     validate_column_name,
     validate_connection_config,
     validate_identifier,
+    validate_metadata_name,
     validate_schema_name,
     validate_table_name,
 )
@@ -71,6 +72,7 @@ __all__ = [
     "DBMetadataNotFoundError",
     # Validators
     "validate_identifier",
+    "validate_metadata_name",
     "validate_table_name",
     "validate_column_name",
     "validate_schema_name",

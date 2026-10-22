@@ -198,20 +198,22 @@ class DBConnectionService {
     sessionId: string,
     tableType: 'origin' | 'destination',
     schema?: string
-  ): Promise<ConnectorTable[]> {
+  ): Promise<{ tables: ConnectorTable[]; failedSchemas: string[] }> {
     const url = schema
       ? `${this.baseUrl}/sessions/${sessionId}/connector-tables?schema=${encodeURIComponent(schema)}`
       : `${this.baseUrl}/sessions/${sessionId}/connector-tables`;
 
     const response = await apiService.get<ConnectorTablesResponse>(url);
 
-    return response.tables.map(table => ({
+    const tables = response.tables.map(table => ({
       ...table,
       id: `connector:${sessionId}:${table.schema}:${table.name}`,
       type: tableType,
       session_id: sessionId,
       is_connector: true as const,
     }));
+
+    return { tables, failedSchemas: response.failed_schemas ?? [] };
   }
 
   /**

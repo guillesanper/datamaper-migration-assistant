@@ -185,7 +185,7 @@ export const ProjectMapping: React.FC = () => {
         }
 
         try {
-          const tables = await dbConnectionService.getConnectorTables(sessionId, type);
+          const { tables } = await dbConnectionService.getConnectorTables(sessionId, type);
           restoredConnectorTables.push(...tables);
           validSessions[type] = sessionId;
         } catch (err) {
@@ -237,7 +237,8 @@ export const ProjectMapping: React.FC = () => {
 
     // Cargar tablas del connector (sin guardar estructura en BD local)
     try {
-      const newConnectorTables = await dbConnectionService.getConnectorTables(sessionId, tableType);
+      const { tables: newConnectorTables, failedSchemas } =
+        await dbConnectionService.getConnectorTables(sessionId, tableType);
 
       // Reemplazar tablas del mismo tipo en el estado (en caso de reconexión)
       setConnectorTables(prev => [
@@ -246,6 +247,9 @@ export const ProjectMapping: React.FC = () => {
       ]);
 
       toast.success(`Conectado como ${tableType}: ${newConnectorTables.length} tablas cargadas`);
+      if (failedSchemas.length > 0) {
+        toast.error(`No se pudieron leer los schemas: ${failedSchemas.join(', ')}`);
+      }
     } catch (err) {
       console.error(`[ProjectMapping] Error loading connector tables:`, err);
       toast.error('Conexión creada pero no se pudieron cargar las tablas');

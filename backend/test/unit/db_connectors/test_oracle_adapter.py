@@ -287,10 +287,43 @@ class TestListTables:
         mock_cursor.execute.assert_called_once()
         assert mock_cursor.execute.call_args[1] == {"schema_name": "APP_SCHEMA"}
 
-    def test_list_tables_invalid_schema_name(self, adapter):
-        """Test get_tables validates schema name"""
+    @patch("app.utils.db_adapters.oracle_adapter.oracledb.connect")
+    def test_list_tables_special_schema_name_is_bound_parameter(self, mock_connect, adapter):
+        """Nombres con caracteres especiales se aceptan y viajan como parámetro enlazado"""
+        mock_cursor = MagicMock()
+        mock_cursor.fetchall.return_value = []
+        mock_conn = MagicMock()
+        mock_conn.cursor.return_value = mock_cursor
+        mock_connect.return_value = mock_conn
+
+        adapter.connect()
+        name = "invalid; DROP TABLE"
+        adapter.get_tables(name)
+
+        assert name not in mock_cursor.execute.call_args[0][0]
+        assert mock_cursor.execute.call_args[1] == {"schema_name": name}
+
+    @patch("app.utils.db_adapters.oracle_adapter.oracledb.connect")
+    def test_mixed_case_names_are_not_uppercased(self, mock_connect, adapter):
+        """Identificadores Oracle citados ("MiTabla") se consultan tal cual"""
+        mock_cursor = MagicMock()
+        mock_cursor.fetchall.return_value = []
+        mock_conn = MagicMock()
+        mock_conn.cursor.return_value = mock_cursor
+        mock_connect.return_value = mock_conn
+
+        adapter.connect()
+        adapter.get_primary_keys("MiTabla", "App_Schema")
+
+        assert mock_cursor.execute.call_args[1] == {
+            "schema_name": "App_Schema",
+            "table_name": "MiTabla",
+        }
+
+    def test_list_tables_rejects_control_characters(self, adapter):
+        """Test get_tables rechaza nombres con caracteres de control"""
         with pytest.raises(ValueError):
-            adapter.get_tables("invalid; DROP TABLE")
+            adapter.get_tables("APP\nSCHEMA")
 
 
 # ============================================================================
@@ -385,12 +418,15 @@ class TestGetTableColumns:
         assert "not found" in str(exc_info.value)
 
     def test_get_table_columns_validates_names(self, adapter):
-        """Test get_columns validates schema and table names"""
+        """Test get_columns rechaza nombres vacíos o con caracteres de control"""
         with pytest.raises(ValueError):
-            adapter.get_columns("users", "invalid; DROP")
+            adapter.get_columns("users", "bad\x00schema")
 
         with pytest.raises(ValueError):
-            adapter.get_columns("invalid; DROP", "schema")
+            adapter.get_columns("bad\ntable", "schema")
+
+        with pytest.raises(ValueError):
+            adapter.get_columns("", "schema")
 
 
 # ============================================================================
@@ -416,7 +452,7 @@ class TestGetPrimaryKeys:
         mock_connect.return_value = mock_conn
 
         adapter.connect()
-        pks = adapter.get_primary_keys("APP_SCHEMA", "USERS")
+        pks = adapter.get_primary_keys("USERS", "APP_SCHEMA")
 
         assert len(pks) == 1
         assert pks[0].constraint_name == "PK_USERS"
@@ -439,7 +475,7 @@ class TestGetPrimaryKeys:
         mock_connect.return_value = mock_conn
 
         adapter.connect()
-        pks = adapter.get_primary_keys("APP_SCHEMA", "ORDER_ITEMS")
+        pks = adapter.get_primary_keys("ORDER_ITEMS", "APP_SCHEMA")
 
         assert len(pks) == 1
         assert pks[0].column_names == ["ORDER_ID", "PRODUCT_ID"]
@@ -457,7 +493,7 @@ class TestGetPrimaryKeys:
         mock_connect.return_value = mock_conn
 
         adapter.connect()
-        pks = adapter.get_primary_keys("APP_SCHEMA", "LOGS")
+        pks = adapter.get_primary_keys("LOGS", "APP_SCHEMA")
 
         assert pks == []
 
@@ -485,7 +521,7 @@ class TestGetForeignKeys:
         mock_connect.return_value = mock_conn
 
         adapter.connect()
-        fks = adapter.get_foreign_keys("APP_SCHEMA", "PRODUCTS")
+        fks = adapter.get_foreign_keys("PRODUCTS", "APP_SCHEMA")
 
         assert len(fks) == 1
         assert fks[0].constraint_name == "FK_PRODUCTS_CATEGORY"
@@ -508,7 +544,7 @@ class TestGetForeignKeys:
         mock_connect.return_value = mock_conn
 
         adapter.connect()
-        fks = adapter.get_foreign_keys("APP_SCHEMA", "CATEGORIES")
+        fks = adapter.get_foreign_keys("CATEGORIES", "APP_SCHEMA")
 
         assert fks == []
 
@@ -537,7 +573,7 @@ class TestGetUniqueConstraints:
         mock_connect.return_value = mock_conn
 
         adapter.connect()
-        uniques = adapter.get_unique_constraints("APP_SCHEMA", "USERS")
+        uniques = adapter.get_unique_constraints("USERS", "APP_SCHEMA")
 
         assert len(uniques) == 2
         assert uniques[0].constraint_name == "UQ_USERS_EMAIL"
@@ -569,7 +605,7 @@ class TestGetCheckConstraints:
         mock_connect.return_value = mock_conn
 
         adapter.connect()
-        checks = adapter.get_check_constraints("APP_SCHEMA", "USERS")
+        checks = adapter.get_check_constraints("USERS", "APP_SCHEMA")
 
         assert len(checks) == 2
         assert checks[0].constraint_name == "CK_USERS_AGE"
@@ -592,7 +628,7 @@ class TestGetCheckConstraints:
         mock_connect.return_value = mock_conn
 
         adapter.connect()
-        checks = adapter.get_check_constraints("APP_SCHEMA", "USERS")
+        checks = adapter.get_check_constraints("USERS", "APP_SCHEMA")
 
         # Should only return the age constraint, not the NOT NULL
         assert len(checks) == 1
@@ -623,7 +659,7 @@ class TestGetIndexes:
         mock_connect.return_value = mock_conn
 
         adapter.connect()
-        indexes = adapter.get_indexes("APP_SCHEMA", "USERS")
+        indexes = adapter.get_indexes("USERS", "APP_SCHEMA")
 
         assert len(indexes) == 2
 
@@ -654,7 +690,7 @@ class TestGetIndexes:
         mock_connect.return_value = mock_conn
 
         adapter.connect()
-        indexes = adapter.get_indexes("APP_SCHEMA", "USERS")
+        indexes = adapter.get_indexes("USERS", "APP_SCHEMA")
 
         # Should filter out SYS_ indexes
         assert len(indexes) == 1
@@ -688,7 +724,7 @@ class TestGetTableStatistics:
         mock_connect.return_value = mock_conn
 
         adapter.connect()
-        stats = adapter.get_table_statistics("APP_SCHEMA", "USERS")
+        stats = adapter.get_table_statistics("USERS", "APP_SCHEMA")
 
         assert stats.table_name == "USERS"
         assert stats.row_count == 1000
@@ -707,7 +743,7 @@ class TestGetTableStatistics:
         mock_connect.return_value = mock_conn
 
         adapter.connect()
-        stats = adapter.get_table_statistics("APP_SCHEMA", "EMPTY_TABLE")
+        stats = adapter.get_table_statistics("EMPTY_TABLE", "APP_SCHEMA")
 
         assert stats.row_count == 0
         assert stats.total_size_bytes == 0

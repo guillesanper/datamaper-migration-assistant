@@ -44,6 +44,23 @@ class DBConnectionConfig(BaseModel):
         ),
     )
 
+    # Oracle: identificador del servicio. Si no se indica ninguno se usa `database`
+    # como service name.
+    service_name: Optional[str] = Field(
+        default=None, max_length=128, description="Oracle: service name"
+    )
+    sid: Optional[str] = Field(default=None, max_length=128, description="Oracle: SID")
+
+    @field_validator("service_name", "sid")
+    @classmethod
+    def validate_oracle_target(cls, v: Optional[str]) -> Optional[str]:
+        """Normaliza vacíos a None y rechaza caracteres de control"""
+        if v is None or not v.strip():
+            return None
+        if any(not char.isprintable() for char in v):
+            raise ValueError("must not contain control characters")
+        return v.strip()
+
     @property
     def username(self) -> str:
         """Alias for user - used by tests"""
@@ -73,6 +90,8 @@ class DBConnectionConfig(BaseModel):
             "password": self.password,
             "timeout": self.timeout,
             "ssl_mode": self.ssl_mode,
+            **({"service_name": self.service_name} if self.service_name else {}),
+            **({"sid": self.sid} if self.sid else {}),
         }
 
     class Config:

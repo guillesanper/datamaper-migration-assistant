@@ -46,6 +46,7 @@ from app.services.db_connection_service import (
     SessionNotFoundError,
 )
 from app.utils.db_adapters import DBHostNotAllowedError, DBMetadataNotFoundError, DBValidationError
+from app.utils.redis_client import get_redis_client as shared_redis_client
 
 logger = logging.getLogger(__name__)
 
@@ -97,14 +98,13 @@ def raise_db_error(action: str, error: Exception) -> NoReturn:
 
 
 def get_redis_client() -> redis.Redis:
-    """Dependency para obtener cliente Redis"""
-    redis_client = redis.Redis(
-        host=os.getenv("REDIS_HOST", "localhost"),
-        port=int(os.getenv("REDIS_PORT", 6379)),
-        db=int(os.getenv("REDIS_DB", 0)),
-        decode_responses=False,  # Mantenemos bytes para hashes
-    )
-    return redis_client
+    """
+    Dependency para obtener cliente Redis.
+
+    Usa el cliente compartido (pool, REDIS_URL/REDIS_PASSWORD/REDIS_SSL); antes se creaba
+    un cliente nuevo por petición sin contraseña.
+    """
+    return shared_redis_client()
 
 
 def get_db_connection_service(
@@ -524,15 +524,27 @@ def get_connector_tables(
         adapter = service._get_adapter(config)
 
         connector_tables: List[ConnectorTableResponse] = []
+        failed_schemas: List[str] = []
 
         with adapter:
             schemas_to_fetch: List[str] = [schema] if schema else adapter.get_schemas()
 
             for schema_name in schemas_to_fetch:
-                try:
+                if schema:
+                    # Schema pedido explícitamente: su error se devuelve al cliente
                     schema_metadata = adapter.get_full_schema_metadata(schema=schema_name)
-                except Exception:
-                    continue
+                else:
+                    try:
+                        schema_metadata = adapter.get_full_schema_metadata(schema=schema_name)
+                    except Exception as e:
+                        # Un schema ilegible no impide devolver el resto, pero no se omite
+                        # en silencio: se loguea y se informa en failed_schemas
+                        logger.warning(
+                            f"Skipping schema '{schema_name}' in connector tables: "
+                            f"{type(e).__name__}: {e}"
+                        )
+                        failed_schemas.append(schema_name)
+                        continue
 
                 for table in schema_metadata.tables:
                     table_hash = hashlib.sha256(table.name.encode()).hexdigest()
@@ -576,6 +588,7 @@ def get_connector_tables(
         return ConnectorTablesResponse(
             session_id=session_id,
             tables=connector_tables,
+            failed_schemas=failed_schemas,
         )
 
     except Exception as e:

@@ -467,7 +467,7 @@ class TestPostgreSQLIntrospection:
 
     def test_get_primary_keys(self, postgres_adapter):
         """Test getting primary key constraints"""
-        pks = postgres_adapter.get_primary_keys("public", "users")
+        pks = postgres_adapter.get_primary_keys("users", "public")
 
         assert len(pks) == 1
         pk = pks[0]
@@ -476,7 +476,7 @@ class TestPostgreSQLIntrospection:
 
     def test_get_foreign_keys(self, postgres_adapter):
         """Test getting foreign key constraints"""
-        fks = postgres_adapter.get_foreign_keys("public", "products")
+        fks = postgres_adapter.get_foreign_keys("products", "public")
 
         # Products table has FK to categories
         assert len(fks) >= 1
@@ -490,7 +490,7 @@ class TestPostgreSQLIntrospection:
 
     def test_get_unique_constraints(self, postgres_adapter):
         """Test getting unique constraints"""
-        uniques = postgres_adapter.get_unique_constraints("public", "users")
+        uniques = postgres_adapter.get_unique_constraints("users", "public")
 
         # Users has unique constraints on username and email
         constraint_names = [u.constraint_name for u in uniques]
@@ -501,7 +501,7 @@ class TestPostgreSQLIntrospection:
 
     def test_get_check_constraints(self, postgres_adapter):
         """Test getting check constraints"""
-        checks = postgres_adapter.get_check_constraints("public", "users")
+        checks = postgres_adapter.get_check_constraints("users", "public")
 
         # Users has check constraints on age and balance
         assert len(checks) >= 2
@@ -517,7 +517,7 @@ class TestPostgreSQLIntrospection:
 
     def test_get_indexes(self, postgres_adapter):
         """Test getting indexes"""
-        indexes = postgres_adapter.get_indexes("public", "users")
+        indexes = postgres_adapter.get_indexes("users", "public")
 
         # Should have indexes on email, username, created_at
         index_names = [idx.index_name.lower() for idx in indexes]
@@ -532,7 +532,7 @@ class TestPostgreSQLIntrospection:
 
     def test_get_table_statistics(self, postgres_adapter):
         """Test getting table statistics"""
-        stats = postgres_adapter.get_table_statistics("public", "users")
+        stats = postgres_adapter.get_table_statistics("users", "public")
 
         assert stats.table_name == "users"
         assert stats.row_count >= 0  # Should have sample data
