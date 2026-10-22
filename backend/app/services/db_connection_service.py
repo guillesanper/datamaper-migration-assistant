@@ -20,6 +20,7 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
 
 import redis  # type: ignore[import-untyped]
+from pydantic import ValidationError
 
 from app.models.db_connection import (
     DBConnectionConfig,
@@ -32,6 +33,7 @@ from app.utils.db_adapters import (
     DBAuthenticationError,
     DBConnectionError,
     DBTimeoutError,
+    DBTLSError,
     MySQLAdapter,
     OracleAdapter,
     PostgreSQLAdapter,
@@ -58,6 +60,26 @@ class SessionExpiredError(DBConnectionServiceError):
     """Session has expired"""
 
     pass
+
+
+class SessionRequiresReconnectError(SessionExpiredError):
+    """
+    La sesión es anterior a la política TLS y se ha invalidado.
+
+    Es una sesión expirada para quien ya captura SessionExpiredError: el usuario debe volver
+    a conectar, esta vez con verificación TLS (o confirmando el opt-out).
+    """
+
+    pass
+
+
+# Mensaje fijo para fallos TLS: el texto del driver puede incluir rutas temporales y detalles
+# de red, así que se registra en el log y no se devuelve al cliente
+TLS_ERROR_MESSAGE = (
+    "TLS verification failed: the server certificate could not be verified (untrusted CA, "
+    "hostname mismatch, expired certificate or server without TLS). Check the CA and hostname, "
+    "or disable verification for this connection (not recommended)"
+)
 
 
 class DBConnectionService:
@@ -186,6 +208,7 @@ class DBConnectionService:
                 dialect=config.dialect,
                 host=config.host,
                 database=config.database,
+                tls_verified=config.tls_verify,
             )
 
         except DBAuthenticationError as e:
@@ -197,6 +220,7 @@ class DBConnectionService:
                 database=config.database,
                 error_message=str(e),
                 error_type="authentication",
+                tls_verified=config.tls_verify,
             )
 
         except DBTimeoutError as e:
@@ -208,6 +232,20 @@ class DBConnectionService:
                 database=config.database,
                 error_message=str(e),
                 error_type="timeout",
+                tls_verified=config.tls_verify,
+            )
+
+        except DBTLSError as e:
+            # Antes que DBConnectionError, de la que hereda. El detalle del driver solo al log
+            logger.warning(f"Connection test failed (tls): {str(e)}")
+            return DBConnectionTestResult(
+                success=False,
+                dialect=config.dialect,
+                host=config.host,
+                database=config.database,
+                error_message=TLS_ERROR_MESSAGE,
+                error_type="tls",
+                tls_verified=config.tls_verify,
             )
 
         except DBConnectionError as e:
@@ -219,6 +257,7 @@ class DBConnectionService:
                 database=config.database,
                 error_message=str(e),
                 error_type="connection",
+                tls_verified=config.tls_verify,
             )
 
         except Exception as e:
@@ -230,6 +269,7 @@ class DBConnectionService:
                 database=config.database,
                 error_message=f"Unexpected error: {str(e)}",
                 error_type="unknown",
+                tls_verified=config.tls_verify,
             )
 
     def create_session(
@@ -292,6 +332,7 @@ class DBConnectionService:
             dialect=config.dialect,
             host=config.host,
             database=config.database,
+            tls_verified=config.tls_verify,
             encrypted_credentials=encrypted_credentials,
             created_at=now,
             expires_at=expires_at,
@@ -309,6 +350,12 @@ class DBConnectionService:
             f"Session created: user_id={user_id}, session_id={session.session_id}, "
             f"dialect={config.dialect}, ttl={ttl_hours}h"
         )
+        if not config.tls_verify:
+            logger.warning(
+                f"TLS verification disabled for connection: user_id={user_id}, "
+                f"project_id={project_id}, session_id={session.session_id}, "
+                f"dialect={config.dialect}, host={config.host}"
+            )
 
         return DBConnectionSessionResponse(
             session_id=session.session_id,
@@ -316,7 +363,32 @@ class DBConnectionService:
             host=session.host,
             database=session.database,
             expires_at=session.expires_at,
+            tls_verified=session.tls_verified,
         )
+
+    def _parse_session(self, redis_key: Any, data: Dict[str, str]) -> DBConnectionSession:
+        """
+        Deserializa una sesión de Redis, invalidando las anteriores a la política TLS.
+
+        Una sesión sin tls_verified se creó antes de que existiera la verificación. En vez de
+        heredar un estado inseguro (o fallar luego con un error TLS poco claro) se borra y se
+        pide al usuario que reconecte.
+
+        Raises:
+            SessionRequiresReconnectError: Si la sesión no lleva el flag tls_verified
+            DBConnectionServiceError: Si el flag existe pero no es legible
+        """
+        if "tls_verified" not in data:
+            self.redis.delete(redis_key)
+            logger.info(f"Session without TLS policy invalidated: key={redis_key!r}")
+            raise SessionRequiresReconnectError(
+                f"Session requires reconnect: {data.get('session_id', '?')}"
+            )
+        try:
+            return DBConnectionSession.from_redis_dict(data)
+        except ValueError as e:
+            logger.error(f"Unreadable session {redis_key!r}: {str(e)}")
+            raise DBConnectionServiceError("Corrupted session data: unreadable TLS flag")
 
     def get_session(self, user_id: str, session_id: str) -> DBConnectionSession:
         """
@@ -345,7 +417,7 @@ class DBConnectionService:
 
         # Deserializar (Redis devuelve bytes)
         data_str = {k.decode(): v.decode() for k, v in data.items()}  # type: ignore[union-attr]
-        session = DBConnectionSession.from_redis_dict(data_str)
+        session = self._parse_session(redis_key, data_str)
 
         # Verificar expiración
         if session.is_expired():
@@ -389,10 +461,16 @@ class DBConnectionService:
             # Parsear JSON
             credentials_dict = json.loads(credentials_json)
 
-            # Crear config
-            return DBConnectionConfig(
+            # Crear config (el validador del modelo exige la confirmación de hostname si
+            # tls_verify es false, así que una sesión sin verificar no se rehidrata sin ella)
+            config = DBConnectionConfig(
                 dialect=session.dialect, **credentials_dict  # type: ignore[arg-type]
             )
+            # El flag en claro es solo metadata para listar: el blob cifrado manda
+            if config.tls_verify != session.tls_verified:
+                logger.error(f"TLS policy mismatch in session {session.session_id}")
+                raise DBConnectionServiceError("Corrupted session data: TLS policy mismatch")
+            return config
 
         except DecryptionError as e:
             logger.error(f"Failed to decrypt session credentials: {str(e)}")
@@ -401,6 +479,10 @@ class DBConnectionService:
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse credentials JSON: {str(e)}")
             raise DBConnectionServiceError(f"Corrupted session data: {str(e)}")
+
+        except ValidationError as e:
+            logger.error(f"Session credentials failed validation: {len(e.errors())} error(s)")
+            raise DBConnectionServiceError("Corrupted session data: invalid configuration")
 
     def delete_session(self, user_id: str, session_id: str) -> bool:
         """
@@ -483,12 +565,14 @@ class DBConnectionService:
             if data:
                 data_str = {k.decode(): v.decode() for k, v in data.items()}  # type: ignore[union-attr]
                 try:
-                    session = DBConnectionSession.from_redis_dict(data_str)
+                    session = self._parse_session(key, data_str)
                     if not session.is_expired():
                         sessions.append(session)
                     else:
                         # Eliminar sesión expirada
                         self.redis.delete(key)
+                except SessionRequiresReconnectError:
+                    continue  # _parse_session ya la ha invalidado
                 except Exception as e:
                     logger.warning(f"Failed to parse session {key}: {str(e)}")
                     continue

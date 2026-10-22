@@ -75,12 +75,9 @@ class MockDatabaseError(Exception):
 class TestConnection:
     """Tests for connection management"""
 
-    @patch("app.utils.db_adapters.oracle_adapter.oracledb.makedsn")
     @patch("app.utils.db_adapters.oracle_adapter.oracledb.connect")
-    def test_connect_success_with_service_name(self, mock_connect, mock_makedsn, adapter):
+    def test_connect_success_with_service_name(self, mock_connect, adapter):
         """Test successful connection with service_name"""
-        mock_dsn = "mocked_dsn"
-        mock_makedsn.return_value = mock_dsn
         mock_conn = MagicMock()
         mock_connect.return_value = mock_conn
 
@@ -88,15 +85,15 @@ class TestConnection:
 
         assert adapter.is_connected is True
         assert adapter.connection == mock_conn
-        mock_makedsn.assert_called_once_with("localhost", 1521, service_name="ORCL")
         mock_connect.assert_called_once()
+        kwargs = mock_connect.call_args.kwargs
+        assert (kwargs["host"], kwargs["port"]) == ("localhost", 1521)
+        assert kwargs["service_name"] == "ORCL"
+        assert "sid" not in kwargs
 
-    @patch("app.utils.db_adapters.oracle_adapter.oracledb.makedsn")
     @patch("app.utils.db_adapters.oracle_adapter.oracledb.connect")
-    def test_connect_success_with_sid(self, mock_connect, mock_makedsn, valid_config_sid):
+    def test_connect_success_with_sid(self, mock_connect, valid_config_sid):
         """Test successful connection with SID"""
-        mock_dsn = "mocked_dsn"
-        mock_makedsn.return_value = mock_dsn
         mock_conn = MagicMock()
         mock_connect.return_value = mock_conn
 
@@ -104,7 +101,10 @@ class TestConnection:
         adapter.connect()
 
         assert adapter.is_connected is True
-        mock_makedsn.assert_called_once_with("localhost", 1521, sid="ORCL")
+        kwargs = mock_connect.call_args.kwargs
+        assert (kwargs["host"], kwargs["port"]) == ("localhost", 1521)
+        assert kwargs["sid"] == "ORCL"
+        assert "service_name" not in kwargs
 
     @patch("app.utils.db_adapters.oracle_adapter.oracledb.DatabaseError", MockDatabaseError)
     @patch("app.utils.db_adapters.oracle_adapter.oracledb.makedsn")

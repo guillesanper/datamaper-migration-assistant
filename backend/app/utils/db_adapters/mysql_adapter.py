@@ -11,8 +11,10 @@ import logging
 from typing import Any, Dict, List, Optional
 
 import pymysql  # type: ignore[import-untyped]
+import pymysql.connections  # type: ignore[import-untyped]
 import pymysql.cursors  # type: ignore[import-untyped]
 from pymysql import InternalError, OperationalError, ProgrammingError
+from pymysql.constants import CLIENT  # type: ignore[import-untyped]
 
 from app.models.db_metadata import (
     ColumnMetadata,
@@ -34,11 +36,34 @@ from .exceptions import (
     DBMetadataNotFoundError,
     DBPermissionError,
     DBQueryExecutionError,
+    DBTLSError,
 )
+from .tls import build_ssl_context, is_tls_error
 from .type_mappers import MySQLTypeMapper
 from .validators import validate_schema_name, validate_table_name
 
 logger = logging.getLogger(__name__)
+
+# Código de error de cliente de MySQL para fallos TLS/SSL (CR_SSL_CONNECTION_ERROR)
+_CR_SSL_CONNECTION_ERROR = 2026
+
+
+class _TLSRequiredConnection(pymysql.connections.Connection):
+    """
+    Conexión PyMySQL que nunca se degrada a texto plano.
+
+    PyMySQL 1.1.0 solo negocia TLS si el servidor lo anuncia en su saludo inicial; si no,
+    sigue adelante sin cifrar y envía la autenticación. Un servidor sin TLS (o un
+    intermediario que oculte esa capacidad) obtendría así la sesión sin cifrar. Aquí se
+    aborta antes de autenticar.
+    """
+
+    def _request_authentication(self):
+        if self.ssl and not self.server_capabilities & CLIENT.SSL:
+            raise OperationalError(
+                _CR_SSL_CONNECTION_ERROR, "TLS/SSL error: the server does not support TLS"
+            )
+        super()._request_authentication()
 
 
 class MySQLAdapter(BaseDBAdapter):
@@ -64,7 +89,7 @@ class MySQLAdapter(BaseDBAdapter):
     def connect(self) -> None:
         """Establece conexión con MySQL"""
         try:
-            self.connection = pymysql.connect(
+            self.connection = _TLSRequiredConnection(
                 host=self.connection_config["host"],
                 port=self.connection_config["port"],
                 database=self.connection_config["database"],
@@ -74,6 +99,8 @@ class MySQLAdapter(BaseDBAdapter):
                 # Usar DictCursor para retornar rows como dicts
                 cursorclass=pymysql.cursors.DictCursor,
                 charset="utf8mb4",
+                # SSLContext: PyMySQL activa TLS y verifica según el contexto (CA en memoria)
+                ssl=build_ssl_context(self.tls),
             )
             self._is_connected = True
             logger.info(
@@ -84,6 +111,8 @@ class MySQLAdapter(BaseDBAdapter):
             error_msg = str(e).lower()
             if "access denied" in error_msg or "authentication" in error_msg:
                 raise DBAuthenticationError(f"Authentication failed for MySQL: {str(e)}")
+            if is_tls_error(str(e)):
+                raise DBTLSError(f"TLS error connecting to MySQL: {str(e)}")
             raise DBConnectionError(f"Cannot connect to MySQL: {str(e)}")
         except Exception as e:
             raise DBConnectionError(f"Unexpected error connecting to MySQL: {str(e)}")

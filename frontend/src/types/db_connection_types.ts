@@ -19,6 +19,13 @@ export interface DBConnectionConfig {
   // Oracle específico
   service_name?: string;
   sid?: string;
+  // TLS: el cifrado es siempre obligatorio; esto solo controla la verificación del certificado
+  /** false salta la verificación del certificado (exige confirm_hostname). Por defecto true */
+  tls_verify?: boolean;
+  /** CA propia en PEM (solo certificados). No soportada en SQL Server */
+  tls_ca_pem?: string;
+  /** Debe coincidir con host cuando tls_verify es false; el backend lo exige */
+  confirm_hostname?: string;
 }
 
 /**
@@ -30,7 +37,10 @@ export interface DBConnectionTestResult {
   host: string;
   database: string;
   error_message?: string | null;
+  /** authentication | connection | timeout | tls | unknown */
   error_type?: string | null;
+  /** false si la prueba no verificó el certificado del servidor */
+  tls_verified: boolean;
 }
 
 /**
@@ -42,6 +52,8 @@ export interface DBConnectionSessionResponse {
   host: string;
   database: string;
   expires_at: string;
+  /** false si la conexión se creó sin verificar el certificado; no cambia en toda la sesión */
+  tls_verified: boolean;
 }
 
 /**
@@ -218,4 +230,5 @@ export interface ValidationErrors {
   service_name?: string;
   sid?: string;
   timeout?: string;
+  tls_ca_pem?: string;
 }

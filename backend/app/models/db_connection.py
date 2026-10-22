@@ -13,7 +13,16 @@ import uuid
 from datetime import datetime
 from typing import Any, Dict, Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from cryptography import x509
+from cryptography.hazmat.primitives import serialization
+from pydantic import BaseModel, Field, StrictBool, field_validator, model_validator
+
+from app.utils.db_adapters.exceptions import DBValidationError
+from app.utils.db_adapters.validators import normalize_hostname, validate_host
+
+# Límites de la CA propia que se sube por conexión
+MAX_CA_PEM_LENGTH = 65_536
+MAX_CA_CERTIFICATES = 10
 
 
 class DBConnectionConfig(BaseModel):
@@ -36,11 +45,86 @@ class DBConnectionConfig(BaseModel):
     user: str = Field(..., min_length=1, max_length=128, description="Usuario de la base de datos")
     password: str = Field(..., min_length=1, description="Contraseña de la base de datos")
     timeout: int = Field(default=30, ge=5, le=600, description="Timeout de conexión en segundos")
+    service_name: Optional[str] = Field(
+        default=None, min_length=1, max_length=128, description="Service name (solo Oracle)"
+    )
+    sid: Optional[str] = Field(
+        default=None, min_length=1, max_length=128, description="SID (solo Oracle)"
+    )
+    tls_verify: StrictBool = Field(
+        default=True,
+        description=(
+            "Verifica el certificado del servidor y su hostname. Desactivarlo exige "
+            "confirm_hostname; el cifrado TLS sigue siendo obligatorio"
+        ),
+    )
+    tls_ca_pem: Optional[str] = Field(
+        default=None,
+        max_length=MAX_CA_PEM_LENGTH,
+        description="CA propia en PEM (solo certificados) con la que verificar el servidor",
+    )
+    confirm_hostname: Optional[str] = Field(
+        default=None,
+        max_length=255,
+        description="Debe coincidir con host cuando tls_verify es false",
+    )
 
     @property
     def username(self) -> str:
         """Alias for user - used by tests"""
         return self.user
+
+    @field_validator("host")
+    @classmethod
+    def validate_host_format(cls, v: str) -> str:
+        """El host se interpola en cadenas de conexión: solo hostname o IP"""
+        try:
+            return validate_host(v)
+        except DBValidationError as e:
+            raise ValueError(str(e))
+
+    @field_validator("tls_ca_pem")
+    @classmethod
+    def validate_tls_ca_pem(cls, v: Optional[str]) -> Optional[str]:
+        """
+        Acepta solo certificados PEM y los vuelve a serializar.
+
+        Al normalizar se descarta cualquier texto ajeno al certificado, que de otro modo
+        acabaría en un archivo temporal que leen los drivers.
+        """
+        if v is None:
+            return v
+        if "PRIVATE KEY" in v:
+            raise ValueError("tls_ca_pem must contain certificates only, never private keys")
+        try:
+            certificates = x509.load_pem_x509_certificates(v.encode())
+        except ValueError:
+            raise ValueError("tls_ca_pem is not a valid PEM certificate")
+        if len(certificates) > MAX_CA_CERTIFICATES:
+            raise ValueError(f"tls_ca_pem accepts at most {MAX_CA_CERTIFICATES} certificates")
+        return "".join(
+            cert.public_bytes(serialization.Encoding.PEM).decode() for cert in certificates
+        )
+
+    @model_validator(mode="after")
+    def validate_tls_policy(self) -> "DBConnectionConfig":
+        """
+        Reglas TLS que valen para cualquier camino de entrada (/test, /sessions, rehidratación).
+
+        La confirmación del hostname se exige aquí, no en la UI: un cliente que llame a la API
+        directamente no puede desactivar la verificación sin confirmarlo.
+        """
+        if self.tls_ca_pem and self.dialect == "sqlserver":
+            raise ValueError(
+                "tls_ca_pem is not supported for SQL Server: ODBC Driver 18 only uses the system "
+                "trust store. Install the CA in the system store"
+            )
+        if not self.tls_verify:
+            if self.tls_ca_pem:
+                raise ValueError("tls_ca_pem cannot be combined with tls_verify=false")
+            if normalize_hostname(self.confirm_hostname or "") != normalize_hostname(self.host):
+                raise ValueError("confirm_hostname must match host when tls_verify is false")
+        return self
 
     @field_validator("dialect")
     @classmethod
@@ -58,14 +142,27 @@ class DBConnectionConfig(BaseModel):
         Returns:
             Dict con configuración para BaseDBAdapter
         """
-        return {
+        adapter_config: Dict[str, Any] = {
             "host": self.host,
             "port": self.port,
             "database": self.database,
             "user": self.user,
             "password": self.password,
             "timeout": self.timeout,
+            "tls_verify": self.tls_verify,
         }
+        # Identificadores de Oracle: solo se emiten si vienen informados
+        if self.service_name:
+            adapter_config["service_name"] = self.service_name
+        if self.sid:
+            adapter_config["sid"] = self.sid
+        if self.tls_ca_pem:
+            adapter_config["tls_ca_pem"] = self.tls_ca_pem
+        # La confirmación viaja en el blob cifrado: sin ella una sesión sin verificar
+        # no se puede rehidratar (el validador del modelo la exige)
+        if not self.tls_verify:
+            adapter_config["confirm_hostname"] = self.confirm_hostname
+        return adapter_config
 
     class Config:
         json_schema_extra = {
@@ -130,6 +227,13 @@ class DBConnectionSession(BaseModel):
     dialect: str = Field(..., description="Tipo de base de datos")
     host: str = Field(..., description="Hostname de la base de datos (metadata no cifrada)")
     database: str = Field(..., description="Nombre de la base de datos (metadata no cifrada)")
+    tls_verified: bool = Field(
+        ...,
+        description=(
+            "False si la conexión se creó con tls_verify=false. Es metadata no cifrada para "
+            "poder listar sesiones; el blob cifrado es la fuente de verdad"
+        ),
+    )
     encrypted_credentials: str = Field(
         ..., description="Credenciales cifradas con AES-256-GCM (base64)"
     )
@@ -158,6 +262,7 @@ class DBConnectionSession(BaseModel):
             "dialect": self.dialect,
             "host": self.host,
             "database": self.database,
+            "tls_verified": "1" if self.tls_verified else "0",
             "encrypted_credentials": self.encrypted_credentials,
             "created_at": self.created_at.isoformat(),
             "expires_at": self.expires_at.isoformat(),
@@ -178,7 +283,13 @@ class DBConnectionSession(BaseModel):
 
         Returns:
             DBConnectionSession instanciada
+
+        Raises:
+            ValueError: Si tls_verified falta o no es "1"/"0" (sesión anterior al flag o dañada)
         """
+        tls_verified = {"1": True, "0": False}.get(data.get("tls_verified", ""))
+        if tls_verified is None:
+            raise ValueError("Session has no valid tls_verified flag")
         return cls(
             session_id=data["session_id"],
             user_id=data["user_id"],
@@ -186,6 +297,7 @@ class DBConnectionSession(BaseModel):
             dialect=data["dialect"],
             host=data["host"],
             database=data["database"],
+            tls_verified=tls_verified,
             encrypted_credentials=data["encrypted_credentials"],
             created_at=datetime.fromisoformat(data["created_at"]),
             expires_at=datetime.fromisoformat(data["expires_at"]),
@@ -201,6 +313,7 @@ class DBConnectionSession(BaseModel):
                 "dialect": "postgresql",
                 "host": "localhost",
                 "database": "mydb",
+                "tls_verified": True,
                 "encrypted_credentials": "base64_encrypted_data...",
                 "created_at": "2025-01-29T10:00:00",
                 "expires_at": "2025-01-29T13:00:00",
@@ -224,7 +337,11 @@ class DBConnectionTestResult(BaseModel):
         default=None, description="Mensaje de error si la conexión falló"
     )
     error_type: Optional[str] = Field(
-        default=None, description="Tipo de error (authentication, connection, timeout, etc.)"
+        default=None,
+        description="Tipo de error (authentication, connection, timeout, tls, unknown)",
+    )
+    tls_verified: bool = Field(
+        ..., description="True si la prueba verificó el certificado del servidor"
     )
 
     class Config:
@@ -236,6 +353,7 @@ class DBConnectionTestResult(BaseModel):
                 "database": "mydb",
                 "error_message": None,
                 "error_type": None,
+                "tls_verified": True,
             }
         }
 
@@ -252,6 +370,10 @@ class DBConnectionSessionResponse(BaseModel):
     host: str = Field(..., description="Hostname de la base de datos")
     database: str = Field(..., description="Nombre de la base de datos")
     expires_at: datetime = Field(..., description="Fecha de expiración de la sesión")
+    tls_verified: bool = Field(
+        ...,
+        description="False si la conexión se creó sin verificar el certificado (tls_verify=false)",
+    )
 
     class Config:
         json_schema_extra = {
@@ -261,5 +383,6 @@ class DBConnectionSessionResponse(BaseModel):
                 "host": "localhost",
                 "database": "mydb",
                 "expires_at": "2025-01-29T13:00:00",
+                "tls_verified": True,
             }
         }

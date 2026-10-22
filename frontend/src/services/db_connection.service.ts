@@ -39,6 +39,7 @@ class DBConnectionService {
           database: config.database,
           error_message: e.response.data.detail || e.response.data.message || 'Error al probar la conexión',
           error_type: e.response.data.error_type || 'connection_error',
+          tls_verified: config.tls_verify !== false,
         };
       }
 
@@ -215,15 +216,22 @@ class DBConnectionService {
   }
 
   /**
+   * Obtener una sesión activa (con su tls_verified), o undefined si ya no existe
+   */
+  async getActiveSession(sessionId: string): Promise<DBConnectionSessionResponse | undefined> {
+    try {
+      const sessions = await this.listSessions();
+      return sessions.find(session => session.session_id === sessionId);
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
    * Verificar si una sesión sigue activa
    */
   async isSessionActive(sessionId: string): Promise<boolean> {
-    try {
-      const sessions = await this.listSessions();
-      return sessions.some(session => session.session_id === sessionId);
-    } catch {
-      return false;
-    }
+    return (await this.getActiveSession(sessionId)) !== undefined;
   }
 
   /**

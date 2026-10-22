@@ -36,6 +36,7 @@ from .exceptions import (
     DBPermissionError,
     DBQueryExecutionError,
     DBTimeoutError,
+    DBTLSError,
     DBValidationError,
 )
 from .mysql_adapter import MySQLAdapter
@@ -65,6 +66,7 @@ __all__ = [
     "DBValidationError",
     "DBDialectNotSupportedError",
     "DBTimeoutError",
+    "DBTLSError",
     "DBMetadataNotFoundError",
     # Validators
     "validate_identifier",

@@ -11,6 +11,39 @@ Sistema de conectores para bases de datos externas con introspección de metadat
 - ❌ NO ejecuta `SELECT * FROM user_tables`
 - ❌ NO ejecuta `COUNT(*)` sobre datos
 
+## 🔐 TLS y verificación del certificado
+
+Toda conexión a una BD externa va **cifrada con TLS y verifica el certificado del servidor** (certificado y hostname). No hay modo sin TLS: un servidor que no ofrezca TLS no se puede conectar (en desarrollo, usa uno con TLS; los de `docker-compose.test.yml` aún no lo tienen, ver más abajo).
+
+La política vive en un solo módulo, [`tls.py`](tls.py), y la aplica `BaseDBAdapter`. Los campos viajan en la configuración de conexión (`DBConnectionConfig`):
+
+| Campo | Por defecto | Significado |
+|---|---|---|
+| `tls_verify` | `true` | `false` salta **solo** la verificación; el cifrado sigue siendo obligatorio. Booleano estricto: `"false"` o `0` no valen |
+| `confirm_hostname` | — | Obligatorio y **igual a `host`** (sin distinguir mayúsculas ni punto final) si `tls_verify` es `false`. Se exige en el backend (`/test` y `/sessions`), no solo en la UI |
+| `tls_ca_pem` | — | CA propia en PEM (solo certificados; máx. 64 KB y 10 certificados; nunca claves privadas). Incompatible con `tls_verify=false` |
+
+Qué recibe cada driver:
+
+| Motor | Por defecto (verifica) | `tls_verify=false` (cifra, no verifica) | CA propia |
+|---|---|---|---|
+| PostgreSQL (psycopg2) | `sslmode=verify-full` + `sslrootcert` | `sslmode=require` | archivo temporal en `sslrootcert`, borrado siempre al terminar |
+| MySQL (PyMySQL 1.1.0) | `ssl=SSLContext` (`CERT_REQUIRED` + hostname) | `SSLContext` con `CERT_NONE` | cargada desde memoria en el `SSLContext` |
+| SQL Server (ODBC Driver 18) | `Encrypt=yes;TrustServerCertificate=no` | `Encrypt=yes;TrustServerCertificate=yes` | **no soportada** (422): ODBC 18 solo usa el almacén del sistema; instala allí la CA |
+| Oracle (oracledb thin) | `protocol=tcps` + `ssl_server_dn_match=True` | `ssl_server_dn_match=False` + `CERT_NONE` | cargada desde memoria en el `SSLContext` |
+
+Detalles que conviene conocer (todos comprobados con los drivers reales salvo que se diga lo contrario):
+
+- **MySQL**: PyMySQL 1.1.0 continúa **en texto plano** si el servidor no anuncia TLS. `_TLSRequiredConnection` lo impide abortando antes de autenticar.
+- **Oracle**: la verificación de hostname es `ssl_server_dn_match`; solo entiende nombres DNS/CN, **no IPs**. Con verificación activa conecta por el hostname del certificado. Con `ssl_server_dn_match=False` oracledb acepta un certificado de otro hostname, por eso solo se desactiva en el opt-out.
+- **SQL Server**: solo se prueba la cadena de conexión (hay tests de inyección y de los atributos TLS); no hay un servidor SQL Server de test. Además, `backend/Dockerfile` no instala `msodbcsql18`.
+- Los fallos de verificación se lanzan como `DBTLSError` (subclase de `DBConnectionError`) y la API los devuelve como `error_type="tls"` con un mensaje fijo, sin el texto del driver. Un corte de red tras un handshake aceptado no cuenta como fallo TLS.
+- El host solo admite hostname o IP (`validate_host`): se interpola en cadenas de conexión.
+
+### Un adaptador nuevo
+
+Debe leer `self.tls`, y añadirse a `CASES` en `test/unit/db_connectors/test_tls_guard.py` (qué recibe su driver al verificar y al hacer opt-out). Sin eso el test guardián falla. Fuera de `tls.py` no puede aparecer ningún literal que debilite la verificación (`CERT_NONE`, `TrustServerCertificate=yes`, `sslmode` débil...).
+
 ## 📦 Instalación de Dependencias
 
 ```bash
