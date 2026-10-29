@@ -1,21 +1,22 @@
 repos:
   # Python formatting and linting
-  - repo: https://github.com/psf/black
-    rev: 24.3.0
+  # Versiones alineadas con backend/requirements-dev.txt (las que usa el CI)
+  - repo: https://github.com/psf/black-pre-commit-mirror
+    rev: 26.10.1
     hooks:
       - id: black
         files: ^backend/
         args: ['--config', 'backend/pyproject.toml']
 
   - repo: https://github.com/PyCQA/flake8
-    rev: 7.0.0
+    rev: 7.5.0
     hooks:
       - id: flake8
         files: ^backend/
         args: ['--config=backend/setup.cfg']
 
   - repo: https://github.com/PyCQA/isort
-    rev: 5.13.2
+    rev: 9.0.2
     hooks:
       - id: isort
         files: ^backend/

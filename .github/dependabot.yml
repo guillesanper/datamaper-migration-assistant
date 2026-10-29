@@ -9,7 +9,18 @@ updates:
     open-pull-requests-limit: 1
     reviewers:
       - "guillermo"  # Reemplazar con tu username de GitHub
+    # Dependabot lee todos los requirements*.txt del directorio, también requirements-dev.txt.
+    # Las herramientas de lint/tipos van en su propio grupo: un bump de black o mypy puede
+    # cambiar los resultados del CI y conviene revisarlo aparte de las dependencias de la app.
+    # Al aceptar uno, actualizar también las revs de .pre-commit-config.yaml.
     groups:
+      backend-dev-tools:
+        patterns:
+          - "black"
+          - "isort"
+          - "flake8"
+          - "mypy"
+          - "types-*"
       backend-python:
         patterns:
           - "*"
