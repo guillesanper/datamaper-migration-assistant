@@ -15,7 +15,7 @@ cd YOUR-REPO
 make install
 
 # O manualmente:
-cd backend && pip install -r requirements.txt
+cd backend && pip install -r requirements.txt -r requirements-dev.txt
 cd ../frontend && npm ci
 cd ../landing && npm ci
 pip install pre-commit && pre-commit install

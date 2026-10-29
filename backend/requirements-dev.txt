@@ -1,0 +1,10 @@
+# Herramientas de lint y tipos del CI (.github/workflows/pr-checks.yml).
+# Versiones fijadas para que el CI no cambie con cada release; Dependabot las actualiza por PR.
+# Mantener alineadas con .pre-commit-config.yaml.
+black==26.10.1
+isort==9.0.2
+flake8==7.5.0
+mypy==2.4.1
+types-psycopg2==2.9.21.20261008
+types-redis==4.6.0.20241004
+types-requests==2.33.0.20261006

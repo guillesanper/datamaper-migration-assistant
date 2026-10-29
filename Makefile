@@ -19,7 +19,7 @@ help:
 
 install:
 	@echo "Installing backend dependencies..."
-	cd backend && pip install -r requirements.txt
+	cd backend && pip install -r requirements.txt -r requirements-dev.txt
 	@echo "Installing frontend dependencies..."
 	cd frontend && npm ci
 	@echo "Installing landing dependencies..."
