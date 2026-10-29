@@ -1,10 +1,30 @@
-# DataMap - Platform
+# DataMap — Asistente de migración de bases de datos
 
-[![PR Checks](https://github.com/YOUR-USERNAME/YOUR-REPO/actions/workflows/pr-checks.yml/badge.svg)](https://github.com/YOUR-USERNAME/YOUR-REPO/actions/workflows/pr-checks.yml)
-[![Main CI/CD](https://github.com/YOUR-USERNAME/YOUR-REPO/actions/workflows/main.yml/badge.svg)](https://github.com/YOUR-USERNAME/YOUR-REPO/actions/workflows/main.yml)
-[![codecov](https://codecov.io/gh/YOUR-USERNAME/YOUR-REPO/branch/main/graph/badge.svg)](https://codecov.io/gh/YOUR-USERNAME/YOUR-REPO)
+[![PR Checks](https://github.com/guillesanper/datamaper-migration-assistant/actions/workflows/pr-checks.yml/badge.svg)](https://github.com/guillesanper/datamaper-migration-assistant/actions/workflows/pr-checks.yml)
+[![Main CI/CD](https://github.com/guillesanper/datamaper-migration-assistant/actions/workflows/main.yml/badge.svg)](https://github.com/guillesanper/datamaper-migration-assistant/actions/workflows/main.yml)
 
-Plataforma de mapeo y transformación de datos con backend FastAPI y frontend React.
+Plataforma web para planificar y generar migraciones entre bases de datos relacionales. DataMap
+inspecciona esquemas de **PostgreSQL, MySQL, SQL Server y Oracle** a través de sus catálogos,
+permite mapear tablas y columnas de origen a destino en una interfaz de grafo y genera los scripts
+`INSERT INTO ... SELECT` de la migración. El orden de ejecución sale de un orden topológico sobre el
+grafo de claves foráneas, que falla de forma explícita si encuentra ciclos.
+
+**Stack:** FastAPI · Python 3.11 · PostgreSQL · Redis · React 19 · TypeScript · Vite · Astro · Docker · GitHub Actions
+
+## ✨ Funcionalidades principales
+
+- **Conectores a BD externas** con TLS verificado por defecto, CA propia por conexión y credenciales
+  que no se persisten en claro.
+- **Introspección de esquemas** (tablas, columnas, claves primarias y foráneas) y mapeo visual
+  origen → destino.
+- **Generación de scripts de migración** ordenados por dependencias de claves foráneas.
+- **Colaboración en tiempo real**: proyectos compartidos, comentarios, bloqueos de edición,
+  notificaciones e historial de versiones.
+- **Seguridad**: sesiones en cookies `HttpOnly`, protección CSRF, verificación de email por OTP,
+  límites de peticiones por IP y por cuenta, cifrado AES-256-GCM con claves derivadas con Argon2id
+  y registro de eventos de seguridad.
+- **Calidad**: tests unitarios, de integración y end-to-end con pytest, linters y type checking en
+  cada Pull Request, escaneo de dependencias e imagen Docker con Trivy.
 
 ## 🚀 Quick Start
 
@@ -166,13 +186,8 @@ Actualiza dependencias automáticamente cada lunes:
 
 ### Render.com (Producción)
 
-El proyecto se despliega automáticamente en Render.com desde la rama `main`:
-
-- **Backend**: https://datamap-backend.onrender.com
-- **Frontend**: https://datamap-frontend.onrender.com
-- **Landing**: https://datamap-landing.onrender.com
-
-La configuración está en [`backend/render.yaml`](backend/render.yaml).
+El pipeline de `main` está preparado para desplegar en Render.com (backend, frontend y landing);
+la configuración está en [`backend/render.yaml`](backend/render.yaml).
 
 ### Despliegue Manual
 
@@ -344,21 +359,8 @@ pytest --cov=app --cov-report=html
 
 ## 🤝 Contributing
 
-1. Crear una feature branch: `git checkout -b feature/amazing-feature`
-2. Hacer commits: `git commit -m 'Add amazing feature'`
-3. Push a la branch: `git push origin feature/amazing-feature`
-4. Abrir un Pull Request
-5. Esperar que pasen los checks de CI
-6. Obtener code review y merge
+Guía de contribución, convenciones de código y flujo de ramas en [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
-## 📄 License
+## 👤 Autor
 
-[Tu licencia aquí]
-
-## 👥 Team
-
-[Tu equipo aquí]
-
----
-
-**Nota**: Reemplaza `YOUR-USERNAME` y `YOUR-REPO` en los badges con tus valores reales de GitHub.
+Guillermo Sánchez — [GitHub](https://github.com/guillesanper) · [Web](https://guillesanper.github.io)

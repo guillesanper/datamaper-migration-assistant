@@ -471,30 +471,6 @@ def test_encryption_roundtrip():
 
 ---
 
-## 💡 Para Continuar en Otro Chat
-
-**Si necesitas retomar desde otro chat, proporciona:**
-
-1. Este archivo (`ENCRYPTION_IMPLEMENTATION_STATUS.md`)
-2. El archivo de documentación (`ENCRYPTION_SETUP.md`)
-3. Contexto específico: "Quiero integrar cifrado en schemas_crud.py"
-
-**Prompt sugerido para nuevo chat**:
-```
-Hola, estoy trabajando en el sistema de cifrado de DataMap.
-
-Ya tengo implementado:
-- EncryptionManager con AES-256-GCM + Argon2id
-- Todos los servicios y routers de cifrado
-- Migración SQL completa
-
-Lee ENCRYPTION_IMPLEMENTATION_STATUS.md para ver el estado actual.
-
-Necesito ayuda con: [tu tarea específica]
-```
-
----
-
 ## 📚 Archivos de Referencia Clave
 
 1. **Arquitectura y diseño**: `ENCRYPTION_SETUP.md`

@@ -199,7 +199,7 @@ sqlparse==0.5.3
 
 ### 🎯 Tarea 1.1: Implementar BaseAdapter Abstracto
 
-**Prompt Específica:**
+**Especificación:**
 
 ```
 Crea un archivo `backend/app/utils/db_adapters/base_adapter.py` que defina:
@@ -568,7 +568,7 @@ SELECT * FROM users;
 
 ### 🎯 Tarea 1.2: Implementar PostgreSQLAdapter
 
-**Prompt Específica:**
+**Especificación:**
 
 ```
 Implementa `backend/app/utils/db_adapters/postgres_adapter.py` que extienda `BaseDBAdapter`.
@@ -615,7 +615,7 @@ CONTEXTO:
 
 ### 🎯 Tarea 1.3: Implementar MySQLAdapter
 
-**Prompt Específica:**
+**Especificación:**
 
 ```
 Implementa `backend/app/utils/db_adapters/mysql_adapter.py` que extienda `BaseDBAdapter`.
@@ -658,7 +658,7 @@ MANEJO DE ERRORES:
 
 ### 🎯 Tarea 1.4: Implementar SQLServerAdapter
 
-**Prompt Específica:**
+**Especificación:**
 
 ```
 Implementa `backend/app/utils/db_adapters/sqlserver_adapter.py` que extienda `BaseDBAdapter`.
@@ -705,7 +705,7 @@ MANEJO DE ERRORES:
 
 ### 🎯 Tarea 1.5: Implementar OracleAdapter
 
-**Prompt Específica:**
+**Especificación:**
 
 ```
 Implementa `backend/app/utils/db_adapters/oracle_adapter.py` que extienda `BaseDBAdapter`.
@@ -752,7 +752,7 @@ MANEJO DE ERRORES:
 
 ### 🎯 Tarea 1.6: Implementar DBConnectionService
 
-**Prompt Específica:**
+**Especificación:**
 
 ```
 Crea `backend/app/services/db_connection_service.py` que:
@@ -816,7 +816,7 @@ CONSIDERACIONES DE SEGURIDAD:
 
 ### 🎯 Tarea 1.7: Implementar API Endpoints de Conexión
 
-**Prompt Específica:**
+**Especificación:**
 
 ```
 Crea `backend/app/routers/database_connections.py` con endpoints:
@@ -884,7 +884,7 @@ CONTEXTO:
 
 ### 🎯 Tarea 2.1: Extender RedisSessionCache para Conexiones DB
 
-**Prompt Específica:**
+**Especificación:**
 
 ```
 Modifica `backend/app/utils/redis_session_cache.py` para agregar:
@@ -959,7 +959,7 @@ CONTEXTO:
 
 ### 🎯 Tarea 2.2: Implementar Middleware de DB Session
 
-**Prompt Específica:**
+**Especificación:**
 
 ```
 Crea `backend/app/middleware/db_connection_session.py` que:
@@ -1011,7 +1011,7 @@ CONTEXTO:
 
 ### 🎯 Tarea 2.3: Implementar Connection Pooling (Opcional)
 
-**Prompt Específica:**
+**Especificación:**
 
 ```
 DECISIÓN: ¿Necesitamos connection pooling para conexiones temporales?
@@ -1061,7 +1061,7 @@ DECISIÓN FINAL: Implementar SOLO si profiling muestra que es necesario.
 
 ### 🎯 Tarea 3.1: Implementar SchemaIntrospectionService
 
-**Prompt Específica:**
+**Especificación:**
 
 ```
 Crea `backend/app/services/schema_introspection_service.py` que:
@@ -1146,7 +1146,7 @@ CONTEXTO:
 
 ### 🎯 Tarea 3.2: Implementar Endpoints de Introspección
 
-**Prompt Específica:**
+**Especificación:**
 
 ```
 Agrega a `backend/app/routers/database_connections.py`:
@@ -1191,7 +1191,7 @@ CACHE:
 
 ### 🎯 Tarea 3.3: Implementar Comparador de Schemas
 
-**Prompt Específica:**
+**Especificación:**
 
 ```
 Implementa lógica de comparación entre schemas en `SchemaIntrospectionService.compare_schemas()`.
@@ -1285,7 +1285,7 @@ Response: ComparisonResult
 
 ### 🎯 Tarea 4.1: Implementar MigrationGeneratorService
 
-**Prompt Específica:**
+**Especificación:**
 
 ```
 Crea `backend/app/services/migration_generator_service.py` que genere scripts DDL para migración.
@@ -1489,7 +1489,7 @@ CONTEXTO:
 
 ### 🎯 Tarea 4.2: Implementar Generador de Scripts de Datos (DML)
 
-**Prompt Específica:**
+**Especificación:**
 
 ```
 Implementa generación de scripts INSERT para copiar datos de origen a destino.
@@ -1631,7 +1631,7 @@ Body: {
 
 ### 🎯 Tarea 4.3: Implementar Endpoints de Generación de Scripts
 
-**Prompt Específica:**
+**Especificación:**
 
 ```
 Crea `backend/app/routers/migration_scripts.py` con endpoints:
@@ -1742,7 +1742,7 @@ Response: {
 
 ### 🎯 Tarea 5.1: Instalar y Configurar SQLGlot
 
-**Prompt Específica:**
+**Especificación:**
 
 ```
 Instala sqlglot para traducción de consultas SQL entre dialectos.
@@ -1805,7 +1805,7 @@ https://github.com/tobymao/sqlglot
 
 ### 🎯 Tarea 5.2: Implementar SQLTranslatorService
 
-**Prompt Específica:**
+**Especificación:**
 
 ```
 Crea `backend/app/services/sql_translator_service.py` que:
@@ -1962,7 +1962,7 @@ Response: {
 
 ### 🎯 Tarea 5.3: Validador de Queries SQL (Sin Ejecución)
 
-**Prompt Específica:**
+**Especificación:**
 
 ```
 OBJETIVO: Permitir al usuario escribir queries y traducirlas entre dialectos, pero SIN EJECUTARLAS.
@@ -2021,7 +2021,7 @@ DataMap NO ejecuta queries sobre datos de usuario. Solo provee:
 
 ### 🎯 Tarea 6.1: Tests Unitarios de Adapters
 
-**Prompt Específica:**
+**Especificación:**
 
 ```
 Crea `backend/test/unit/test_db_adapters.py` con tests para cada adapter.
@@ -2168,7 +2168,7 @@ pytest backend/test/unit/test_db_adapters.py -v --cov=app/utils/db_adapters
 
 ### 🎯 Tarea 6.2: Tests de Integración con Bases de Datos Reales
 
-**Prompt Específica:**
+**Especificación:**
 
 ```
 Crea `backend/test/integration/test_db_connection_flow.py` para tests E2E.
@@ -2318,7 +2318,7 @@ docker-compose -f docker-compose.test.yml down
 
 ### 🎯 Tarea 6.3: Auditoría de Seguridad
 
-**Prompt Específica:**
+**Especificación:**
 
 ```
 Realiza auditoría de seguridad completa del sistema de conexiones.
