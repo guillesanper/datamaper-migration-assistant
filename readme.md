@@ -11,7 +11,7 @@ grafo de claves foráneas, que falla de forma explícita si encuentra ciclos.
 
 **Stack:** FastAPI · Python 3.11 · PostgreSQL · Redis · React 19 · TypeScript · Vite · Astro · Docker · GitHub Actions
 
-## ✨ Funcionalidades principales
+## Funcionalidades principales
 
 - **Conectores a BD externas** con TLS verificado por defecto, CA propia por conexión y credenciales
   que no se persisten en claro.
@@ -26,7 +26,7 @@ grafo de claves foráneas, que falla de forma explícita si encuentra ciclos.
 - **Calidad**: tests unitarios, de integración y end-to-end con pytest, linters y type checking en
   cada Pull Request, escaneo de dependencias e imagen Docker con Trivy.
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Desarrollo Local
 
@@ -87,32 +87,50 @@ Cosas a tener en cuenta:
 - Cada código admite 5 comprobaciones erróneas (`OTP_MAX_ATTEMPTS`); al llegar se invalida y hay que pedir otro. Las rutas de autenticación tienen límite de peticiones (429 con `Retry-After`): en desarrollo es permisivo; valores y variables en [Autenticación: límites y variables](#autenticación-límites-y-variables).
 - Mailpit solo es para desarrollo; en producción se usa un SMTP real (ver [`backend/docs/DEPLOYMENT_GUIDE.md`](backend/docs/DEPLOYMENT_GUIDE.md)).
 
-## 🏗️ Arquitectura
+## Arquitectura
 
-```
-┌─────────────────────────────────────────┐
-│  Frontend (React + Vite + TypeScript)   │
-│  http://localhost:5173                  │
-└──────────────┬──────────────────────────┘
-               │ API calls
-               ▼
-┌─────────────────────────────────────────┐
-│  Backend (FastAPI + Python 3.11)        │
-│  http://localhost:8000                  │
-└──────────┬─────────────┬────────────────┘
-           │             │
-           ▼             ▼
-    ┌──────────┐   ┌──────────┐
-    │PostgreSQL│   │  Redis   │
-    │  :5432   │   │  :6379   │
-    └──────────┘   └──────────┘
+```mermaid
+flowchart TB
+    user(["Usuario"]) --> spa["Frontend SPA<br/>React + Vite · :5173"]
+    visitor(["Visitante"]) --> landing["Landing · Astro"]
+
+    subgraph backend["Backend · FastAPI :8000"]
+        ws["WebSocket<br/>colaboración en tiempo real"]
+        api["Routers REST<br/>auth · proyectos · mappings · versiones"]
+        conn["Conectores<br/>introspección de catálogos"]
+        gen["Generador de migraciones<br/>orden topológico por FKs"]
+        copy["Copia por lotes<br/>entre BDs distintas"]
+        api --> gen --> copy
+        api --> conn
+    end
+
+    spa -- "HTTPS · cookie HttpOnly + CSRF" --> api
+    spa <-- "eventos" --> ws
+
+    subgraph infra["Servicios"]
+        pg[("PostgreSQL<br/>datos · rate limiting<br/>logs de seguridad")]
+        redis[("Redis<br/>sesiones de cifrado<br/>y de conector")]
+        smtp["SMTP · códigos OTP<br/>Mailpit en desarrollo"]
+        stripe["Stripe · facturación"]
+        pg ~~~ redis ~~~ smtp ~~~ stripe
+    end
+    api --> pg & redis & smtp & stripe
+
+    subgraph ext["BDs del cliente · PostgreSQL · MySQL · SQL Server · Oracle"]
+        src[("Origen")]
+        dst[("Destino")]
+    end
+
+    conn -- "introspección con TLS verificado" --> ext
+    copy -- "SELECT en streaming" --> src
+    copy -- "INSERT parametrizado" --> dst
 ```
 
 Los conectores a bases de datos externas (PostgreSQL, MySQL, SQL Server, Oracle) exigen TLS y verifican el certificado del servidor por defecto; se puede subir una CA propia por conexión, y desactivar la verificación es un opt-out que exige confirmar el hostname y deja la conexión marcada como «Sin verificar». Ver [`backend/app/utils/db_adapters/README.md`](backend/app/utils/db_adapters/README.md#-tls-y-verificación-del-certificado).
 
 En desarrollo con Docker Compose, el backend también envía los correos (códigos de verificación) a Mailpit (SMTP `:1025`, interfaz web `:8025`).
 
-## 🧪 Testing
+## Testing
 
 ```bash
 # Run all tests
@@ -131,7 +149,7 @@ pytest -m integration   # Integration tests only
 pytest -m e2e          # End-to-end tests
 ```
 
-## 🔍 Linting & Formatting
+## Linting & Formatting
 
 ```bash
 # Check linting
@@ -149,40 +167,40 @@ make lint-frontend
 make format-frontend
 ```
 
-## 🔄 CI/CD Pipeline
+## CI/CD Pipeline
 
 Este proyecto utiliza GitHub Actions para CI/CD:
 
 ### PR Workflow (`.github/workflows/pr-checks.yml`)
 Se ejecuta en cada Pull Request:
-- ✅ Linting (flake8, ESLint)
-- ✅ Type checking (mypy, TypeScript)
-- ✅ Tests (pytest con coverage)
-- ✅ Security scanning (safety, npm audit)
-- ✅ Build validation (Docker, frontend, landing)
-- ⚡ Path filtering para optimizar tiempos
+- Linting (flake8, ESLint)
+- Type checking (mypy, TypeScript)
+- Tests (pytest con coverage)
+- Security scanning (safety, npm audit)
+- Build validation (Docker, frontend, landing)
+- Path filtering para optimizar tiempos
 
 ### Main Workflow (`.github/workflows/main.yml`)
 Se ejecuta en cada push a `main`:
-- ✅ Full test suite con coverage
-- ✅ Docker build & push a GitHub Container Registry
-- ✅ Security scan con Trivy
-- ✅ Validación de builds (frontend + landing)
-- 🚀 Auto-deploy a Render.com
+- Full test suite con coverage
+- Docker build & push a GitHub Container Registry
+- Security scan con Trivy
+- Validación de builds (frontend + landing)
+- Auto-deploy a Render.com
 
 ### E2E Workflow (`.github/workflows/e2e.yml`)
 Se ejecuta diariamente a las 2 AM UTC:
-- ✅ Tests end-to-end con docker-compose
-- ✅ Validación de todas las integraciones
+- Tests end-to-end con docker-compose
+- Validación de todas las integraciones
 
 ### Dependabot
 Actualiza dependencias automáticamente cada lunes:
-- 📦 Backend (pip)
-- 📦 Frontend (npm)
-- 📦 Landing (npm)
-- 📦 GitHub Actions
+- Backend (pip)
+- Frontend (npm)
+- Landing (npm)
+- GitHub Actions
 
-## 📦 Deployment
+## Deployment
 
 ### Render.com (Producción)
 
@@ -199,7 +217,7 @@ make docker-build
 make docker-test
 ```
 
-## 🛠️ Stack Tecnológico
+## Stack Tecnológico
 
 ### Backend
 - **Framework**: FastAPI 0.116.1
@@ -228,7 +246,7 @@ make docker-test
 - **Security**: Trivy, Safety, npm audit
 - **Coverage**: Codecov
 
-## 📝 Scripts Disponibles
+## Scripts Disponibles
 
 ### Makefile Commands
 
@@ -244,7 +262,7 @@ make docker-build  # Build Docker image
 make docker-test   # Ejecutar E2E con docker
 ```
 
-## 🔒 Pre-commit Hooks
+## Pre-commit Hooks
 
 El proyecto usa pre-commit hooks para validar código antes de commits:
 
@@ -258,15 +276,15 @@ pre-commit run --all-files
 ```
 
 Hooks configurados:
-- ✅ black (formatting)
-- ✅ isort (import sorting)
-- ✅ flake8 (linting)
-- ✅ ESLint (frontend linting)
-- ✅ TypeScript check
-- ✅ Trailing whitespace
-- ✅ Secrets detection
+- black (formatting)
+- isort (import sorting)
+- flake8 (linting)
+- ESLint (frontend linting)
+- TypeScript check
+- Trailing whitespace
+- Secrets detection
 
-## 🌍 Variables de Entorno
+## Variables de Entorno
 
 ### Backend (`.env`)
 ```env
@@ -324,7 +342,7 @@ Valores por defecto del código (todas opcionales; la tabla completa, la lectura
 | `TRUSTED_PROXY_HOPS` | `0` | Proxies de confianza delante de la app: IP del cliente = entrada N-ésima desde la derecha de `X-Forwarded-For` (con `0`, la IP del socket) |
 | `RATE_LIMIT_<RUTA>_ATTEMPTS` / `_WINDOW` (s) | `LOGIN` 5/900, `REGISTER` 3/3600, `VERIFY` 10/3600, `RESEND` 3/600, `RESET` 5/3600, `FORGOT` 3/3600 | Límite por IP y por ruta; `register`, `resend-code` y `forgot` cuentan además por email. En `login` cuentan solo los **fallos** de credenciales (los logins correctos, el 423 y el 403 no) |
 
-> ⚠️ **Despliegue**: `TRUSTED_PROXY_HOPS` no está en `backend/render.yaml` y su valor correcto **no se ha medido** (aún no hay despliegue). Con `0` detrás de un proxy todos los usuarios comparten IP y los límites por IP bloquean el sitio entero tras unos pocos intentos (5 logins fallidos en 15 minutos entre todos). La aplicación lo avisa (al arrancar en Render con `0` y con una línea de log `TRUSTED_PROXY_HOPS=0 pero llegan peticiones con X-Forwarded-For`, enmascarada y una vez por worker) y esa línea sirve para calibrarlo: el procedimiento está en la [guía](backend/docs/DEPLOYMENT_GUIDE.md#trusted_proxy_hops). Ante la duda, un valor menor es lo seguro: uno mayor que los proxies reales permite suplantar la IP.
+> **Despliegue**: `TRUSTED_PROXY_HOPS` no está en `backend/render.yaml` y su valor correcto **no se ha medido** (aún no hay despliegue). Con `0` detrás de un proxy todos los usuarios comparten IP y los límites por IP bloquean el sitio entero tras unos pocos intentos (5 logins fallidos en 15 minutos entre todos). La aplicación lo avisa (al arrancar en Render con `0` y con una línea de log `TRUSTED_PROXY_HOPS=0 pero llegan peticiones con X-Forwarded-For`, enmascarada y una vez por worker) y esa línea sirve para calibrarlo: el procedimiento está en la [guía](backend/docs/DEPLOYMENT_GUIDE.md#trusted_proxy_hops). Ante la duda, un valor menor es lo seguro: uno mayor que los proxies reales permite suplantar la IP.
 
 Respuestas: `verify-code` y `reset` devuelven siempre `400 «Código inválido o expirado»`, y `resend-code` / `forgot` un `200` idéntico exista o no la cuenta (el motivo real queda en `security_logs`). `register` responde `201` con el mismo cuerpo exista o no una cuenta con ese email (a quien ya la tiene le llega un aviso «Ya tienes una cuenta», o un código nuevo si no la había verificado); solo el `409 username_taken` por un username ocupado es explícito. Riesgos residuales (enumeración de usernames y pre-secuestro de una cuenta sin verificar): ver la [guía](backend/docs/DEPLOYMENT_GUIDE.md#riesgos-residuales-decisiones-explícitas-no-defectos-pendientes-de-arreglar-en-esta-fase).
 
@@ -346,7 +364,7 @@ VITE_API_URL=http://localhost:8000
 DEV=true
 ```
 
-## 📊 Coverage Reports
+## Coverage Reports
 
 Los reportes de cobertura se generan automáticamente en CI y se suben a Codecov.
 
@@ -357,10 +375,10 @@ pytest --cov=app --cov-report=html
 # Abrir: backend/htmlcov/index.html
 ```
 
-## 🤝 Contributing
+## Contributing
 
 Guía de contribución, convenciones de código y flujo de ramas en [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
-## 👤 Autor
+## Autor
 
 Guillermo Sánchez — [GitHub](https://github.com/guillesanper) · [Web](https://guillesanper.github.io)
