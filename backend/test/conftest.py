@@ -1,5 +1,6 @@
 # tests/conftest.py
 import os
+import socket
 import subprocess
 import sys
 import uuid
@@ -40,6 +41,10 @@ os.environ["DB_PORT"] = os.getenv("TEST_DB_PORT", "5432")
 os.environ["DB_USER"] = os.getenv("TEST_DB_USER", "postgres")
 os.environ["DB_PASSWORD"] = os.getenv("TEST_DB_PASSWORD", "postgres")
 os.environ["DB_NAME"] = "datamap_test"  # Use test database
+# Las BDs externas de test (docker-compose.test.yml) escuchan en localhost y sin TLS
+os.environ.setdefault("DB_CONNECTOR_ALLOW_PRIVATE_HOSTS", "true")
+# Los tests e2e prueban muchas conexiones seguidas con el mismo usuario
+os.environ.setdefault("DB_CONNECTOR_RATE_LIMIT", "10000")
 
 from main import app
 
@@ -110,6 +115,72 @@ def get_unique_user_data(worker_id, base_username="testuser", base_email="test@e
     unique_username = f"{base_username}_{worker_id}"
 
     return unique_username, unique_email
+
+
+# ============================================================================
+# BDs EXTERNAS (docker-compose.test.yml)
+# ============================================================================
+
+
+def require_external_test_db(name: str, host: str, port: int) -> None:
+    """
+    Omite el test si la BD externa de docker-compose.test.yml no escucha.
+
+    Con REQUIRE_TEST_DATABASES=1 (CI) falla en vez de omitirse, para que no se salten en silencio.
+    """
+    try:
+        socket.create_connection((host, port), timeout=2).close()
+    except OSError as e:
+        message = f"{name} de test no disponible en {host}:{port} (docker-compose.test.yml): {e}"
+        if os.getenv("REQUIRE_TEST_DATABASES") == "1":
+            pytest.fail(message)
+        pytest.skip(message)
+
+
+@pytest.fixture(scope="session")
+def external_test_db_check():
+    """Expone require_external_test_db a los tests de la propia infraestructura"""
+    return require_external_test_db
+
+
+@pytest.fixture(scope="session")
+def external_mysql():
+    """MySQL externo de test (puerto 3307)"""
+    require_external_test_db("MySQL", "localhost", 3307)
+
+
+@pytest.fixture(scope="session")
+def external_postgres():
+    """PostgreSQL externo de test (puerto 5433)"""
+    require_external_test_db("PostgreSQL", "localhost", 5433)
+
+
+@pytest.fixture
+def postgres_tls_optional(monkeypatch):
+    """
+    Conecta a las BDs PostgreSQL de test aunque no ofrezcan TLS.
+
+    Ni la de docker-compose.test.yml ni la de la app tienen por qué tener certificado:
+    sslmode=prefer usa TLS si el servidor lo ofrece y si no, texto plano. Solo para tests
+    funcionales contra BDs locales; la política TLS real la cubren los tests de db_connectors
+    (test_postgres_tls.py, test_tls_guard.py).
+    """
+    from app.utils.db_adapters.postgres_adapter import PostgreSQLAdapter
+
+    monkeypatch.setattr(
+        PostgreSQLAdapter, "_ssl_params", lambda self, root_cert: {"sslmode": "prefer"}
+    )
+
+
+@pytest.fixture(scope="session")
+def unique_user_data():
+    """
+    Expone get_unique_user_data a los tests.
+
+    "from conftest import ..." es ambiguo: resuelve al primer conftest.py del sys.path, que
+    puede ser el de un subdirectorio (p. ej. test/unit/db_connectors/conftest.py).
+    """
+    return get_unique_user_data
 
 
 # ============================================================================
@@ -284,11 +355,14 @@ def drop_worker_database(worker_id: str, config: dict):
         print(f"⚠️  Error eliminando BD {db_name}: {e}")
 
 
-@pytest.fixture(scope="session", autouse=True)
+@pytest.fixture(scope="session")
 def setup_worker_databases(worker_id):
     """
-    Fixture que crea automáticamente una base de datos específica para cada worker.
-    Se ejecuta al inicio de la sesión de tests y limpia al final.
+    Fixture que crea una base de datos específica para cada worker.
+    Se ejecuta la primera vez que un test la necesita y limpia al final de la sesión.
+
+    No es autouse: los tests unitarios puros deben poder ejecutarse sin PostgreSQL.
+    Los fixtures de BD (db_session, client, test_db_connection...) dependen de ella.
     """
     config = {
         "host": os.getenv("TEST_DB_HOST", os.getenv("DB_HOST", "localhost")),
@@ -301,7 +375,10 @@ def setup_worker_databases(worker_id):
 
     # Crear BD para este worker
     if not create_worker_database(worker_id, config):
-        pytest.fail(f"No se pudo crear la base de datos para worker {worker_id}")
+        pytest.fail(
+            f"No se pudo crear la base de datos para worker {worker_id}: "
+            f"¿está PostgreSQL de test en {config['host']}:{config['port']}?"
+        )
 
     # Configurar SessionLocal para que use la BD del worker
     db_name = f"datamap_test_{worker_id}"

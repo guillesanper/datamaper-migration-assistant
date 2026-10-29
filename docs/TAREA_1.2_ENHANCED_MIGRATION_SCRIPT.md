@@ -527,5 +527,4 @@ El servicio ahora genera scripts SQL **production-ready** que:
 
 **Documentación relacionada**:
 - [Plan maestro](./PLAN_MIGRACION_ENTERPRISE.md)
-- [Prompts tareas individuales](./PROMPTS_TAREAS_INDIVIDUALES.md)
 - [Dependency Graph Service](../backend/app/services/dependency_graph_service.py) (Tarea 1.1 ✅)

@@ -9,7 +9,6 @@ Estado TLS de las sesiones de conexión (DBConnectionService + router).
   el texto crudo del driver (puede incluir rutas temporales y detalles de red).
 """
 
-import asyncio
 import logging
 from unittest.mock import MagicMock, patch
 
@@ -39,7 +38,9 @@ def redis_client():
 
 @pytest.fixture
 def service(redis_client):
-    return DBConnectionService(redis_client, "test_master_key_12345")
+    return DBConnectionService(
+        redis_client, "ZGF0YW1hcC10ZXN0LW1hc3Rlci1rZXktMzItYnl0ZXM="
+    )  # base64 de 32 bytes
 
 
 def _config(**extra) -> DBConnectionConfig:
@@ -194,7 +195,7 @@ class TestSesionesAntiguas:
         session_id, _ = self._crear_antigua(service, redis_client)
 
         with pytest.raises(HTTPException) as excinfo:
-            asyncio.run(get_user_session(session_id, service, {"id": USER}))
+            get_user_session(session_id, service, {"id": USER})
 
         assert excinfo.value.status_code == 410
         assert "reconnect" in excinfo.value.detail.lower()
@@ -205,15 +206,15 @@ class TestRouter:
         _create(service)
         _create(service, _unverified())
 
-        respuesta = asyncio.run(list_sessions(service=service, current_user={"id": USER}))
+        respuesta = list_sessions(service=service, current_user={"id": USER})
 
         assert sorted(s.tls_verified for s in respuesta) == [False, True]
 
     def test_refresh_session_conserva_tls_verified(self, service):
         creada = _create(service, _unverified())
 
-        respuesta = asyncio.run(
-            refresh_session(creada.session_id, 4, service=service, current_user={"id": USER})
+        respuesta = refresh_session(
+            creada.session_id, 4, service=service, current_user={"id": USER}
         )
 
         assert respuesta.tls_verified is False

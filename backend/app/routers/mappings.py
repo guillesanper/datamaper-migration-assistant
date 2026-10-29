@@ -1198,7 +1198,9 @@ async def save_mapping(
 
             try:
                 # Validar que la sesión existe y no ha expirado
-                session = db_service.get_session(current_user["id"], origin_session_id)
+                session = db_service.get_session(
+                    current_user["id"], origin_session_id, project_id=project_id
+                )
 
                 # Validar ownership (la sesión debe pertenecer al usuario actual)
                 if session.user_id != current_user["id"]:
@@ -1224,7 +1226,9 @@ async def save_mapping(
             db_service = DBConnectionService(redis_client, encryption_key)
 
             try:
-                session = db_service.get_session(current_user["id"], destination_session_id)
+                session = db_service.get_session(
+                    current_user["id"], destination_session_id, project_id=project_id
+                )
 
                 if session.user_id != current_user["id"]:
                     raise HTTPException(
@@ -2702,7 +2706,9 @@ async def generate_migration_script(
             origin_session_id = list(origin_session_ids)[0]
 
             try:
-                session = db_service.get_session(current_user["id"], origin_session_id)
+                session = db_service.get_session(
+                    current_user["id"], origin_session_id, project_id=project_id
+                )
 
                 # Validar ownership
                 if session.user_id != current_user["id"]:
@@ -2739,7 +2745,9 @@ async def generate_migration_script(
             dest_session_id = list(dest_session_ids)[0]
 
             try:
-                session = db_service.get_session(current_user["id"], dest_session_id)
+                session = db_service.get_session(
+                    current_user["id"], dest_session_id, project_id=project_id
+                )
 
                 # Validar ownership
                 if session.user_id != current_user["id"]:

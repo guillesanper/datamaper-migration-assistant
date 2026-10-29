@@ -14,6 +14,9 @@ export interface GenerateScriptOptions {
   include_constraints?: boolean;
   include_validation?: boolean;
   dialect: "postgresql" | "mysql" | "sqlserver" | "oracle";
+  /** Sesiones de conexión con las que resolver mappings de BD conectada */
+  origin_connection_session_id?: string;
+  dest_connection_session_id?: string;
 }
 
 export interface GeneratedScript {
@@ -29,6 +32,8 @@ export interface ExecutionRequest {
   script_id?: string;
   dry_run: boolean;
   dest_connection_session_id: string;
+  /** Si el origen es otra BD, el backend copia los datos por lotes */
+  origin_connection_session_id?: string;
 }
 
 export interface ExecutionStarted {

@@ -32,6 +32,7 @@ from .exceptions import (
     DBAuthenticationError,
     DBConnectionError,
     DBDialectNotSupportedError,
+    DBHostNotAllowedError,
     DBMetadataNotFoundError,
     DBPermissionError,
     DBQueryExecutionError,
@@ -40,6 +41,7 @@ from .exceptions import (
     DBValidationError,
 )
 from .mysql_adapter import MySQLAdapter
+from .network_policy import validate_connection_host
 from .oracle_adapter import OracleAdapter
 
 # Import adapters específicos
@@ -50,6 +52,7 @@ from .validators import (
     validate_column_name,
     validate_connection_config,
     validate_identifier,
+    validate_metadata_name,
     validate_schema_name,
     validate_table_name,
 )
@@ -65,16 +68,19 @@ __all__ = [
     "DBPermissionError",
     "DBValidationError",
     "DBDialectNotSupportedError",
+    "DBHostNotAllowedError",
     "DBTimeoutError",
     "DBTLSError",
     "DBMetadataNotFoundError",
     # Validators
     "validate_identifier",
+    "validate_metadata_name",
     "validate_table_name",
     "validate_column_name",
     "validate_schema_name",
     "validate_connection_config",
     "detect_sql_injection_attempt",
+    "validate_connection_host",
     # Adapters
     "PostgreSQLAdapter",
     "MySQLAdapter",

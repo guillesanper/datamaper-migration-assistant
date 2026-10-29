@@ -49,11 +49,13 @@ class DBConnectionService {
 
   /**
    * Crear sesión de conexión (persiste en Redis con TTL)
+   * Con projectId la sesión solo se puede usar desde ese proyecto
    */
   async createSession(
     config: DBConnectionConfig,
     testConnection: boolean = true,
-    ttlHours: number = 3
+    ttlHours: number = 3,
+    projectId?: string
   ): Promise<DBConnectionSessionResponse> {
     const response = await apiService.post<DBConnectionSessionResponse>(
       `${this.baseUrl}/sessions`,
@@ -61,6 +63,7 @@ class DBConnectionService {
         connection: config,
         test_connection: testConnection,
         ttl_hours: ttlHours,
+        ...(projectId ? { project_id: projectId } : {}),
       }
     );
     return response;
@@ -199,20 +202,22 @@ class DBConnectionService {
     sessionId: string,
     tableType: 'origin' | 'destination',
     schema?: string
-  ): Promise<ConnectorTable[]> {
+  ): Promise<{ tables: ConnectorTable[]; failedSchemas: string[] }> {
     const url = schema
       ? `${this.baseUrl}/sessions/${sessionId}/connector-tables?schema=${encodeURIComponent(schema)}`
       : `${this.baseUrl}/sessions/${sessionId}/connector-tables`;
 
     const response = await apiService.get<ConnectorTablesResponse>(url);
 
-    return response.tables.map(table => ({
+    const tables = response.tables.map(table => ({
       ...table,
       id: `connector:${sessionId}:${table.schema}:${table.name}`,
       type: tableType,
       session_id: sessionId,
       is_connector: true as const,
     }));
+
+    return { tables, failedSchemas: response.failed_schemas ?? [] };
   }
 
   /**

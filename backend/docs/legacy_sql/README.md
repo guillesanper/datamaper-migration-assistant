@@ -43,5 +43,5 @@ Por tanto, estos `.sql` definen funciones, triggers y vistas que **ya no existen
 ## Notas
 
 - De `backend/utilities/` solo queda `migrations/validators.py`, porque `app/services/execution_service.py` importa `BackupManager` de `utilities.migrations.validators`. Los scripts que dependían de este SQL (`run_migration_00X.py`, `check_migration_status.py`) se eliminaron.
-- Documentos antiguos (`MIGRATION_API_IMPLEMENTATION.md`, `IMPLEMENTATION_PLAN.md`, `docs/COLLABORATION_SYSTEM_README.md`…) son históricos: llevan una nota al inicio y sus rutas apuntan aquí, a `legacy_sql/`.
+- Documentos antiguos (`MIGRATION_API_IMPLEMENTATION.md`, `docs/COLLABORATION_SYSTEM_README.md`…) son históricos: llevan una nota al inicio y sus rutas apuntan aquí, a `legacy_sql/`.
 - Recuperar el estado anterior a Alembic: tag `pre-alembic-baseline` (commit `de5a54b`).

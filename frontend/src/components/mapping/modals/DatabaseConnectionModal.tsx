@@ -35,6 +35,7 @@ const TLS_FAILURE_PREFIX = 'TLS verification failed';
 export const DatabaseConnectionModal: React.FC<DatabaseConnectionModalProps> = ({
   isOpen,
   onClose,
+  projectId,
   onSuccess,
   targetType,
 }) => {
@@ -271,7 +272,7 @@ export const DatabaseConnectionModal: React.FC<DatabaseConnectionModalProps> = (
     try {
       const fullConfig = buildConfig(selectedDialect);
 
-      const session = await dbConnectionService.createSession(fullConfig, true, 3);
+      const session = await dbConnectionService.createSession(fullConfig, true, 3, projectId);
 
       toast.success(t('db.toast.connected', { name: DIALECT_NAMES[selectedDialect] }));
 

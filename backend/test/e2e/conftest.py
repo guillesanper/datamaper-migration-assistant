@@ -477,7 +477,7 @@ def e2e_encryption_setup(test_environment_setup, db_session, worker_id):
 
 
 @pytest.fixture
-def postgres_connection_config():
+def postgres_connection_config(external_postgres, postgres_tls_optional):
     """PostgreSQL test database configuration"""
     return {
         "dialect": "postgresql",
@@ -491,7 +491,7 @@ def postgres_connection_config():
 
 
 @pytest.fixture
-def mysql_connection_config():
+def mysql_connection_config(external_mysql):
     """MySQL test database configuration"""
     return {
         "dialect": "mysql",
@@ -501,11 +501,14 @@ def mysql_connection_config():
         "user": "test_user",
         "password": "test_password",
         "timeout": 30,
+        # BD de test local con certificado autofirmado: cifrada, sin verificar
+        "tls_verify": False,
+        "confirm_hostname": "localhost",
     }
 
 
 @pytest.fixture
-def postgres_invalid_config():
+def postgres_invalid_config(external_postgres, postgres_tls_optional):
     """Invalid PostgreSQL configuration (wrong password)"""
     return {
         "dialect": "postgresql",
@@ -519,7 +522,7 @@ def postgres_invalid_config():
 
 
 @pytest.fixture
-def mysql_invalid_config():
+def mysql_invalid_config(external_mysql):
     """Invalid MySQL configuration (wrong password)"""
     return {
         "dialect": "mysql",
@@ -529,6 +532,9 @@ def mysql_invalid_config():
         "user": "test_user",
         "password": "wrong_password",
         "timeout": 30,
+        # BD de test local con certificado autofirmado: cifrada, sin verificar
+        "tls_verify": False,
+        "confirm_hostname": "localhost",
     }
 
 
@@ -543,7 +549,7 @@ def set_encryption_key():
     original_key = os.getenv("ENCRYPTION_MASTER_KEY")
 
     # Set test encryption key
-    test_key = "test-encryption-key-min-32-chars-long-for-security"
+    test_key = "ZGF0YW1hcC10ZXN0LW1hc3Rlci1rZXktMzItYnl0ZXM="  # base64 de 32 bytes
     os.environ["ENCRYPTION_MASTER_KEY"] = test_key
 
     yield test_key

@@ -32,16 +32,32 @@ from app.models.db_connection import (
 from app.utils.db_adapters import (
     DBAuthenticationError,
     DBConnectionError,
+    DBHostNotAllowedError,
     DBTimeoutError,
     DBTLSError,
     MySQLAdapter,
     OracleAdapter,
     PostgreSQLAdapter,
     SQLServerAdapter,
+    validate_connection_host,
 )
 from app.utils.encryption import DecryptionError, EncryptionManager
+from app.utils.master_key import parse_master_key
 
 logger = logging.getLogger(__name__)
+
+
+def _decode_hash(data: Dict[Any, Any]) -> Dict[str, str]:
+    """
+    Normaliza un HGETALL a dict de str.
+
+    El cliente compartido (app.utils.redis_client) usa decode_responses=True y devuelve
+    str; un cliente sin decodificar devuelve bytes. El servicio acepta ambos.
+    """
+    return {
+        (k.decode() if isinstance(k, bytes) else k): (v.decode() if isinstance(v, bytes) else v)
+        for k, v in data.items()
+    }
 
 
 class DBConnectionServiceError(Exception):
@@ -52,6 +68,17 @@ class DBConnectionServiceError(Exception):
 
 class SessionNotFoundError(DBConnectionServiceError):
     """Session does not exist or has expired"""
+
+    pass
+
+
+class SessionProjectMismatchError(SessionNotFoundError):
+    """
+    La sesión está atada a otro proyecto.
+
+    Hereda de SessionNotFoundError: para quien la usa desde otro proyecto no existe (404),
+    sin revelar que la sesión existe.
+    """
 
     pass
 
@@ -127,20 +154,9 @@ class DBConnectionService:
         """
         self.redis = redis_client
         self.encryption_manager = EncryptionManager()
-        # La encryption_key debe ser 32 bytes para AES-256
-        # Si es string base64, decodificar; si no, asumir que ya son bytes
-        if isinstance(encryption_key, str):
-            import base64
-
-            try:
-                self.encryption_key = base64.b64decode(encryption_key)
-            except:
-                # Si no es base64, usar los primeros 32 bytes del UTF-8
-                key_bytes = encryption_key.encode("utf-8")
-                # Pad o truncate a 32 bytes
-                self.encryption_key = key_bytes[:32].ljust(32, b"\x00")
-        else:
-            self.encryption_key = encryption_key
+        # 32 bytes para AES-256 (base64 estricto); una clave inválida es un error, no se
+        # "arregla" en silencio
+        self.encryption_key = parse_master_key(encryption_key)
 
         logger.info("DBConnectionService initialized")
 
@@ -157,20 +173,30 @@ class DBConnectionService:
         """
         return f"{self.REDIS_KEY_PREFIX}:{user_id}:{session_id}"
 
-    def _get_adapter(self, config: DBConnectionConfig):
+    def _get_adapter(self, config: DBConnectionConfig, long_running: bool = False):
         """
         Obtiene el adapter apropiado según el dialecto.
 
         Args:
             config: Configuración de conexión
+            long_running: Si True, no se limita el tiempo de espera de respuesta de las
+                queries (ejecución de migraciones). Por defecto las lecturas usan el
+                mismo timeout que la conexión (introspección de metadata).
 
         Returns:
             Instancia del adapter (PostgreSQLAdapter, MySQLAdapter, etc.)
 
         Raises:
             DBConnectionServiceError: Si el dialecto no está soportado
+            DBHostNotAllowedError: Si el host resuelve a una red interna no permitida
         """
+        # Política de red anti-SSRF: se revalida en cada conexión, no solo al crear
+        # la sesión, para acotar ataques de DNS rebinding
+        validate_connection_host(config.host, config.port)
+
         adapter_config = config.to_adapter_config()
+        if long_running:
+            adapter_config["read_timeout"] = None
 
         if config.dialect == "postgresql":
             return PostgreSQLAdapter(adapter_config)
@@ -193,6 +219,21 @@ class DBConnectionService:
         Returns:
             DBConnectionTestResult con resultado del test
         """
+
+        def failure(error_type: str, message: str, exc: Exception) -> DBConnectionTestResult:
+            # El detalle del driver (IPs, puertos, versiones, mensajes del servidor) solo
+            # va al log: devolverlo convertiría el endpoint en un oráculo de la red
+            logger.warning(f"Connection test failed ({error_type}): {str(exc)}")
+            return DBConnectionTestResult(
+                success=False,
+                dialect=config.dialect,
+                host=config.host,
+                database=config.database,
+                error_message=message,
+                error_type=error_type,
+                tls_verified=config.tls_verify,
+            )
+
         try:
             adapter = self._get_adapter(config)
 
@@ -211,66 +252,29 @@ class DBConnectionService:
                 tls_verified=config.tls_verify,
             )
 
+        except DBHostNotAllowedError as e:
+            return failure("host_not_allowed", str(e), e)
+
         except DBAuthenticationError as e:
-            logger.warning(f"Connection test failed (auth): {str(e)}")
-            return DBConnectionTestResult(
-                success=False,
-                dialect=config.dialect,
-                host=config.host,
-                database=config.database,
-                error_message=str(e),
-                error_type="authentication",
-                tls_verified=config.tls_verify,
-            )
+            return failure("authentication", "Authentication failed: check user and password", e)
 
         except DBTimeoutError as e:
-            logger.warning(f"Connection test failed (timeout): {str(e)}")
-            return DBConnectionTestResult(
-                success=False,
-                dialect=config.dialect,
-                host=config.host,
-                database=config.database,
-                error_message=str(e),
-                error_type="timeout",
-                tls_verified=config.tls_verify,
-            )
+            return failure("timeout", "Connection timed out", e)
 
         except DBTLSError as e:
-            # Antes que DBConnectionError, de la que hereda. El detalle del driver solo al log
-            logger.warning(f"Connection test failed (tls): {str(e)}")
-            return DBConnectionTestResult(
-                success=False,
-                dialect=config.dialect,
-                host=config.host,
-                database=config.database,
-                error_message=TLS_ERROR_MESSAGE,
-                error_type="tls",
-                tls_verified=config.tls_verify,
-            )
+            # Antes que DBConnectionError, de la que hereda
+            return failure("tls", TLS_ERROR_MESSAGE, e)
 
         except DBConnectionError as e:
-            logger.warning(f"Connection test failed (connection): {str(e)}")
-            return DBConnectionTestResult(
-                success=False,
-                dialect=config.dialect,
-                host=config.host,
-                database=config.database,
-                error_message=str(e),
-                error_type="connection",
-                tls_verified=config.tls_verify,
+            return failure(
+                "connection",
+                "Could not connect to the database: check host, port and database name",
+                e,
             )
 
         except Exception as e:
-            logger.error(f"Connection test failed (unexpected): {str(e)}")
-            return DBConnectionTestResult(
-                success=False,
-                dialect=config.dialect,
-                host=config.host,
-                database=config.database,
-                error_message=f"Unexpected error: {str(e)}",
-                error_type="unknown",
-                tls_verified=config.tls_verify,
-            )
+            logger.exception("Unexpected error testing connection")
+            return failure("unknown", "Unexpected error testing connection", e)
 
     def create_session(
         self,
@@ -300,6 +304,12 @@ class DBConnectionService:
         # Validar TTL
         if ttl_hours > self.MAX_TTL_HOURS:
             raise ValueError(f"TTL cannot exceed {self.MAX_TTL_HOURS} hours")
+
+        # La política de red se aplica aunque no se pruebe la conexión
+        try:
+            validate_connection_host(config.host, config.port)
+        except DBHostNotAllowedError as e:
+            raise DBConnectionServiceError(str(e))
 
         # Test connection si está habilitado
         if test_connection:
@@ -390,19 +400,24 @@ class DBConnectionService:
             logger.error(f"Unreadable session {redis_key!r}: {str(e)}")
             raise DBConnectionServiceError("Corrupted session data: unreadable TLS flag")
 
-    def get_session(self, user_id: str, session_id: str) -> DBConnectionSession:
+    def get_session(
+        self, user_id: str, session_id: str, project_id: Optional[str] = None
+    ) -> DBConnectionSession:
         """
         Recupera una sesión activa.
 
         Args:
             user_id: ID del usuario propietario
             session_id: ID de la sesión
+            project_id: Proyecto desde el que se usa. Una sesión atada a otro proyecto se
+                rechaza; las sesiones sin proyecto valen para cualquiera del usuario
 
         Returns:
             DBConnectionSession con datos de la sesión
 
         Raises:
             SessionNotFoundError: Si la sesión no existe
+            SessionProjectMismatchError: Si la sesión es de otro proyecto
             SessionExpiredError: Si la sesión ha expirado
         """
         redis_key = self._get_redis_key(user_id, session_id)
@@ -415,15 +430,22 @@ class DBConnectionService:
                 f"Session not found: user_id={user_id}, session_id={session_id}"
             )
 
-        # Deserializar (Redis devuelve bytes)
-        data_str = {k.decode(): v.decode() for k, v in data.items()}  # type: ignore[union-attr]
-        session = self._parse_session(redis_key, data_str)
+        session = self._parse_session(redis_key, _decode_hash(data))
 
         # Verificar expiración
         if session.is_expired():
             # Eliminar sesión expirada
             self.redis.delete(redis_key)
             raise SessionExpiredError(f"Session expired: {session_id}")
+
+        if (
+            project_id is not None
+            and session.project_id is not None
+            and str(session.project_id) != str(project_id)
+        ):
+            raise SessionProjectMismatchError(
+                f"Session not found for project: project_id={project_id}, session_id={session_id}"
+            )
 
         # Actualizar last_used_at
         session.last_used_at = datetime.utcnow()
@@ -523,21 +545,28 @@ class DBConnectionService:
 
         Raises:
             SessionNotFoundError: Si la sesión no existe
-            ValueError: Si ttl_hours excede el máximo
+            ValueError: Si ttl_hours no está entre 1 y el máximo
         """
-        # Validar TTL
+        # Validar TTL: con 0 o negativo EXPIRE borraba la sesión y el HSET siguiente la
+        # recreaba solo con expires_at y sin TTL (clave huérfana que nunca caducaba)
+        if ttl_hours < 1:
+            raise ValueError("TTL must be at least 1 hour")
         if ttl_hours > self.MAX_TTL_HOURS:
             raise ValueError(f"TTL cannot exceed {self.MAX_TTL_HOURS} hours")
 
         # Verificar que existe
-        session = self.get_session(user_id, session_id)
+        self.get_session(user_id, session_id)
 
         # Extender TTL
         redis_key = self._get_redis_key(user_id, session_id)
         ttl_seconds = ttl_hours * 3600
         new_expires_at = datetime.utcnow() + timedelta(hours=ttl_hours)
 
-        self.redis.expire(redis_key, ttl_seconds)
+        # EXPIRE devuelve False si la clave ya no existe (caducó entre medias): no recrearla
+        if not self.redis.expire(redis_key, ttl_seconds):
+            raise SessionNotFoundError(
+                f"Session not found: user_id={user_id}, session_id={session_id}"
+            )
         self.redis.hset(redis_key, "expires_at", new_expires_at.isoformat())
 
         logger.info(
@@ -557,15 +586,13 @@ class DBConnectionService:
             Lista de DBConnectionSession
         """
         pattern = f"{self.REDIS_KEY_PREFIX}:{user_id}:*"
-        keys = self.redis.keys(pattern)
-
         sessions = []
-        for key in keys:  # type: ignore[union-attr]
+        # scan_iter en lugar de KEYS: KEYS recorre todo Redis bloqueándolo
+        for key in self.redis.scan_iter(match=pattern):
             data = self.redis.hgetall(key)
             if data:
-                data_str = {k.decode(): v.decode() for k, v in data.items()}  # type: ignore[union-attr]
                 try:
-                    session = self._parse_session(key, data_str)
+                    session = self._parse_session(key, _decode_hash(data))
                     if not session.is_expired():
                         sessions.append(session)
                     else:

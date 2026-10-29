@@ -44,7 +44,9 @@ def _walk(dependant):
 
 @pytest.fixture
 def service():
-    return DBConnectionService(fakeredis.FakeRedis(), "test_master_key_12345")
+    return DBConnectionService(
+        fakeredis.FakeRedis(), "ZGF0YW1hcC10ZXN0LW1hc3Rlci1rZXktMzItYnl0ZXM="
+    )  # base64 de 32 bytes
 
 
 @pytest.fixture
