@@ -77,12 +77,12 @@ export const ExportModal: React.FC<ExportModalProps> = ({
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
 
-      toast.success(t('export.success' as any));
+      toast.success(t('export.success'));
       onClose();
     } catch (error: unknown) {
       console.error('Export error:', error);
 
-      let errorMessage = t('export.error' as any);
+      let errorMessage = t('export.error');
 
       const errObj = error as Record<string, unknown>;
       const responseData = errObj.response as Record<string, unknown> | undefined;
@@ -118,7 +118,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
       <div className={styles.modalContent}>
         {/* Header */}
         <div className={styles.modalHeader}>
-          <h2 className={styles.modalTitle}>{t('export.title' as any)}</h2>
+          <h2 className={styles.modalTitle}>{t('export.title')}</h2>
           <button onClick={onClose} className={styles.modalCloseButton}>
             <X className="w-5 h-5" />
           </button>
@@ -134,7 +134,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                   ? <div className="animate-spin rounded-full h-4 w-4 border-2 border-primary border-t-transparent mx-auto" />
                   : mappings.length}
               </div>
-              <div className={styles.statsLabel}>{t('export.stats.total' as any)}</div>
+              <div className={styles.statsLabel}>{t('export.stats.total')}</div>
             </div>
             <div className={styles.statsCard}>
               <div className={styles.statsValue}>
@@ -142,7 +142,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                   ? <div className="animate-spin rounded-full h-4 w-4 border-2 border-primary border-t-transparent mx-auto" />
                   : new Set(mappings.map(m => m.origin_table)).size}
               </div>
-              <div className={styles.statsLabel}>{t('export.stats.originTables' as any)}</div>
+              <div className={styles.statsLabel}>{t('export.stats.originTables')}</div>
             </div>
             <div className={styles.statsCard}>
               <div className={styles.statsValue}>
@@ -150,7 +150,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                   ? <div className="animate-spin rounded-full h-4 w-4 border-2 border-primary border-t-transparent mx-auto" />
                   : new Set(mappings.map(m => m.destination_table)).size}
               </div>
-              <div className={styles.statsLabel}>{t('export.stats.destTables' as any)}</div>
+              <div className={styles.statsLabel}>{t('export.stats.destTables')}</div>
             </div>
           </div>
 
@@ -172,8 +172,8 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                       : styles.alertTitleWarning
                   }`}>
                     {validationResult.isValid
-                      ? t('export.validation.ok' as any)
-                      : t('export.validation.warnings', { count: validationResult.errors.length } as any)
+                      ? t('export.validation.ok')
+                      : t('export.validation.warnings', { count: validationResult.errors.length })
                     }
                   </h4>
                   {!validationResult.isValid && validationResult.errors.length > 0 && (
@@ -192,7 +192,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
 
           {/* Format selector */}
           <div>
-            <label className="text-sm font-medium mb-3 block">{t('export.format.label' as any)}</label>
+            <label className="text-sm font-medium mb-3 block">{t('export.format.label')}</label>
             <div className={styles.formatGrid}>
               <button
                 onClick={() => setSelectedFormat('json')}
@@ -204,7 +204,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
               >
                 <FileText className={styles.formatIcon} />
                 <div className={styles.formatName}>JSON</div>
-                <div className={styles.formatDescription}>{t('export.format.jsonLabel' as any)}</div>
+                <div className={styles.formatDescription}>{t('export.format.jsonLabel')}</div>
               </button>
 
               <button
@@ -217,7 +217,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
               >
                 <Table className={styles.formatIcon} />
                 <div className={styles.formatName}>CSV</div>
-                <div className={styles.formatDescription}>{t('export.format.csvLabel' as any)}</div>
+                <div className={styles.formatDescription}>{t('export.format.csvLabel')}</div>
               </button>
 
               <button
@@ -230,15 +230,15 @@ export const ExportModal: React.FC<ExportModalProps> = ({
               >
                 <FileSpreadsheet className={styles.formatIcon} />
                 <div className={styles.formatName}>Excel</div>
-                <div className={styles.formatDescription}>{t('export.format.excelLabel' as any)}</div>
+                <div className={styles.formatDescription}>{t('export.format.excelLabel')}</div>
               </button>
             </div>
 
             <p className="text-sm text-muted-foreground mt-3">
               {{
-                json: t('export.format.jsonDesc' as any),
-                csv: t('export.format.csvDesc' as any),
-                excel: t('export.format.excelDesc' as any)
+                json: t('export.format.jsonDesc'),
+                csv: t('export.format.csvDesc'),
+                excel: t('export.format.excelDesc')
               }[selectedFormat]}
             </p>
           </div>
@@ -247,15 +247,15 @@ export const ExportModal: React.FC<ExportModalProps> = ({
           <div className="space-y-3">
             <label className="flex items-center gap-3">
               <input type="checkbox" className="w-4 h-4" defaultChecked />
-              <span className="text-sm">{t('export.options.metadata' as any)}</span>
+              <span className="text-sm">{t('export.options.metadata')}</span>
             </label>
             <label className="flex items-center gap-3">
               <input type="checkbox" className="w-4 h-4" defaultChecked />
-              <span className="text-sm">{t('export.options.dataTypes' as any)}</span>
+              <span className="text-sm">{t('export.options.dataTypes')}</span>
             </label>
             <label className="flex items-center gap-3">
               <input type="checkbox" className="w-4 h-4" />
-              <span className="text-sm">{t('export.options.sqlScript' as any)}</span>
+              <span className="text-sm">{t('export.options.sqlScript')}</span>
             </label>
           </div>
         </div>
@@ -264,10 +264,10 @@ export const ExportModal: React.FC<ExportModalProps> = ({
         <div className={styles.modalFooter}>
           <div className={styles.modalFooterLeft}>
             {isMappingsLoading
-              ? t('export.footer.loading' as any)
+              ? t('export.footer.loading')
               : mappings.length === 0
-                ? t('export.footer.empty' as any)
-                : t('export.footer.ready', { count: mappings.length } as any)
+                ? t('export.footer.empty')
+                : t('export.footer.ready', { count: mappings.length })
             }
           </div>
           <div className={styles.modalFooterRight}>
@@ -286,12 +286,12 @@ export const ExportModal: React.FC<ExportModalProps> = ({
               {isExporting ? (
                 <>
                   <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent" />
-                  {t('export.exporting' as any)}
+                  {t('export.exporting')}
                 </>
               ) : (
                 <>
                   <Download className="w-4 h-4" />
-                  {t('export.submit' as any)}
+                  {t('export.submit')}
                 </>
               )}
             </button>
