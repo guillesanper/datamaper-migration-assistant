@@ -24,13 +24,9 @@ pip install pre-commit && pre-commit install
 ### 2. Configurar Variables de Entorno
 
 ```bash
-# Backend
-cp backend/.env.example backend/.env
-# Editar backend/.env con tus valores
-
-# Frontend
-cp frontend/.env.example frontend/.env
-# Editar frontend/.env con tus valores
+# Un único .env en la raíz: lo leen docker-compose y el backend (load_dotenv)
+cp .env.example .env
+# Editar .env con tus valores (SECRET_KEY es obligatoria para docker-compose)
 ```
 
 ### 3. Iniciar los Servicios

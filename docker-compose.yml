@@ -5,8 +5,9 @@ services:
   redis:
     image: redis:7-alpine
     container_name: datamap-redis
+    # Solo localhost: sin REDIS_PASSWORD, Redis acepta a cualquiera que llegue al puerto
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
     command: >
@@ -44,8 +45,9 @@ services:
       POSTGRES_PASSWORD: ${DB_PASSWORD:-DataMap1234}
       POSTGRES_HOST_AUTH_METHOD: scram-sha-256
       POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
+    # Solo localhost: la contraseña por defecto de desarrollo es pública (.env.example)
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -86,7 +88,7 @@ services:
       dockerfile: Dockerfile
     container_name: datamap-backend
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     environment:
       # Database
       DB_HOST: postgres
@@ -103,7 +105,9 @@ services:
       REDIS_SSL: "false"
 
       # App Configuration
-      SECRET_KEY: ${SECRET_KEY:-eWG%pN%xWGxY35_TwgWg_x23_2}
+      # Sin valor por defecto: una clave versionada en el repo firmaría las cookies de
+      # cualquier instancia levantada así. Copia .env.example a .env.
+      SECRET_KEY: ${SECRET_KEY:?Define SECRET_KEY en .env (copia .env.example)}
       ENV: development
 
       # Encryption
