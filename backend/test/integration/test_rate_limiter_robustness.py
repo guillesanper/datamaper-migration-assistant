@@ -185,15 +185,8 @@ STABLE_MARK = "rate_limit_backend_unavailable"
 
 
 @pytest.fixture
-def limiter_log(caplog, monkeypatch):
-    """
-    Captura el logger del limitador a nivel ERROR
-
-    El conftest ejecuta `alembic upgrade head` en el proceso y fileConfig deja deshabilitados
-    los loggers ya creados: sin reactivarlo, los tests de ausencia pasarían en vacío.
-    """
-    logger = logging.getLogger(LOGGER_NAME)
-    monkeypatch.setattr(logger, "disabled", False)
+def limiter_log(caplog):
+    """Captura el logger del limitador a nivel ERROR"""
     caplog.set_level(logging.ERROR, logger=LOGGER_NAME)
     return caplog
 

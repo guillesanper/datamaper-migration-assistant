@@ -427,12 +427,10 @@ class TestProxyHeaderTripwire:
 
     @pytest.fixture(autouse=True)
     def tripwire(self, monkeypatch, caplog):
-        """Producción con 0 saltos, bandera reiniciada y logger activo"""
+        """Producción con 0 saltos y bandera reiniciada"""
         import app.utils.security as security_module
 
         monkeypatch.setattr(security_module, "_proxy_header_warned", False)
-        # El conftest ejecuta alembic (fileConfig): deja disabled=True los loggers ya creados
-        monkeypatch.setattr(security_module.logger, "disabled", False)
         monkeypatch.setattr(security_module.security_settings, "DEVELOPMENT_MODE", False)
         monkeypatch.setattr(security_module.security_settings, "TRUSTED_PROXY_HOPS", 0)
         caplog.set_level(logging.WARNING, logger="app.utils.security")
