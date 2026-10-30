@@ -52,6 +52,12 @@ class _SslParams(TypedDict, total=False):
     sslrootcert: str
 
 
+class _AddressParams(TypedDict, total=False):
+    """IP a la que conecta libpq sin resolver host (pinning de la política de red)"""
+
+    hostaddr: str
+
+
 class PostgreSQLAdapter(BaseDBAdapter):
     """
     Adapter para PostgreSQL 12+.
@@ -86,6 +92,7 @@ class PostgreSQLAdapter(BaseDBAdapter):
                     connect_timeout=self.timeout,
                     # Usar RealDictCursor para retornar rows como dicts
                     cursor_factory=psycopg2.extras.RealDictCursor,
+                    **self._pinned_address(),
                     **self._ssl_params(root_cert),
                 )
             self._is_connected = True
@@ -103,6 +110,16 @@ class PostgreSQLAdapter(BaseDBAdapter):
             raise DBConnectionError(f"Cannot connect to PostgreSQL: {str(e)}")
         except Exception as e:
             raise DBConnectionError(f"Unexpected error connecting to PostgreSQL: {str(e)}")
+
+    def _pinned_address(self) -> _AddressParams:
+        """
+        hostaddr de libpq con la IP ya validada por la política de red.
+
+        libpq conecta a hostaddr sin resolver host, y sigue usando host para verificar el
+        certificado TLS (verify-full) y para SNI.
+        """
+        hostaddr = self.connection_config.get("hostaddr")
+        return _AddressParams(hostaddr=hostaddr) if hostaddr else _AddressParams()
 
     def _ssl_params(self, root_cert: str) -> _SslParams:
         """

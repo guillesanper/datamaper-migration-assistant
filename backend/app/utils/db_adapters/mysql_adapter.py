@@ -8,6 +8,7 @@ NO ejecuta queries sobre datos de usuario.
 """
 
 import logging
+import socket
 from typing import Any, Dict, List, Optional
 
 import pymysql  # type: ignore[import-untyped]
@@ -58,6 +59,30 @@ class _TLSRequiredConnection(pymysql.connections.Connection):
     aborta antes de autenticar.
     """
 
+    def __init__(self, *args, hostaddr: Optional[str] = None, **kwargs):
+        # Debe existir antes de super().__init__, que ya llama a connect()
+        self._hostaddr = hostaddr
+        super().__init__(*args, **kwargs)
+
+    def connect(self, sock=None):
+        """
+        Con hostaddr, abre el socket contra esa IP (ya validada por la política de red)
+        en vez de volver a resolver host. host se sigue usando para verificar el
+        certificado TLS y para SNI.
+        """
+        if sock is None and self._hostaddr:
+            try:
+                sock = socket.create_connection((self._hostaddr, self.port), self.connect_timeout)
+            except OSError as e:
+                raise OperationalError(
+                    2003, f"Can't connect to MySQL server on {self.host!r} ({e})"
+                ) from e
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+            sock.settimeout(None)
+            self.host_info = "socket %s:%d" % (self.host, self.port)
+        super().connect(sock)
+
     def _request_authentication(self):
         if self.ssl and not self.server_capabilities & CLIENT.SSL:
             raise OperationalError(
@@ -106,6 +131,7 @@ class MySQLAdapter(BaseDBAdapter):
                 charset="utf8mb4",
                 # SSLContext: PyMySQL activa TLS y verifica según el contexto (CA en memoria)
                 ssl=build_ssl_context(self.tls),
+                hostaddr=self.connection_config.get("hostaddr"),
             )
             self._is_connected = True
             logger.info(

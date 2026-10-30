@@ -14,7 +14,7 @@ Requiere:
 import logging
 import re
 import types
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from app.models.db_metadata import (
     CheckConstraintMetadata,
@@ -130,7 +130,7 @@ class SQLServerAdapter(BaseDBAdapter):
         try:
             # Build connection string
             driver = "{ODBC Driver 18 for SQL Server}"
-            server = self.connection_config["host"]
+            server, host_in_certificate = self._server_address()
             port = self.connection_config.get("port", 1433)
             database = self.connection_config["database"]
             username = self.connection_config["user"]
@@ -144,6 +144,7 @@ class SQLServerAdapter(BaseDBAdapter):
                 f"UID={_odbc_value(username)};"
                 f"PWD={_odbc_value(password)};"
                 f"{self._tls_attributes()}"
+                f"{host_in_certificate}"
                 f"Connection Timeout={self.timeout};"
             )
 
@@ -171,6 +172,20 @@ class SQLServerAdapter(BaseDBAdapter):
 
         except Exception as e:
             raise DBConnectionError(f"Unexpected error connecting to SQL Server: {str(e)}")
+
+    def _server_address(self) -> Tuple[str, str]:
+        """
+        Servidor al que conectar y atributo HostNameInCertificate.
+
+        Con hostaddr (IP IPv4 ya validada por la política de red) se conecta a esa IP sin
+        volver a resolver el nombre, y el certificado se sigue verificando contra el nombre
+        original con HostNameInCertificate. Las IPv6 se dejan con el nombre.
+        """
+        host = self.connection_config["host"]
+        hostaddr = self.connection_config.get("hostaddr")
+        if not hostaddr or hostaddr == host or ":" in hostaddr:
+            return host, ""
+        return hostaddr, f"HostNameInCertificate={host};"
 
     def _tls_attributes(self) -> str:
         """
