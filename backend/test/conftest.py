@@ -227,6 +227,7 @@ def create_worker_database(worker_id: str, config: dict) -> bool:
         # Conectar a BD administrativa (postgres) para crear la BD del worker
         admin_conn = psycopg2.connect(
             host=config["host"],
+            port=config["port"],
             database="postgres",
             user=config["user"],
             password=config["password"],
@@ -266,6 +267,7 @@ def create_worker_database(worker_id: str, config: dict) -> bool:
         # Conectar a la nueva BD para crear extensiones
         worker_conn = psycopg2.connect(
             host=config["host"],
+            port=config["port"],
             database=db_name,
             user=config["user"],
             password=config["password"],
@@ -323,6 +325,7 @@ def drop_worker_database(worker_id: str, config: dict):
     try:
         admin_conn = psycopg2.connect(
             host=config["host"],
+            port=config["port"],
             database="postgres",
             user=config["user"],
             password=config["password"],
@@ -450,6 +453,7 @@ def setup_test_database(worker_id="master"):
         # Verificar si la base de datos existe y tiene tablas
         conn = psycopg2.connect(
             host=os.getenv("TEST_DB_HOST", "localhost"),
+            port=os.getenv("TEST_DB_PORT", "5432"),
             database=db_name,
             user=os.getenv("TEST_DB_USER", "postgres"),
             password=os.getenv("TEST_DB_PASSWORD", "postgres"),
@@ -505,6 +509,7 @@ def test_db_connection(worker_id, setup_worker_databases):
 
     conn = psycopg2.connect(
         host=os.getenv("TEST_DB_HOST", "localhost"),
+        port=os.getenv("TEST_DB_PORT", "5432"),
         database=db_name,
         user=os.getenv("TEST_DB_USER", "postgres"),
         password=os.getenv("TEST_DB_PASSWORD", "postgres"),
