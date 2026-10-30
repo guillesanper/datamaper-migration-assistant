@@ -5,9 +5,6 @@ on:
     - cron: '0 2 * * *'  # Daily at 2 AM UTC
   workflow_dispatch:  # Allow manual trigger
 
-env:
-  PYTHON_VERSION: '3.11'
-
 jobs:
   e2e-tests:
     runs-on: ubuntu-latest
@@ -15,28 +12,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Start services with docker-compose
+      - name: Start test databases (PostgreSQL:5433, MySQL:3307, Redis:6380)
+        run: docker compose -f docker-compose.test.yml up -d
+
+      - name: Wait for test databases to be healthy
         run: |
-          docker-compose -f docker-compose.test.yml up -d
-
-      - name: Wait for services to be healthy
-        run: |
-          echo "⏳ Waiting for services to be ready..."
-          sleep 30
-
-          # Check PostgreSQL
-          docker-compose -f docker-compose.test.yml exec -T postgres pg_isready -U test_user || true
-
-          # Check MySQL
-          docker-compose -f docker-compose.test.yml exec -T mysql mysqladmin ping -h localhost || true
-
-          # Check Redis
-          docker-compose -f docker-compose.test.yml exec -T redis redis-cli ping || true
+          echo "Waiting for PostgreSQL test instance (port 5433)..."
+          timeout 60 bash -c 'until docker exec datamap-postgres-test pg_isready -U test_user -d test_database 2>/dev/null; do sleep 2; done'
+          echo "Waiting for MySQL test instance (port 3307)..."
+          timeout 60 bash -c 'until docker exec datamap-mysql-test mysqladmin ping -h localhost -u test_user -ptest_password 2>/dev/null; do sleep 2; done'
+          echo "Waiting for Redis test instance (port 6380)..."
+          timeout 60 bash -c 'until docker exec datamap-redis-test redis-cli ping 2>/dev/null; do sleep 2; done'
+          echo "All test databases are ready!"
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: ${{ env.PYTHON_VERSION }}
+          python-version-file: '.python-version'
           cache: 'pip'
           cache-dependency-path: 'backend/requirements.txt'
 
@@ -54,6 +46,11 @@ jobs:
           DB_NAME: test_database
           DB_USER: test_user
           DB_PASSWORD: test_password
+          # El conftest toma la BD de la app de TEST_DB_* (sin ellas usaría postgres/postgres)
+          TEST_DB_HOST: localhost
+          TEST_DB_PORT: 5433
+          TEST_DB_USER: test_user
+          TEST_DB_PASSWORD: test_password
 
           # Redis test instance
           REDIS_HOST: localhost
@@ -64,7 +61,8 @@ jobs:
 
           # App configuration
           SECRET_KEY: test-secret-key-for-e2e-ci
-          ENV: test
+          # Los tests asumen desarrollo, como en pr-checks.yml ("test" se trata como producción)
+          ENV: development
           ENCRYPTION_ENABLED: "false"
           # docker-compose.test.yml está levantado: no omitir los tests de MySQL/PostgreSQL externos
           REQUIRE_TEST_DATABASES: "1"
@@ -75,7 +73,7 @@ jobs:
         if: failure()
         run: |
           echo "=== Docker Compose Logs ==="
-          docker-compose -f docker-compose.test.yml logs > e2e-logs.txt
+          docker compose -f docker-compose.test.yml logs > e2e-logs.txt
           cat e2e-logs.txt
 
       - name: Upload logs
@@ -89,4 +87,4 @@ jobs:
       - name: Cleanup services
         if: always()
         run: |
-          docker-compose -f docker-compose.test.yml down -v
+          docker compose -f docker-compose.test.yml down -v
