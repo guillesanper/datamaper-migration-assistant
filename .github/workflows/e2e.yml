@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Start test databases (PostgreSQL:5433, MySQL:3307, Redis:6380)
         run: docker compose -f docker-compose.test.yml up -d
@@ -26,7 +26,7 @@ jobs:
           echo "All test databases are ready!"
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version-file: '.python-version'
           cache: 'pip'
@@ -78,7 +78,7 @@ jobs:
 
       - name: Upload logs
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: e2e-logs
           path: e2e-logs.txt
