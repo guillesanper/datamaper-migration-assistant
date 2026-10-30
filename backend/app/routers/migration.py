@@ -49,6 +49,7 @@ from app.services.migration_script_service import (
     MigrationScriptServiceError,
 )
 from app.utils.db_adapters.base_adapter import BaseDBAdapter
+from app.utils.exception_sanitizer import internal_server_error
 from app.utils.redis_client import get_redis_client
 
 logger = logging.getLogger(__name__)
@@ -685,10 +686,7 @@ def generate_migration_script(
     except Exception as e:
         logger.error(f"Error generating migration script: {str(e)}")
         db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error generating migration script: {str(e)}",
-        )
+        raise internal_server_error(e, logger, "Error generating migration script") from e
 
 
 @router.post(
@@ -845,11 +843,7 @@ def execute_migration(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error executing migration: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error executing migration: {str(e)}",
-        )
+        raise internal_server_error(e, logger, "Error executing migration") from e
 
 
 @router.get(
@@ -930,11 +924,7 @@ def get_execution_status(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error getting execution status: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error getting execution status: {str(e)}",
-        )
+        raise internal_server_error(e, logger, "Error getting execution status") from e
 
 
 @router.get(
@@ -1006,11 +996,7 @@ def list_executions(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error listing executions: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error listing executions: {str(e)}",
-        )
+        raise internal_server_error(e, logger, "Error listing executions") from e
 
 
 @router.get(
@@ -1121,11 +1107,7 @@ def get_dependency_graph(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error getting dependency graph: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error getting dependency graph: {str(e)}",
-        )
+        raise internal_server_error(e, logger, "Error getting dependency graph") from e
 
 
 @global_router.get(
@@ -1149,8 +1131,4 @@ def get_recent_migrations(
             limit=limit,
         )
     except Exception as e:
-        logger.error(f"Error fetching recent migrations: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error fetching recent migrations: {str(e)}",
-        )
+        raise internal_server_error(e, logger, "Error fetching recent migrations") from e

@@ -3,6 +3,7 @@
 API endpoints for entity locking operations
 """
 
+import logging
 from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
@@ -12,8 +13,10 @@ from app.database.session import get_db_session
 from app.routers.dependencies import get_current_user, require_project_access
 from app.routers.realtime import realtime_broadcast
 from app.services import locking_service
+from app.utils.exception_sanitizer import internal_server_error
 
 router = APIRouter(prefix="/api", tags=["locks"])
+logger = logging.getLogger(__name__)
 
 
 # Pydantic models
@@ -78,7 +81,7 @@ def acquire_lock(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error acquiring lock: {str(e)}")
+        raise internal_server_error(e, logger, "Error acquiring lock") from e
 
 
 @router.post("/locks/release")
@@ -118,7 +121,7 @@ def release_lock(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error releasing lock: {str(e)}")
+        raise internal_server_error(e, logger, "Error releasing lock") from e
 
 
 @router.get("/locks/{entity_id}/{entity_type}/status")
@@ -142,7 +145,7 @@ def get_lock_status(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error checking lock status: {str(e)}")
+        raise internal_server_error(e, logger, "Error checking lock status") from e
 
 
 @router.post("/locks/{lock_id}/renew")
@@ -174,7 +177,7 @@ def renew_lock(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error renewing lock: {str(e)}")
+        raise internal_server_error(e, logger, "Error renewing lock") from e
 
 
 @router.post("/locks/force-unlock")
@@ -218,7 +221,7 @@ def force_unlock(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error force unlocking: {str(e)}")
+        raise internal_server_error(e, logger, "Error force unlocking") from e
 
 
 @router.get("/locks/projects/{project_id}")
@@ -231,4 +234,4 @@ def get_active_locks(
         locks = locking_service.get_active_locks(db, project_id)
         return locks
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error fetching locks: {str(e)}")
+        raise internal_server_error(e, logger, "Error fetching locks") from e

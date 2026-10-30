@@ -3,6 +3,7 @@
 API endpoints for version control operations
 """
 
+import logging
 import uuid
 from typing import Any, Dict, List, Optional
 
@@ -15,9 +16,11 @@ from app.routers.dependencies import get_current_user, require_project_access
 from app.routers.realtime import realtime_broadcast
 from app.services import version_control_service
 from app.utils.error_codes import ErrorCode, make_error
+from app.utils.exception_sanitizer import internal_server_error
 from app.utils.redis_session_cache import get_encryption_session_cache
 
 router = APIRouter(prefix="/api", tags=["versions"])
+logger = logging.getLogger(__name__)
 
 
 # Pydantic models
@@ -99,7 +102,7 @@ async def create_version(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error creating version: {str(e)}")
+        raise internal_server_error(e, logger, "Error creating version") from e
 
 
 @router.get("/versions/entity/{entity_id}")
@@ -122,7 +125,7 @@ def get_version_history(
 
         return {"success": True, "data": {"versions": versions, "total": len(versions)}}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error fetching versions: {str(e)}")
+        raise internal_server_error(e, logger, "Error fetching versions") from e
 
 
 @router.get("/versions/recent")
@@ -167,7 +170,7 @@ def compare_versions(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error comparing versions: {str(e)}")
+        raise internal_server_error(e, logger, "Error comparing versions") from e
 
 
 @router.get("/versions/{version_id}")
@@ -231,7 +234,7 @@ async def restore_version(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error restoring version: {str(e)}")
+        raise internal_server_error(e, logger, "Error restoring version") from e
 
 
 @router.post("/versions/tags")
@@ -255,7 +258,7 @@ def create_tag(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error creating tag: {str(e)}")
+        raise internal_server_error(e, logger, "Error creating tag") from e
 
 
 @router.get("/versions/projects/{project_id}")
@@ -286,7 +289,7 @@ def get_project_versions(
 
         return {"success": True, "data": {"versions": versions, "total": len(versions)}}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error fetching project versions: {str(e)}")
+        raise internal_server_error(e, logger, "Error fetching project versions") from e
 
 
 @router.get("/versions/projects/{project_id}/tags")

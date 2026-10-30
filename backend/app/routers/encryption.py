@@ -13,6 +13,7 @@ Endpoints:
 Autor: DataMap Security Team
 """
 
+import logging
 import os
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
@@ -24,9 +25,11 @@ from pydantic import BaseModel, Field
 from app.database.session import get_db_session
 from app.routers.dependencies import get_current_user
 from app.services.encryption_service import EncryptionService
+from app.utils.exception_sanitizer import internal_server_error
 from app.utils.security_logger import log_security_event
 
 router = APIRouter(prefix="/api/projects", tags=["encryption"])
+logger = logging.getLogger(__name__)
 
 
 # ==================== Schemas de Request ====================
@@ -142,10 +145,7 @@ async def setup_project_encryption(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error configurando cifrado: {str(e)}",
-        )
+        raise internal_server_error(e, logger, "Error configurando cifrado") from e
 
 
 @router.post("/{project_id}/encryption/verify")
@@ -719,10 +719,7 @@ async def rotate_master_key(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error rotando master key: {str(e)}",
-        )
+        raise internal_server_error(e, logger, "Error rotando master key") from e
 
 
 @router.get("/{project_id}/encryption/stats", response_model=EncryptionStatsResponse)

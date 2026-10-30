@@ -4,6 +4,7 @@ API endpoints for comments and reactions
 """
 
 import asyncio
+import logging
 import uuid
 from typing import List, Optional
 
@@ -14,8 +15,10 @@ from app.database.session import get_db_session as get_db
 from app.routers.dependencies import get_current_user, require_project_access
 from app.routers.realtime import realtime_broadcast
 from app.services import comments_service
+from app.utils.exception_sanitizer import internal_server_error
 
 router = APIRouter(prefix="/api", tags=["comments"])
+logger = logging.getLogger(__name__)
 
 
 # Helper function to schedule realtime broadcast
@@ -129,7 +132,7 @@ def create_comment(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error creating comment: {str(e)}")
+        raise internal_server_error(e, logger, "Error creating comment") from e
 
 
 @router.put("/comments/{comment_id}")
@@ -171,7 +174,7 @@ def update_comment(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error updating comment: {str(e)}")
+        raise internal_server_error(e, logger, "Error updating comment") from e
 
 
 @router.delete("/comments/{comment_id}")
@@ -213,7 +216,7 @@ def delete_comment(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error deleting comment: {str(e)}")
+        raise internal_server_error(e, logger, "Error deleting comment") from e
 
 
 @router.patch("/comments/{comment_id}/resolve")
@@ -258,7 +261,7 @@ def resolve_comment(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error resolving comment: {str(e)}")
+        raise internal_server_error(e, logger, "Error resolving comment") from e
 
 
 @router.post("/comments/{comment_id}/reactions")
@@ -304,7 +307,7 @@ def add_reaction(
             "message": "Reaction added successfully",
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error adding reaction: {str(e)}")
+        raise internal_server_error(e, logger, "Error adding reaction") from e
 
 
 @router.delete("/comments/{comment_id}/reactions")
@@ -351,7 +354,7 @@ def remove_reaction(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error removing reaction: {str(e)}")
+        raise internal_server_error(e, logger, "Error removing reaction") from e
 
 
 @router.get("/comments")
@@ -377,7 +380,7 @@ def get_comments(
 
         return {"success": True, "data": {"comments": comments}}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error fetching comments: {str(e)}")
+        raise internal_server_error(e, logger, "Error fetching comments") from e
 
 
 @router.post("/comments/mark-read")
@@ -396,7 +399,7 @@ def mark_comments_read(
             "message": f"{count} comment(s) marked as read",
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error marking comments as read: {str(e)}")
+        raise internal_server_error(e, logger, "Error marking comments as read") from e
 
 
 @router.get("/comments/unread/{project_id}")
@@ -414,4 +417,4 @@ def get_unread_count(project_id: str, db=Depends(get_db), current_user=Depends(g
             "message": "Unread count retrieved successfully",
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error getting unread count: {str(e)}")
+        raise internal_server_error(e, logger, "Error getting unread count") from e

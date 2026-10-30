@@ -43,6 +43,7 @@ from app.services.migration_script_service import (
 from app.utils.db_adapters import DBConnectionError
 from app.utils.db_adapters.type_mappers import TypeMapper
 from app.utils.error_codes import ErrorCode, make_error
+from app.utils.exception_sanitizer import internal_server_error
 from app.utils.i18n import DEFAULT_LOCALE
 from app.utils.redis_client import get_redis_client
 from config import make_translator
@@ -319,7 +320,6 @@ def export_mappings(
     current_user=Depends(get_current_user),
 ):
     import sys
-    import traceback
     from uuid import UUID
 
     # Forzar flush de stdout
@@ -773,9 +773,7 @@ def export_mappings(
         log.error(f"[EXPORT] HTTPException: {he.status_code} - {he.detail}")
         raise
     except Exception as e:
-        error_msg = f"[EXPORT ERROR] {str(e)}\n{traceback.format_exc()}"
-        log.error(error_msg)
-        raise HTTPException(status_code=500, detail=f"Export error: {str(e)}")
+        raise internal_server_error(e, logger, "Export error") from e
 
 
 @router.get("/projects/{project_id}/tables")
@@ -1010,7 +1008,7 @@ async def get_project_tables(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_server_error(e, logger, "Internal server error") from e
 
 
 @router.get("/projects/{project_id}")
@@ -1108,7 +1106,7 @@ async def get_project_mappings(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_server_error(e, logger, "Internal server error") from e
 
 
 # Añadir un nuevo mapping
@@ -1657,7 +1655,7 @@ async def validate_mappings(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_server_error(e, logger, "Internal server error") from e
 
 
 # Eliminar mapping
@@ -2890,8 +2888,7 @@ async def generate_migration_script(
         raise
 
     except Exception as e:
-        logger.error(f"Error generating migration script: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
+        raise internal_server_error(e, logger, "Unexpected error") from e
 
     finally:
         # Desconectar adapters
