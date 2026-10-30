@@ -37,8 +37,10 @@ def acquire_lock(
     )
 
     if not lock:
-        # Lock failed, get current lock info
+        # Lock failed, get current lock info (solo si es de este proyecto: no filtrar datos ajenos)
         current_lock = locks_crud.get_lock_status_orm(db, entity_id, entity_type)
+        if current_lock and current_lock["project_id"] != str(project_id):
+            current_lock = None
         return {"success": False, "locked_by_another": True, "current_lock": current_lock}
 
     # Log activity
@@ -96,6 +98,11 @@ def check_lock_status(db, entity_id: str, entity_type: str, user_id: str) -> Dic
     }
 
 
+def get_lock(db, lock_id: str) -> Optional[Dict[str, Any]]:
+    """Get a lock by ID (None if it does not exist)"""
+    return locks_crud.get_lock_by_id_orm(db, lock_id)
+
+
 def renew_lock(
     db, lock_id: str, user_id: str, duration_minutes: int = 15
 ) -> Optional[Dict[str, Any]]:
@@ -112,7 +119,8 @@ def force_unlock(db, entity_id: str, entity_type: str, project_id: str, admin_us
     """
     # Get lock info before removing for logging
     lock = locks_crud.get_lock_status_orm(db, entity_id, entity_type)
-    if not lock:
+    # Solo se fuerza el desbloqueo de locks del proyecto sobre el que se tienen permisos
+    if not lock or lock["project_id"] != str(project_id):
         return False
 
     unlocked = locks_crud.force_unlock_orm(db, entity_id, entity_type)

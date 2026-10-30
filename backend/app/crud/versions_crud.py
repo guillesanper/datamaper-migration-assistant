@@ -123,8 +123,13 @@ def get_version_history_orm(
     offset: int = 0,
     change_type: Optional[str] = None,
     user_id: Optional[str] = None,
+    viewer_id: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
-    """Get version history for an entity with optional filters (ORM version)"""
+    """
+    Get version history for an entity with optional filters (ORM version).
+
+    Con viewer_id solo se devuelven versiones de proyectos a los que ese usuario tiene acceso.
+    """
     from sqlalchemy import func
 
     from app.models.orm.user import User
@@ -146,6 +151,13 @@ def get_version_history_orm(
 
     if user_id:
         query = query.filter(EntityVersion.user_id == user_id)
+
+    if viewer_id:
+        from app.crud.project_crud import ProjectCRUD
+
+        query = query.filter(
+            EntityVersion.project_id.in_(ProjectCRUD.accessible_project_ids_orm(db, viewer_id))
+        )
 
     # Group by all EntityVersion columns and user info
     query = query.group_by(EntityVersion.id, User.username, User.email)

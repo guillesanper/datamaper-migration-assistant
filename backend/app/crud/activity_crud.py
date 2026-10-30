@@ -99,21 +99,35 @@ def get_project_activity_orm(
 
 
 def get_entity_activity_orm(
-    db, entity_id: str, entity_type: str, limit: int = 50  # SQLAlchemy Session
+    db,  # SQLAlchemy Session
+    entity_id: str,
+    entity_type: str,
+    limit: int = 50,
+    viewer_id: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
-    """Get activity for a specific entity (ORM version)"""
+    """
+    Get activity for a specific entity (ORM version).
+
+    Con viewer_id solo se devuelve la actividad de proyectos a los que ese usuario tiene acceso.
+    """
     from app.models.orm.activity import ProjectActivity
     from app.models.orm.user import User
 
-    results = (
+    query = (
         db.query(ProjectActivity, User.username, User.email)
         .outerjoin(User, ProjectActivity.user_id == User.id)
         .filter(ProjectActivity.entity_id == entity_id)
         .filter(ProjectActivity.entity_type == entity_type)
-        .order_by(ProjectActivity.created_at.desc())
-        .limit(limit)
-        .all()
     )
+
+    if viewer_id:
+        from app.crud.project_crud import ProjectCRUD
+
+        query = query.filter(
+            ProjectActivity.project_id.in_(ProjectCRUD.accessible_project_ids_orm(db, viewer_id))
+        )
+
+    results = query.order_by(ProjectActivity.created_at.desc()).limit(limit).all()
 
     # Convertir con mapeo manual
     return [
@@ -135,9 +149,17 @@ def get_entity_activity_orm(
 
 
 def get_user_activity_orm(
-    db, user_id: str, project_id: Optional[str] = None, limit: int = 50  # SQLAlchemy Session
+    db,  # SQLAlchemy Session
+    user_id: str,
+    project_id: Optional[str] = None,
+    limit: int = 50,
+    viewer_id: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
-    """Get activity for a specific user (ORM version)"""
+    """
+    Get activity for a specific user (ORM version).
+
+    Con viewer_id solo se devuelve la actividad de proyectos a los que ese usuario tiene acceso.
+    """
     from app.models.orm.activity import ProjectActivity
     from app.models.orm.user import User
 
@@ -150,6 +172,13 @@ def get_user_activity_orm(
     # Filtro opcional por proyecto
     if project_id:
         query = query.filter(ProjectActivity.project_id == project_id)
+
+    if viewer_id:
+        from app.crud.project_crud import ProjectCRUD
+
+        query = query.filter(
+            ProjectActivity.project_id.in_(ProjectCRUD.accessible_project_ids_orm(db, viewer_id))
+        )
 
     results = query.order_by(ProjectActivity.created_at.desc()).limit(limit).all()
 
@@ -179,22 +208,11 @@ def get_global_activity_orm(
     offset: int = 0,
 ) -> List[Dict[str, Any]]:
     """Get activity across all projects accessible to the user (ORM version)"""
-    from sqlalchemy import or_
-
+    from app.crud.project_crud import ProjectCRUD
     from app.models.orm.activity import ProjectActivity
-    from app.models.orm.project import Project, ProjectMember
     from app.models.orm.user import User
 
-    accessible = (
-        db.query(Project.id)
-        .outerjoin(ProjectMember, ProjectMember.project_id == Project.id)
-        .filter(
-            Project.is_deleted == False,  # noqa: E712
-            or_(Project.owner_id == user_id, ProjectMember.user_id == user_id),
-        )
-        .subquery()
-        .select()
-    )
+    accessible = ProjectCRUD.accessible_project_ids_orm(db, user_id)
 
     results = (
         db.query(ProjectActivity, User.username, User.email)

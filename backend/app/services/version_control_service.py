@@ -120,9 +120,9 @@ def create_version(
 
 
 def get_version_history(
-    db, entity_id: str, filters: Optional[Dict[str, Any]] = None
+    db, entity_id: str, filters: Optional[Dict[str, Any]] = None, viewer_id: Optional[str] = None
 ) -> List[Dict[str, Any]]:
-    """Get version history with optional filters"""
+    """Get version history with optional filters (con viewer_id, solo de proyectos accesibles)"""
     filters = filters or {}
 
     return versions_crud.get_version_history_orm(
@@ -132,6 +132,7 @@ def get_version_history(
         offset=filters.get("offset", 0),
         change_type=filters.get("change_type"),
         user_id=filters.get("user_id"),
+        viewer_id=viewer_id,
     )
 
 

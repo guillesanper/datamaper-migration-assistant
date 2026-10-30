@@ -3,6 +3,7 @@
 API endpoints for version control operations
 """
 
+import uuid
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -10,7 +11,7 @@ from pydantic import UUID4, BaseModel
 
 from app.crud import versions_crud
 from app.database.session import get_db_session
-from app.routers.dependencies import get_current_user
+from app.routers.dependencies import get_current_user, require_project_access
 from app.routers.realtime import realtime_broadcast
 from app.services import version_control_service
 from app.utils.error_codes import ErrorCode, make_error
@@ -41,6 +42,32 @@ class CreateTagRequest(BaseModel):
     color: Optional[str] = None
 
 
+def _is_uuid(value: str) -> bool:
+    try:
+        uuid.UUID(str(value))
+        return True
+    except ValueError:
+        return False
+
+
+def _get_accessible_version(db, version_id: str, current_user: dict, min_role: str = "viewer"):
+    """
+    Devuelve la versión si el usuario tiene acceso a su proyecto (con al menos min_role).
+
+    Una versión inexistente y una de un proyecto ajeno responden igual (404).
+    """
+    version = versions_crud.get_version_by_id_orm(db, version_id) if _is_uuid(version_id) else None
+    if not version:
+        raise HTTPException(status_code=404, detail=make_error(ErrorCode.VERSION_NOT_FOUND))
+    try:
+        require_project_access(db, version["project_id"], current_user["id"], min_role=min_role)
+    except HTTPException as e:
+        if e.status_code == 404:
+            raise HTTPException(status_code=404, detail=make_error(ErrorCode.VERSION_NOT_FOUND))
+        raise
+    return version
+
+
 # Endpoints
 @router.post("/versions")
 async def create_version(
@@ -48,7 +75,8 @@ async def create_version(
     db=Depends(get_db_session),
     current_user=Depends(get_current_user),
 ):
-    """Create a new version"""
+    """Create a new version (owner o editor del proyecto)"""
+    require_project_access(db, payload.project_id, current_user["id"], min_role="editor")
     try:
         version = version_control_service.create_version(
             db=db,
@@ -89,7 +117,7 @@ def get_version_history(
         filters = {"limit": limit, "offset": offset, "change_type": change_type, "user_id": user_id}
 
         versions = version_control_service.get_version_history(
-            db=db, entity_id=entity_id, filters=filters
+            db=db, entity_id=entity_id, filters=filters, viewer_id=str(current_user["id"])
         )
 
         return {"success": True, "data": {"versions": versions, "total": len(versions)}}
@@ -113,20 +141,6 @@ def get_recent_versions(
         raise HTTPException(status_code=500, detail=make_error(ErrorCode.VERSION_OPERATION_FAILED))
 
 
-@router.get("/versions/{version_id}")
-def get_version(
-    version_id: str, db=Depends(get_db_session), current_user=Depends(get_current_user)
-):
-    """Get a specific version by ID"""
-    from app.crud import versions_crud
-
-    version = versions_crud.get_version_by_id_orm(db, version_id)
-    if not version:
-        raise HTTPException(status_code=404, detail=make_error(ErrorCode.VERSION_NOT_FOUND))
-
-    return {"success": True, "data": {"version": version}}
-
-
 @router.get("/versions/compare")
 def compare_versions(
     version_a_id: str = Query(..., description="First version ID"),
@@ -135,6 +149,8 @@ def compare_versions(
     current_user=Depends(get_current_user),
 ):
     """Compare two versions"""
+    _get_accessible_version(db, version_a_id, current_user)
+    _get_accessible_version(db, version_b_id, current_user)
     try:
         comparison = version_control_service.compare_versions(
             db=db, version_a_id=version_a_id, version_b_id=version_b_id
@@ -154,6 +170,18 @@ def compare_versions(
         raise HTTPException(status_code=500, detail=f"Error comparing versions: {str(e)}")
 
 
+@router.get("/versions/{version_id}")
+def get_version(
+    version_id: str, db=Depends(get_db_session), current_user=Depends(get_current_user)
+):
+    """Get a specific version by ID"""
+    from app.crud import versions_crud
+
+    version = _get_accessible_version(db, version_id, current_user)
+
+    return {"success": True, "data": {"version": version}}
+
+
 @router.post("/versions/{version_id}/restore")
 async def restore_version(
     version_id: str,
@@ -162,7 +190,8 @@ async def restore_version(
     db=Depends(get_db_session),
     current_user=Depends(get_current_user),
 ):
-    """Restore a previous version"""
+    """Restore a previous version (owner o editor del proyecto de la versión)"""
+    _get_accessible_version(db, version_id, current_user, min_role="editor")
     try:
         # The restore URL (/api/versions/{id}/restore) has no /projects/{uuid} segment,
         # so the EncryptionSessionMiddleware cannot extract the project_id and never sets
@@ -209,7 +238,8 @@ async def restore_version(
 def create_tag(
     payload: CreateTagRequest, db=Depends(get_db_session), current_user=Depends(get_current_user)
 ):
-    """Create a tag for a version"""
+    """Create a tag for a version (owner o editor del proyecto)"""
+    require_project_access(db, payload.project_id, current_user["id"], min_role="editor")
     try:
         tag = version_control_service.create_tag(
             db=db,
@@ -240,6 +270,7 @@ def get_project_versions(
     current_user=Depends(get_current_user),
 ):
     """Get all versions for a project"""
+    require_project_access(db, project_id, current_user["id"])
     try:
         filters = {
             "limit": limit,
@@ -263,6 +294,7 @@ def get_project_tags(
     project_id: str, db=Depends(get_db_session), current_user=Depends(get_current_user)
 ):
     """Get all tags for a project"""
+    require_project_access(db, project_id, current_user["id"])
     try:
         tags = version_control_service.get_project_tags(db, project_id)
         return {"success": True, "data": {"tags": tags}}
@@ -272,7 +304,16 @@ def get_project_tags(
 
 @router.delete("/versions/tags/{tag_id}")
 def delete_tag(tag_id: str, db=Depends(get_db_session), current_user=Depends(get_current_user)):
-    """Delete a tag"""
+    """Delete a tag (solo su creador o el owner del proyecto)"""
+    from app.crud import tags_crud
+
+    tag = tags_crud.get_tag_by_id_orm(db, tag_id) if _is_uuid(tag_id) else None
+    if not tag:
+        raise HTTPException(status_code=404, detail=make_error(ErrorCode.TAG_NOT_FOUND))
+    access = require_project_access(db, tag["project_id"], current_user["id"])
+    if not access["is_owner"] and str(tag.get("created_by")) != str(current_user["id"]):
+        raise HTTPException(status_code=403, detail=make_error(ErrorCode.PROJECT_FORBIDDEN))
+
     try:
         deleted = version_control_service.delete_tag(
             db=db, tag_id=tag_id, user_id=current_user["id"]

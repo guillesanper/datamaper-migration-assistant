@@ -9,7 +9,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel
 
 from app.database.session import get_db_session
-from app.routers.dependencies import get_current_user
+from app.routers.dependencies import get_current_user, require_project_access
 from app.routers.realtime import realtime_broadcast
 from app.services import locking_service
 
@@ -48,7 +48,8 @@ def acquire_lock(
     db=Depends(get_db_session),
     current_user=Depends(get_current_user),
 ):
-    """Attempt to acquire a lock on an entity"""
+    """Attempt to acquire a lock on an entity (owner o editor del proyecto)"""
+    require_project_access(db, payload.project_id, current_user["id"], min_role="editor")
     try:
         result = locking_service.acquire_lock(
             db=db,
@@ -74,6 +75,8 @@ def acquire_lock(
             )
 
         return result
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error acquiring lock: {str(e)}")
 
@@ -86,6 +89,7 @@ def release_lock(
     current_user=Depends(get_current_user),
 ):
     """Release a lock"""
+    require_project_access(db, payload.project_id, current_user["id"])
     try:
         released = locking_service.release_lock(
             db=db,
@@ -130,7 +134,13 @@ def get_lock_status(
             db=db, entity_id=entity_id, entity_type=entity_type, user_id=current_user["id"]
         )
 
+        # Un lock de un proyecto ajeno no se muestra (ni quién lo tiene)
+        if status["lock"]:
+            require_project_access(db, status["lock"]["project_id"], current_user["id"])
+
         return status
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error checking lock status: {str(e)}")
 
@@ -144,6 +154,12 @@ def renew_lock(
 ):
     """Renew a lock (heartbeat)"""
     try:
+        # Quien ya no tiene acceso al proyecto no puede seguir renovando el lock
+        existing = locking_service.get_lock(db, lock_id)
+        if not existing or str(existing["user_id"]) != str(current_user["id"]):
+            raise HTTPException(status_code=400, detail="Lock not found or you don't own it")
+        require_project_access(db, existing["project_id"], current_user["id"], min_role="editor")
+
         lock = locking_service.renew_lock(
             db=db,
             lock_id=lock_id,
@@ -170,11 +186,9 @@ def force_unlock(
 ):
     """
     Force unlock an entity (admin action).
-    Requires admin or owner permissions (checked in service/router).
+    Solo el owner del proyecto, y solo sobre locks de ese proyecto.
     """
-    # TODO: Add permission check here (must be admin or owner)
-    # For now, allowing any authenticated user
-    # You should add: check_user_role(db, current_user['id'], payload.project_id, ['admin', 'owner'])
+    require_project_access(db, payload.project_id, current_user["id"], min_role="owner")
 
     try:
         unlocked = locking_service.force_unlock(
@@ -212,6 +226,7 @@ def get_active_locks(
     project_id: str, db=Depends(get_db_session), current_user=Depends(get_current_user)
 ):
     """Get all active locks for a project"""
+    require_project_access(db, project_id, current_user["id"])
     try:
         locks = locking_service.get_active_locks(db, project_id)
         return locks

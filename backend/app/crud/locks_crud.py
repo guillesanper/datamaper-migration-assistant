@@ -152,6 +152,22 @@ def get_lock_status_orm(
     }
 
 
+def get_lock_by_id_orm(db, lock_id: str) -> Optional[Dict[str, Any]]:  # SQLAlchemy Session
+    """Get a lock by ID (ORM version). Returns None if not found or the ID is not a UUID."""
+    import uuid as uuid_module
+
+    from app.models.orm.lock import EntityLock
+    from app.utils.orm_helpers import model_to_dict
+
+    try:
+        uuid_module.UUID(str(lock_id))
+    except ValueError:
+        return None
+
+    lock = db.query(EntityLock).filter(EntityLock.id == lock_id).first()
+    return model_to_dict(lock) if lock else None
+
+
 def renew_lock_orm(
     db,  # SQLAlchemy Session
     lock_id: str,
