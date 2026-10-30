@@ -5,7 +5,7 @@ API endpoints for entity locking operations
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel
 
 from app.database.session import get_db_session
@@ -43,7 +43,10 @@ class ForceUnlockRequest(BaseModel):
 # Endpoints
 @router.post("/locks/acquire")
 def acquire_lock(
-    payload: AcquireLockRequest, db=Depends(get_db_session), current_user=Depends(get_current_user)
+    payload: AcquireLockRequest,
+    background_tasks: BackgroundTasks,
+    db=Depends(get_db_session),
+    current_user=Depends(get_current_user),
 ):
     """Attempt to acquire a lock on an entity"""
     try:
@@ -58,17 +61,16 @@ def acquire_lock(
 
         if result["success"]:
             # Broadcast real-time event
-            __import__("asyncio").create_task(
-                realtime_broadcast(
-                    payload.project_id,
-                    {
-                        "type": "lock:acquired",
-                        "lock": result["lock"],
-                        "entity_id": payload.entity_id,
-                        "entity_type": payload.entity_type,
-                        "actor_id": str(current_user["id"]),
-                    },
-                )
+            background_tasks.add_task(
+                realtime_broadcast,
+                payload.project_id,
+                {
+                    "type": "lock:acquired",
+                    "lock": result["lock"],
+                    "entity_id": payload.entity_id,
+                    "entity_type": payload.entity_type,
+                    "actor_id": str(current_user["id"]),
+                },
             )
 
         return result
@@ -78,7 +80,10 @@ def acquire_lock(
 
 @router.post("/locks/release")
 def release_lock(
-    payload: ReleaseLockRequest, db=Depends(get_db_session), current_user=Depends(get_current_user)
+    payload: ReleaseLockRequest,
+    background_tasks: BackgroundTasks,
+    db=Depends(get_db_session),
+    current_user=Depends(get_current_user),
 ):
     """Release a lock"""
     try:
@@ -94,16 +99,15 @@ def release_lock(
             raise HTTPException(status_code=400, detail="Lock not found or you don't own it")
 
         # Broadcast real-time event
-        __import__("asyncio").create_task(
-            realtime_broadcast(
-                payload.project_id,
-                {
-                    "type": "lock:released",
-                    "entity_id": payload.entity_id,
-                    "entity_type": payload.entity_type,
-                    "actor_id": str(current_user["id"]),
-                },
-            )
+        background_tasks.add_task(
+            realtime_broadcast,
+            payload.project_id,
+            {
+                "type": "lock:released",
+                "entity_id": payload.entity_id,
+                "entity_type": payload.entity_type,
+                "actor_id": str(current_user["id"]),
+            },
         )
 
         return {"released": True}
@@ -159,7 +163,10 @@ def renew_lock(
 
 @router.post("/locks/force-unlock")
 def force_unlock(
-    payload: ForceUnlockRequest, db=Depends(get_db_session), current_user=Depends(get_current_user)
+    payload: ForceUnlockRequest,
+    background_tasks: BackgroundTasks,
+    db=Depends(get_db_session),
+    current_user=Depends(get_current_user),
 ):
     """
     Force unlock an entity (admin action).
@@ -182,16 +189,15 @@ def force_unlock(
             raise HTTPException(status_code=404, detail="Lock not found")
 
         # Broadcast real-time event
-        __import__("asyncio").create_task(
-            realtime_broadcast(
-                payload.project_id,
-                {
-                    "type": "lock:force_unlocked",
-                    "entity_id": payload.entity_id,
-                    "entity_type": payload.entity_type,
-                    "actor_id": str(current_user["id"]),
-                },
-            )
+        background_tasks.add_task(
+            realtime_broadcast,
+            payload.project_id,
+            {
+                "type": "lock:force_unlocked",
+                "entity_id": payload.entity_id,
+                "entity_type": payload.entity_type,
+                "actor_id": str(current_user["id"]),
+            },
         )
 
         return {"unlocked": True}
