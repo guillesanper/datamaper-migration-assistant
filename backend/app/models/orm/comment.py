@@ -17,7 +17,17 @@ Características:
 
 import uuid
 
-from sqlalchemy import Boolean, CheckConstraint, Column, DateTime, ForeignKey, Index, String, Text, text
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    Column,
+    DateTime,
+    ForeignKey,
+    Index,
+    String,
+    Text,
+    text,
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -71,7 +81,9 @@ class Comment(Base):
     content_nonce = Column(Text)
 
     # Flag de cifrado
-    is_encrypted = Column(Boolean, default=False, server_default=text("false"), nullable=False, index=True)
+    is_encrypted = Column(
+        Boolean, default=False, server_default=text("false"), nullable=False, index=True
+    )
 
     # Timestamps
     created_at = Column(
@@ -81,7 +93,9 @@ class Comment(Base):
 
     # Estado
     is_edited = Column(Boolean, default=False, server_default=text("false"), nullable=False)
-    is_resolved = Column(Boolean, default=False, server_default=text("false"), nullable=False, index=True)
+    is_resolved = Column(
+        Boolean, default=False, server_default=text("false"), nullable=False, index=True
+    )
 
     # Resolución
     resolved_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
@@ -191,7 +205,10 @@ class CommentRead(Base):
     __tablename__ = "comment_reads"
 
     id = Column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, server_default=text("gen_random_uuid()")
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        server_default=text("gen_random_uuid()"),
     )
 
     # Relaciones

@@ -8,10 +8,10 @@ from sqlalchemy import text
 
 from app.database.session import get_db_session
 from app.routers.dependencies import get_current_user, validate_encryption_session
-from app.utils.error_codes import ErrorCode, make_error
 from app.routers.realtime import realtime_broadcast
 from app.services.schema_service import ALLOWED_COLUMN_TYPES, PARAMETRIZED_TYPES, SchemaService
 from app.services.type_compatibility_service import TypeCompatibilityService
+from app.utils.error_codes import ErrorCode, make_error
 
 router = APIRouter()
 
@@ -359,7 +359,9 @@ async def api_get_table(
 
     table = schemas_crud.get_table_by_id_orm(db, table_id, encryption_key)
     if not table:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=make_error(ErrorCode.TABLE_NOT_FOUND))
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=make_error(ErrorCode.TABLE_NOT_FOUND)
+        )
 
     # Check permissions
     SchemaService.can_user_modify_schema(db, project_id, current_user["id"])
@@ -390,7 +392,9 @@ async def api_create_column(
 
         table = schemas_crud.get_table_by_id_orm(db, table_id, encryption_key)
         if not table:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=make_error(ErrorCode.TABLE_NOT_FOUND))
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail=make_error(ErrorCode.TABLE_NOT_FOUND)
+            )
 
         column = SchemaService.create_column_with_validation(
             db,
@@ -700,7 +704,9 @@ async def api_get_column(
 
     column = schemas_crud.get_column_by_id_orm(db, column_id)
     if not column:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=make_error(ErrorCode.COLUMN_NOT_FOUND))
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=make_error(ErrorCode.COLUMN_NOT_FOUND)
+        )
 
     # Check permissions
     SchemaService.can_user_modify_schema(db, column["project_id"], current_user["id"])
@@ -822,7 +828,9 @@ async def api_get_primary_key(
         # Check table exists and user has permission
         table = schemas_crud.get_table_by_id_orm(db, str(table_id))
         if not table:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=make_error(ErrorCode.TABLE_NOT_FOUND))
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail=make_error(ErrorCode.TABLE_NOT_FOUND)
+            )
 
         # Check permissions (read-only, so any project member can view)
         SchemaService.can_user_modify_schema(db, table["project_id"], current_user["id"])
@@ -864,7 +872,9 @@ async def api_delete_primary_key(
         # Get table for project_id
         table = schemas_crud.get_table_by_id_orm(db, str(table_id))
         if not table:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=make_error(ErrorCode.TABLE_NOT_FOUND))
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail=make_error(ErrorCode.TABLE_NOT_FOUND)
+            )
 
         result = PrimaryKeyService.remove_primary_key(db, table_id, current_user["id"])
 

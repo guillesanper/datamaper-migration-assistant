@@ -15,7 +15,6 @@ import uuid
 import pytest
 from fastapi import status
 
-
 # ============================================================================
 # HELPERS
 # ============================================================================
@@ -61,14 +60,19 @@ def test_recent_migrations_success(authenticated_client, test_project, db_sessio
     assert len(data) >= 1
 
     entry = data[0]
-    for field in ("execution_id", "project_id", "project_name", "status", "started_at", "completed_at"):
+    for field in (
+        "execution_id",
+        "project_id",
+        "project_name",
+        "status",
+        "started_at",
+        "completed_at",
+    ):
         assert field in entry, f"Missing field: {field}"
 
 
 @pytest.mark.integration
-def test_recent_migrations_contains_created_entry(
-    authenticated_client, test_project, db_session
-):
+def test_recent_migrations_contains_created_entry(authenticated_client, test_project, db_session):
     """The created execution appears in the response."""
     execution = create_execution(db_session, test_project["id"], "failed")
 

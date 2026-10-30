@@ -639,9 +639,7 @@ class ProjectCRUD:
         db.commit()
 
     @staticmethod
-    def get_recent_projects_for_user_orm(
-        db, user_id: str, limit: int = 5
-    ) -> List[Dict[str, Any]]:
+    def get_recent_projects_for_user_orm(db, user_id: str, limit: int = 5) -> List[Dict[str, Any]]:
         """
         Devuelve proyectos donde el usuario es owner o miembro,
         ordenados por last_accessed_at DESC (NULLs al final), limitados a `limit`.

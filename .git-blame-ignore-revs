@@ -1,0 +1,5 @@
+# Commits de solo formato que git blame debe ignorar.
+# Uso local: git config blame.ignoreRevsFile .git-blame-ignore-revs
+
+# style: formatear el backend con black e isort
+512104eb2548137aa38c58e70d64a948efeaae95

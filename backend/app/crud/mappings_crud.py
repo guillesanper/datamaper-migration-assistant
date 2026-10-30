@@ -13,7 +13,6 @@ from fastapi import HTTPException, status
 
 from app.utils.error_codes import ErrorCode, make_error
 
-
 # ========================================================================
 # SQLALCHEMY ORM VERSIONS - Funciones con sufijo _orm
 # ========================================================================
@@ -596,7 +595,10 @@ def update_mapping_orm(
         mapping = db.query(Mapping).filter(Mapping.id == mapping_id).first()
 
         if not mapping:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=make_error(ErrorCode.MAPPING_NOT_FOUND))
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=make_error(ErrorCode.MAPPING_NOT_FOUND),
+            )
 
         project_id = str(mapping.project_id)
         now = datetime.now(timezone.utc).replace(tzinfo=None)

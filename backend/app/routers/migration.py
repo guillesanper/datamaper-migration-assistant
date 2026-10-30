@@ -643,7 +643,11 @@ def generate_migration_script(
         logger.info(f"Script saved with ID: {script_id}")
 
         # PASO 8: Log activity
-        tables_count = len(dependency_order) if dependency_order else len(set(m["destination_table"] for m in mappings))
+        tables_count = (
+            len(dependency_order)
+            if dependency_order
+            else len(set(m["destination_table"] for m in mappings))
+        )
         activity_crud.create_activity_log_orm(
             db=db,
             project_id=project_id,
@@ -805,7 +809,9 @@ def execute_migration(
         final_status = result["status"]
         if final_status == "success":
             notif_title = "Migration completed successfully"
-            notif_body = f"Project '{project['name']}': {result.get('rows_affected', 0)} rows migrated."
+            notif_body = (
+                f"Project '{project['name']}': {result.get('rows_affected', 0)} rows migrated."
+            )
         elif final_status == "dry_run_complete":
             notif_title = "Dry-run migration completed"
             notif_body = f"Project '{project['name']}': dry-run finished — no data was modified."

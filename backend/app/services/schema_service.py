@@ -104,7 +104,8 @@ class SchemaService:
         """
         if not table_type:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail=make_error(ErrorCode.TABLE_TYPE_REQUIRED)
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=make_error(ErrorCode.TABLE_TYPE_REQUIRED),
             )
 
         table_type = table_type.strip().lower()
@@ -201,7 +202,8 @@ class SchemaService:
         """
         if not data_type:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail=make_error(ErrorCode.DATA_TYPE_REQUIRED)
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=make_error(ErrorCode.DATA_TYPE_REQUIRED),
             )
 
         # Parse the data type
@@ -234,7 +236,9 @@ class SchemaService:
                     if length < 1 or length > 10485760:  # PostgreSQL max
                         raise HTTPException(
                             status_code=status.HTTP_400_BAD_REQUEST,
-                            detail=make_error(ErrorCode.LENGTH_INVALID, type=base_type, min=1, max=10485760),
+                            detail=make_error(
+                                ErrorCode.LENGTH_INVALID, type=base_type, min=1, max=10485760
+                            ),
                         )
 
             elif base_type in ["NUMERIC", "DECIMAL"]:
@@ -243,7 +247,9 @@ class SchemaService:
                     if precision < 1 or precision > 1000:
                         raise HTTPException(
                             status_code=status.HTTP_400_BAD_REQUEST,
-                            detail=make_error(ErrorCode.PRECISION_INVALID, type=base_type, min=1, max=1000),
+                            detail=make_error(
+                                ErrorCode.PRECISION_INVALID, type=base_type, min=1, max=1000
+                            ),
                         )
 
                 if "scale" in parameters:
@@ -253,7 +259,9 @@ class SchemaService:
                     if scale < 0 or scale > precision:
                         raise HTTPException(
                             status_code=status.HTTP_400_BAD_REQUEST,
-                            detail=make_error(ErrorCode.SCALE_INVALID, type=base_type, precision=precision),
+                            detail=make_error(
+                                ErrorCode.SCALE_INVALID, type=base_type, precision=precision
+                            ),
                         )
 
         return str(parsed["full_type"])
@@ -276,7 +284,8 @@ class SchemaService:
 
         if not project:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail=make_error(ErrorCode.PROJECT_NOT_FOUND)
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=make_error(ErrorCode.PROJECT_NOT_FOUND),
             )
 
         project_dict = {
@@ -400,7 +409,9 @@ class SchemaService:
         # Get table and check it exists
         table = schemas_crud.get_table_by_id_orm(db, table_id, encryption_key)  # type: ignore[arg-type]
         if not table:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=make_error(ErrorCode.TABLE_NOT_FOUND))
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail=make_error(ErrorCode.TABLE_NOT_FOUND)
+            )
 
         # Validate permissions
         SchemaService.can_user_modify_schema(db, table["project_id"], user_id)
@@ -446,7 +457,9 @@ class SchemaService:
         # Get table and check it exists
         table = schemas_crud.get_table_by_id_orm(db, table_id)
         if not table:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=make_error(ErrorCode.TABLE_NOT_FOUND))
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail=make_error(ErrorCode.TABLE_NOT_FOUND)
+            )
 
         # Validate permissions
         SchemaService.can_user_modify_schema(db, table["project_id"], user_id)
@@ -457,7 +470,9 @@ class SchemaService:
         )
 
         if not table_data:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=make_error(ErrorCode.TABLE_NOT_FOUND))
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail=make_error(ErrorCode.TABLE_NOT_FOUND)
+            )
 
         columns_deleted = len(column_names)
 
@@ -498,7 +513,9 @@ class SchemaService:
         # Get table and check it exists
         table = schemas_crud.get_table_by_id_orm(db, table_id)
         if not table:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=make_error(ErrorCode.TABLE_NOT_FOUND))
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail=make_error(ErrorCode.TABLE_NOT_FOUND)
+            )
 
         # Validate permissions
         SchemaService.can_user_modify_schema(db, table["project_id"], user_id)
@@ -606,7 +623,8 @@ class SchemaService:
 
             if not new_data:
                 raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND, detail=make_error(ErrorCode.COLUMN_NOT_FOUND)
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=make_error(ErrorCode.COLUMN_NOT_FOUND),
                 )
 
             return old_data, new_data, mappings_renamed

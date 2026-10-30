@@ -5,6 +5,7 @@ in app.routers.mappings.
 TypeMapper.extract_type_name() is already tested in
 test/unit/db_connectors/test_type_mappers.py — not repeated here.
 """
+
 import pytest
 
 from app.routers.mappings import _TYPE_COMPATIBILITY, _are_types_mapping_compatible
@@ -136,6 +137,6 @@ class TestTypeCompatibilityMatrix:
     def test_every_type_maps_to_itself(self):
         """Every type must be reflexive — can always map to its own kind."""
         for type_name in _TYPE_COMPATIBILITY:
-            assert type_name in _TYPE_COMPATIBILITY[type_name], (
-                f"{type_name!r} is not reflexive in _TYPE_COMPATIBILITY"
-            )
+            assert (
+                type_name in _TYPE_COMPATIBILITY[type_name]
+            ), f"{type_name!r} is not reflexive in _TYPE_COMPATIBILITY"

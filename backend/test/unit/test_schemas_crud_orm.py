@@ -476,9 +476,9 @@ class TestUpdateColumnOrm:
             "table_name",
             "project_id",
         }
-        assert required_fields <= old_data.keys(), (
-            f"old_data is missing fields: {required_fields - old_data.keys()}"
-        )
+        assert (
+            required_fields <= old_data.keys()
+        ), f"old_data is missing fields: {required_fields - old_data.keys()}"
 
         # old_data must reflect the pre-update state
         assert old_data["name"] == "order_ref"
@@ -521,9 +521,9 @@ class TestUpdateColumnOrm:
         )
 
         assert old_data is not None
-        assert old_data["is_nullable"] is True    # was True before the update
-        assert old_data["is_primary"] is False    # was False before the update
+        assert old_data["is_nullable"] is True  # was True before the update
+        assert old_data["is_primary"] is False  # was False before the update
 
         assert new_data is not None
-        assert new_data["is_nullable"] is False   # updated to False
-        assert new_data["is_primary"] is True     # updated to True
+        assert new_data["is_nullable"] is False  # updated to False
+        assert new_data["is_primary"] is True  # updated to True

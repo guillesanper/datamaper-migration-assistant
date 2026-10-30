@@ -344,9 +344,7 @@ def get_versions_count_orm(db, entity_id: str) -> int:
     return int(count)
 
 
-def get_recent_versions_for_user(
-    db, user_id: str, limit: int = 5
-) -> List[Dict[str, Any]]:
+def get_recent_versions_for_user(db, user_id: str, limit: int = 5) -> List[Dict[str, Any]]:
     """
     Returns the most recent entity versions across all projects accessible by the user.
 

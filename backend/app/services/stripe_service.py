@@ -7,9 +7,7 @@ import stripe
 
 from app.crud.subscription_crud import create_subscription_orm as create_subscription
 from app.crud.subscription_crud import get_customer_by_stripe_id_orm as get_customer_by_stripe_id
-from app.crud.subscription_crud import (
-    get_plan_by_price_id_orm,
-)
+from app.crud.subscription_crud import get_plan_by_price_id_orm
 from app.crud.subscription_crud import (
     get_subscription_by_stripe_id_orm as get_subscription_by_stripe_id,
 )

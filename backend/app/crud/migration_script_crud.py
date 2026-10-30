@@ -502,16 +502,14 @@ def get_recent_executions_for_user(
     from app.models.orm.project import Project, ProjectMember
 
     try:
-        accessible_projects = (
-            select(Project.id).where(
-                or_(
-                    Project.owner_id == user_id,
-                    Project.id.in_(
-                        select(ProjectMember.project_id).where(ProjectMember.user_id == user_id)
-                    ),
+        accessible_projects = select(Project.id).where(
+            or_(
+                Project.owner_id == user_id,
+                Project.id.in_(
+                    select(ProjectMember.project_id).where(ProjectMember.user_id == user_id)
                 ),
-                Project.is_deleted.is_(False),
-            )
+            ),
+            Project.is_deleted.is_(False),
         )
 
         rows = (

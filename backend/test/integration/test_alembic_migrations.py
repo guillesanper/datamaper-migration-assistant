@@ -259,7 +259,9 @@ def _required_columns(table) -> set:
     required = set()
     for col in table.columns:
         serial = (
-            col.primary_key and isinstance(col.type, Integer) and col.autoincrement in (True, "auto")
+            col.primary_key
+            and isinstance(col.type, Integer)
+            and col.autoincrement in (True, "auto")
         )
         if not col.nullable and col.server_default is None and col.identity is None and not serial:
             required.add(col.name)
@@ -287,7 +289,9 @@ def test_t3_raw_inserts_do_not_omit_required_columns():
     inserts, _ = _raw_inserts()
     problems = []
     for rel, lineno, table, columns in inserts:
-        assert table in Base.metadata.tables, f"{rel}:{lineno} inserta en una tabla desconocida: {table}"
+        assert (
+            table in Base.metadata.tables
+        ), f"{rel}:{lineno} inserta en una tabla desconocida: {table}"
         missing = sorted(_required_columns(Base.metadata.tables[table]) - set(columns))
         if missing:
             problems.append(f"{rel}:{lineno} -> {table}: omite {', '.join(missing)}")
@@ -346,7 +350,9 @@ def _make_project(session: Session, owner_id, **fields):
 
 def _calculate_metrics(session: Session, user_id) -> None:
     # Misma llamada que project_crud.force_recalculate_user_metrics_orm
-    session.execute(text("SELECT calculate_and_save_user_metrics(:user_id)"), {"user_id": str(user_id)})
+    session.execute(
+        text("SELECT calculate_and_save_user_metrics(:user_id)"), {"user_id": str(user_id)}
+    )
     session.commit()
 
 
@@ -373,7 +379,12 @@ def test_t4_metrics_on_database_with_user_without_projects(session):
     rows = _metrics_rows(session, user.id)
     assert len(rows) == 1
     row = rows[0]
-    assert (row.total_projects, row.active_projects, row.paused_projects, row.completed_projects) == (
+    assert (
+        row.total_projects,
+        row.active_projects,
+        row.paused_projects,
+        row.completed_projects,
+    ) == (
         0,
         0,
         0,
@@ -392,7 +403,9 @@ def test_t4_metrics_aggregate_owned_projects_and_upsert(session):
     _make_project(session, user.id, status="paused", progress=50, budget=Decimal("0"))
     _make_project(session, user.id, status="completed", progress=100, budget=Decimal("50"))
     # No cuentan: proyecto borrado del usuario y proyecto de otro usuario
-    _make_project(session, user.id, status="active", progress=99, budget=Decimal("999"), is_deleted=True)
+    _make_project(
+        session, user.id, status="active", progress=99, budget=Decimal("999"), is_deleted=True
+    )
     _make_project(session, other.id, status="active", progress=99, budget=Decimal("999"))
 
     _calculate_metrics(session, user.id)

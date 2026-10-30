@@ -16,13 +16,14 @@ Revises: 0001
 Create Date: 2026-10-06
 
 """
+
 from typing import Sequence, Union
 
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = '0002'
-down_revision: Union[str, None] = '0001'
+revision: str = "0002"
+down_revision: Union[str, None] = "0001"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
@@ -151,8 +152,8 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.execute('DROP FUNCTION IF EXISTS calculate_and_save_user_metrics(uuid)')
-    op.execute('DROP TRIGGER IF EXISTS trigger_log_comment_activity ON comments')
-    op.execute('DROP FUNCTION IF EXISTS log_comment_activity()')
-    op.execute('DROP TRIGGER IF EXISTS trigger_log_version_activity ON entity_versions')
-    op.execute('DROP FUNCTION IF EXISTS log_version_activity()')
+    op.execute("DROP FUNCTION IF EXISTS calculate_and_save_user_metrics(uuid)")
+    op.execute("DROP TRIGGER IF EXISTS trigger_log_comment_activity ON comments")
+    op.execute("DROP FUNCTION IF EXISTS log_comment_activity()")
+    op.execute("DROP TRIGGER IF EXISTS trigger_log_version_activity ON entity_versions")
+    op.execute("DROP FUNCTION IF EXISTS log_version_activity()")

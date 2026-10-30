@@ -10,7 +10,6 @@ from app.database.session import get_db_session
 from app.utils.cookies import get_session_token_hash
 from app.utils.error_codes import ErrorCode, make_error
 
-
 # ============================================================================
 # SQLAlchemy ORM Version
 # ============================================================================
@@ -94,9 +93,11 @@ class CurrentUserORM:
                 if self.required:
                     from app.models.orm.session import UserSession
 
-                    raw = db.query(UserSession).filter(
-                        UserSession.session_token == hashed_token
-                    ).first()
+                    raw = (
+                        db.query(UserSession)
+                        .filter(UserSession.session_token == hashed_token)
+                        .first()
+                    )
                     if raw is None:
                         raise HTTPException(401, detail=make_error(ErrorCode.SESSION_INVALID))
                     elif raw.is_revoked:
