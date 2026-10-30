@@ -6,9 +6,10 @@ export function getApiError(error: unknown, t: TFunction): string {
 
   const code = err?.code;
   if (code) {
-    const params = (err?.params ?? {}) as Record<string, unknown>;
     const key = `errors.${code}`;
-    const msg = t(key as any, params);
+    // El código llega del backend: clave dinámica, con defaultValue para que una clave sin
+    // traducción devuelva la propia clave (y caiga a los mensajes genéricos de abajo)
+    const msg = t(key, { ...err?.params, defaultValue: key });
     if (msg !== key) return msg;
   }
 

@@ -195,6 +195,7 @@ class ApiService {
         if (err.name === "AbortError") {
           const timeoutError: ApiErrorResponse = {
             success: false,
+            code: "timeout",
             error: "timeout",
             message: "La petición ha excedido el tiempo límite",
           };
@@ -210,6 +211,7 @@ class ApiService {
         if (attempt < retries) {
           lastError = {
             success: false,
+            code: "network_error",
             error: "network_error",
             message: err.message || "Error de conexión con el servidor",
           };
@@ -220,6 +222,7 @@ class ApiService {
         // Último intento fallido
         const networkError: ApiErrorResponse = {
           success: false,
+          code: "network_error",
           error: "network_error",
           message: err.message || "Error de conexión con el servidor",
         };
