@@ -33,8 +33,10 @@ if not config.get_main_option("sqlalchemy.url"):
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
+# Sin deshabilitar los loggers ya creados: si alembic se ejecuta en el mismo proceso que la app
+# (los tests lo hacen en el conftest), los loggers de app.* dejarían de emitir.
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 # Importar Base y todos los modelos ORM para autogenerate
 from app.database.base import Base

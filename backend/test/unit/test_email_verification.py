@@ -580,15 +580,6 @@ def _send_code(scenario, development, mock_db, to_email, user_id):
 class TestOtpNotLoggedOutsideDevelopment:
     """El OTP en claro solo puede salir por stdout/log en desarrollo; fuera de él, nunca"""
 
-    @pytest.fixture(autouse=True)
-    def _enable_module_logger(self, monkeypatch):
-        """
-        El conftest ejecuta `alembic upgrade head` en el proceso con alembic.ini y su
-        fileConfig deshabilita los loggers ya creados; sin esto caplog no vería nada y los
-        tests de ausencia pasarían en vacío. En producción alembic corre en otro proceso.
-        """
-        monkeypatch.setattr(email_verification.logger, "disabled", False)
-
     @pytest.mark.parametrize("scenario", list(_UNDELIVERED_SCENARIOS))
     def test_code_absent_from_output_and_logs_in_production(
         self, scenario, mock_db, test_email, test_user_id, capsys, caplog
