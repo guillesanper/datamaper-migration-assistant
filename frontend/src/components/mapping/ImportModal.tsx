@@ -70,7 +70,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
 
   const handleImport = async () => {
     if (!file) {
-      toast.error(t('import.error.noFile' as any));
+      toast.error(t('import.error.noFile'));
       return;
     }
 
@@ -82,18 +82,18 @@ export const ImportModal: React.FC<ImportModalProps> = ({
       const parts: string[] = [];
 
       if (response.tables_added > 0)
-        parts.push(t('import.result.tablesAdded', { count: response.tables_added } as any));
+        parts.push(t('import.result.tablesAdded', { count: response.tables_added }));
       if ((response.tables_replaced ?? 0) > 0)
-        parts.push(t('import.result.tablesReplaced', { count: response.tables_replaced } as any));
+        parts.push(t('import.result.tablesReplaced', { count: response.tables_replaced }));
       if (response.columns_added > 0)
-        parts.push(t('import.result.columnsAdded', { count: response.columns_added } as any));
+        parts.push(t('import.result.columnsAdded', { count: response.columns_added }));
 
       if (parts.length === 0) {
-        toast.success(t('import.nothingImported', { count: totalSkipped } as any));
+        toast.success(t('import.nothingImported', { count: totalSkipped }));
       } else {
         if (totalSkipped > 0)
-          parts.push(t('import.result.skipped', { count: totalSkipped } as any));
-        toast.success(t('import.success', { details: parts.join(', ') } as any));
+          parts.push(t('import.result.skipped', { count: totalSkipped }));
+        toast.success(t('import.success', { details: parts.join(', ') }));
       }
 
       onSuccess();
@@ -123,7 +123,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
       <div className={styles.modalContent}>
         {/* Header */}
         <div className={styles.modalHeader}>
-          <h2 className={styles.modalTitle}>{t('import.title' as any)}</h2>
+          <h2 className={styles.modalTitle}>{t('import.title')}</h2>
           <button onClick={handleClose} className={styles.modalCloseButton}>
             <X className="w-5 h-5" />
           </button>
@@ -133,7 +133,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
         <div className={styles.modalBody}>
           {/* Tipo de importación */}
           <div>
-            <label className="text-sm font-medium mb-2 block">{t('import.type.label' as any)}</label>
+            <label className="text-sm font-medium mb-2 block">{t('import.type.label')}</label>
             <div className="flex gap-3">
               <label className="flex items-center gap-2">
                 <input
@@ -143,7 +143,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
                   onChange={(e) => setImportType(e.target.value as 'origin' | 'destination' | 'both')}
                   className="w-4 h-4"
                 />
-                <span>{t('import.type.originOnly' as any)}</span>
+                <span>{t('import.type.originOnly')}</span>
               </label>
               <label className="flex items-center gap-2">
                 <input
@@ -153,7 +153,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
                   onChange={(e) => setImportType(e.target.value as 'origin' | 'destination' | 'both')}
                   className="w-4 h-4"
                 />
-                <span>{t('import.type.destOnly' as any)}</span>
+                <span>{t('import.type.destOnly')}</span>
               </label>
               <label className="flex items-center gap-2">
                 <input
@@ -163,7 +163,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
                   onChange={(e) => setImportType(e.target.value as 'origin' | 'destination' | 'both')}
                   className="w-4 h-4"
                 />
-                <span>{t('import.type.both' as any)}</span>
+                <span>{t('import.type.both')}</span>
               </label>
             </div>
             <p className="text-xs text-muted-foreground mt-1.5">{t('import.type.hint')}</p>
@@ -171,7 +171,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
 
           {/* Manejo de Duplicados */}
           <div>
-            <label className="text-sm font-medium mb-2 block">{t('import.duplicates.label' as any)}</label>
+            <label className="text-sm font-medium mb-2 block">{t('import.duplicates.label')}</label>
             <div className="flex gap-3">
               <label className="flex items-center gap-2">
                 <input
@@ -181,7 +181,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
                   onChange={() => setDuplicateStrategy('skip')}
                   className="w-4 h-4"
                 />
-                <span>{t('import.duplicates.skip' as any)}</span>
+                <span>{t('import.duplicates.skip')}</span>
               </label>
               <label className="flex items-center gap-2">
                 <input
@@ -191,19 +191,19 @@ export const ImportModal: React.FC<ImportModalProps> = ({
                   onChange={() => setDuplicateStrategy('replace')}
                   className="w-4 h-4"
                 />
-                <span>{t('import.duplicates.replace' as any)}</span>
+                <span>{t('import.duplicates.replace')}</span>
               </label>
             </div>
             <p className="text-xs text-muted-foreground mt-1.5">
               {duplicateStrategy === 'skip'
-                ? t('import.duplicates.skipHint' as any)
-                : t('import.duplicates.replaceHint' as any)}
+                ? t('import.duplicates.skipHint')
+                : t('import.duplicates.replaceHint')}
             </p>
           </div>
 
           {/* Format selector */}
           <div>
-            <label className="text-sm font-medium mb-2 block">{t('import.format.label' as any)}</label>
+            <label className="text-sm font-medium mb-2 block">{t('import.format.label')}</label>
             <div className={styles.formatGrid}>
               <button
                 onClick={() => setSelectedFormat('json')}
@@ -215,7 +215,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
               >
                 <FileText className={styles.formatIcon} />
                 <div className={styles.formatName}>JSON</div>
-                <div className={styles.formatDescription}>{t('import.format.recommended' as any)}</div>
+                <div className={styles.formatDescription}>{t('import.format.recommended')}</div>
               </button>
 
               <button
@@ -228,7 +228,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
               >
                 <Table className={styles.formatIcon} />
                 <div className={styles.formatName}>CSV</div>
-                <div className={styles.formatDescription}>{t('import.format.simple' as any)}</div>
+                <div className={styles.formatDescription}>{t('import.format.simple')}</div>
               </button>
 
               <button
@@ -241,14 +241,14 @@ export const ImportModal: React.FC<ImportModalProps> = ({
               >
                 <FileSpreadsheet className={styles.formatIcon} />
                 <div className={styles.formatName}>Excel</div>
-                <div className={styles.formatDescription}>{t('import.format.compatible' as any)}</div>
+                <div className={styles.formatDescription}>{t('import.format.compatible')}</div>
               </button>
             </div>
           </div>
 
           {/* Dropzone */}
           <div>
-            <label className="text-sm font-medium mb-2 block">{t('import.file.label' as any)}</label>
+            <label className="text-sm font-medium mb-2 block">{t('import.file.label')}</label>
             <div
               {...getRootProps()}
               className={`${styles.dropzone} ${isDragActive ? styles.dropzoneActive : ''}`}
@@ -265,10 +265,10 @@ export const ImportModal: React.FC<ImportModalProps> = ({
               ) : (
                 <div>
                   <p className={styles.dropzoneTitle}>
-                    {t('import.file.dropTitle' as any)}
+                    {t('import.file.dropTitle')}
                   </p>
                   <p className={styles.dropzoneDescription}>
-                    {t('import.file.dropHint' as any)}
+                    {t('import.file.dropHint')}
                   </p>
                 </div>
               )}
@@ -277,7 +277,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
 
           {/* Format example */}
           <div>
-            <label className="text-sm font-medium mb-2 block">{t('import.example.label' as any)}</label>
+            <label className="text-sm font-medium mb-2 block">{t('import.example.label')}</label>
             <p className="text-xs mb-1.5">{t(`import.example.hint.${importType}`)}</p>
             {selectedFormat === 'excel' && (
               <p className="text-xs text-muted-foreground mb-1.5">
@@ -296,19 +296,19 @@ export const ImportModal: React.FC<ImportModalProps> = ({
               <AlertCircle className={`${styles.alertIcon} ${styles.alertIconInfo}`} />
               <div className={styles.alertBody}>
                 <p className={`${styles.alertTitle} ${styles.alertTitleInfo}`}>
-                  {t('import.info.title' as any)}
+                  {t('import.info.title')}
                 </p>
                 <ul className={styles.alertList}>
                   <li className={styles.alertListItemInfo}>
                     {duplicateStrategy === 'skip'
-                      ? t('import.info.duplicates' as any)
-                      : t('import.info.duplicatesReplace' as any)}
+                      ? t('import.info.duplicates')
+                      : t('import.info.duplicatesReplace')}
                   </li>
                   <li className={styles.alertListItemInfo}>
-                    {t('import.info.types' as any)}
+                    {t('import.info.types')}
                   </li>
                   <li className={styles.alertListItemInfo}>
-                    {t('import.info.direction' as any)}
+                    {t('import.info.direction')}
                   </li>
                 </ul>
               </div>
@@ -320,8 +320,8 @@ export const ImportModal: React.FC<ImportModalProps> = ({
         <div className={styles.modalFooter}>
           <div className={styles.modalFooterLeft}>
             {file
-              ? t('import.footer.ready', { filename: file.name } as any)
-              : t('import.footer.empty' as any)}
+              ? t('import.footer.ready', { filename: file.name })
+              : t('import.footer.empty')}
           </div>
           <div className={styles.modalFooterRight}>
             <button
@@ -339,12 +339,12 @@ export const ImportModal: React.FC<ImportModalProps> = ({
               {isUploading ? (
                 <>
                   <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent" />
-                  {t('import.importing' as any)}
+                  {t('import.importing')}
                 </>
               ) : (
                 <>
                   <Upload className="w-4 h-4" />
-                  {t('import.submit' as any)}
+                  {t('import.submit')}
                 </>
               )}
             </button>

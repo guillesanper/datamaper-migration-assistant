@@ -115,22 +115,22 @@ conn.close()`,
 };
 
 export const MigrationGuideModal: React.FC<MigrationGuideModalProps> = ({ isOpen, onClose, dialect }) => {
-  const { t } = useTranslation('mapping' as any);
+  const { t } = useTranslation('mapping');
 
   if (!isOpen) return null;
 
-  const cliNote = t(`guide.dialects.${dialect}.cliNote` as any);
+  const cliNote = t(`guide.dialects.${dialect}.cliNote`);
   const guiSteps = [
-    t(`guide.dialects.${dialect}.guiStep1` as any),
-    t(`guide.dialects.${dialect}.guiStep2` as any),
-    t(`guide.dialects.${dialect}.guiStep3` as any),
-    t(`guide.dialects.${dialect}.guiStep4` as any),
+    t(`guide.dialects.${dialect}.guiStep1`),
+    t(`guide.dialects.${dialect}.guiStep2`),
+    t(`guide.dialects.${dialect}.guiStep3`),
+    t(`guide.dialects.${dialect}.guiStep4`),
   ];
   const params = [
-    { name: t('guide.params.batchSize' as any), desc: t('guide.params.batchSizeHint' as any) },
-    { name: t('guide.params.dryRun' as any),    desc: t('guide.params.dryRunHint' as any) },
-    { name: t('guide.params.constraints' as any), desc: t('guide.params.constraintsHint' as any) },
-    { name: t('guide.params.validation' as any), desc: t('guide.params.validationHint' as any) },
+    { name: t('guide.params.batchSize'), desc: t('guide.params.batchSizeHint') },
+    { name: t('guide.params.dryRun'),    desc: t('guide.params.dryRunHint') },
+    { name: t('guide.params.constraints'), desc: t('guide.params.constraintsHint') },
+    { name: t('guide.params.validation'), desc: t('guide.params.validationHint') },
   ];
 
   const guide = DIALECT_GUIDES[dialect];
@@ -179,7 +179,7 @@ export const MigrationGuideModal: React.FC<MigrationGuideModalProps> = ({ isOpen
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.625rem' }}>
             <HelpCircle style={{ width: '1.125rem', height: '1.125rem', color: 'hsl(var(--primary))' }} />
             <h3 style={{ fontSize: '1rem', fontWeight: 600, margin: 0 }}>
-              {t('guide.title' as any, { dialect: dialectLabel })}
+              {t('guide.title', { dialect: dialectLabel })}
             </h3>
           </div>
           <button onClick={onClose} className={styles.modalCloseButton}>
@@ -201,10 +201,10 @@ export const MigrationGuideModal: React.FC<MigrationGuideModalProps> = ({ isOpen
           {/* CLI */}
           <section>
             <h4 style={{ fontSize: '0.9375rem', fontWeight: 600, marginBottom: '0.5rem' }}>
-              {t('guide.cli.title' as any, { tool: guide.cliTool })}
+              {t('guide.cli.title', { tool: guide.cliTool })}
             </h4>
             <p style={{ fontSize: '0.875rem', color: 'hsl(var(--muted-foreground))', marginBottom: '0.5rem' }}>
-              {t('guide.cli.download' as any)}
+              {t('guide.cli.download')}
             </p>
             {codeBlock(guide.cliCommand)}
             <p style={{ fontSize: '0.8125rem', color: 'hsl(var(--muted-foreground))', marginTop: '0.375rem' }}>
@@ -215,7 +215,7 @@ export const MigrationGuideModal: React.FC<MigrationGuideModalProps> = ({ isOpen
           {/* GUI */}
           <section>
             <h4 style={{ fontSize: '0.9375rem', fontWeight: 600, marginBottom: '0.5rem' }}>
-              {t('guide.gui.title' as any, { tools: guide.guiTools })}
+              {t('guide.gui.title', { tools: guide.guiTools })}
             </h4>
             <ol style={{ fontSize: '0.875rem', color: 'hsl(var(--muted-foreground))', paddingLeft: '1.25rem', margin: 0, lineHeight: 1.8 }}>
               {guiSteps.map((step, i) => (
@@ -227,7 +227,7 @@ export const MigrationGuideModal: React.FC<MigrationGuideModalProps> = ({ isOpen
           {/* Python */}
           <section>
             <h4 style={{ fontSize: '0.9375rem', fontWeight: 600, marginBottom: '0.5rem' }}>
-              {t('guide.python.title' as any, { package: guide.pythonPackage })}
+              {t('guide.python.title', { package: guide.pythonPackage })}
             </h4>
             {codeBlock(guide.pythonCode)}
           </section>
@@ -235,7 +235,7 @@ export const MigrationGuideModal: React.FC<MigrationGuideModalProps> = ({ isOpen
           {/* Parámetros */}
           <section>
             <h4 style={{ fontSize: '0.9375rem', fontWeight: 600, marginBottom: '0.5rem' }}>
-              {t('guide.params.title' as any)}
+              {t('guide.params.title')}
             </h4>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.625rem' }}>
               {params.map((p) => (
@@ -250,14 +250,14 @@ export const MigrationGuideModal: React.FC<MigrationGuideModalProps> = ({ isOpen
           {/* Tips */}
           <section>
             <h4 style={{ fontSize: '0.9375rem', fontWeight: 600, marginBottom: '0.5rem' }}>
-              {t('guide.tips.title' as any)}
+              {t('guide.tips.title')}
             </h4>
             <ul style={{ fontSize: '0.875rem', color: 'hsl(var(--muted-foreground))', paddingLeft: '1.25rem', margin: 0, lineHeight: 1.8 }}>
-              <li>{t('guide.tips.backup' as any)}</li>
-              <li>{t('guide.tips.dryRunFirst' as any)}</li>
-              <li>{t('guide.tips.rowsApprox' as any)}</li>
-              <li>{t('guide.tips.transactions' as any)}</li>
-              <li>{t('guide.tips.largeTable' as any)}</li>
+              <li>{t('guide.tips.backup')}</li>
+              <li>{t('guide.tips.dryRunFirst')}</li>
+              <li>{t('guide.tips.rowsApprox')}</li>
+              <li>{t('guide.tips.transactions')}</li>
+              <li>{t('guide.tips.largeTable')}</li>
             </ul>
           </section>
         </div>
@@ -272,7 +272,7 @@ export const MigrationGuideModal: React.FC<MigrationGuideModalProps> = ({ isOpen
           }}
         >
           <button onClick={onClose} className={styles.toolbarButtonPrimary}>
-            {t('guide.close' as any)}
+            {t('guide.close')}
           </button>
         </div>
       </div>
