@@ -52,7 +52,7 @@ def _resolve(host: str, port: int) -> List[IPAddress]:
 
     addresses = []
     for info in infos:
-        address = ipaddress.ip_address(info[4][0].split("%")[0])
+        address = ipaddress.ip_address(str(info[4][0]).split("%")[0])
         # ::ffff:10.0.0.1 debe evaluarse como 10.0.0.1
         if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped:
             address = address.ipv4_mapped

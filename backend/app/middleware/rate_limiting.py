@@ -434,7 +434,7 @@ def _retry_after_seconds(result: Dict[str, Any], fallback: int) -> int:
         return max(1, fallback)
     if blocked_until.tzinfo is None:
         blocked_until = blocked_until.replace(tzinfo=timezone.utc)
-    remaining = (blocked_until - datetime.now(timezone.utc)).total_seconds()
+    remaining: float = (blocked_until - datetime.now(timezone.utc)).total_seconds()
     return max(1, math.ceil(remaining))
 
 

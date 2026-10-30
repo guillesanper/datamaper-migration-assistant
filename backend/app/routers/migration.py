@@ -393,7 +393,12 @@ def generate_script_for_sessions(
                 # El script se ejecuta en el destino: su dialecto manda
                 dialect = dest_config.dialect
 
-        if is_cross_database(origin_session_id, dest_session_id, origin_config, dest_config):
+        # is_cross_database ya exige ambos configs; cada adaptador se abre junto a su config
+        if (
+            origin_adapter is not None
+            and dest_adapter is not None
+            and is_cross_database(origin_session_id, dest_session_id, origin_config, dest_config)
+        ):
             # Entre BDs distintas un INSERT ... SELECT no puede leer el origen
             plans = build_copy_plans(mappings, origin_adapter, dest_adapter, dependency_order)
             script = DataCopyService(
@@ -488,7 +493,7 @@ def load_or_generate_script(
         if not script_row or str(script_row.get("project_id")) != str(project_id):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Script not found")
 
-        script = script_row["script_content"]
+        script: str = script_row["script_content"]
         script_dialect = script_row.get("dialect") or dialect
         if script_dialect != dialect:
             raise HTTPException(
@@ -755,7 +760,8 @@ def execute_migration(
                     long_running=True,
                 )
 
-            if is_cross_database(
+            # is_cross_database ya exige el config de origen, que se abre junto a su adaptador
+            if origin_adapter is not None and is_cross_database(
                 origin_session_id, request.dest_connection_session_id, origin_config, config
             ):
                 # PASO 4a: BDs distintas: copia por lotes origen -> destino

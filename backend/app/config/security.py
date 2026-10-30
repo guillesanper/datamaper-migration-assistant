@@ -289,8 +289,8 @@ def _validate_secrets(errors: list, warnings: list) -> None:
 # Validaciones de configuración
 def validate_security_config():
     """Valida que la configuración de seguridad sea correcta"""
-    errors = []
-    warnings = []
+    errors: list[str] = []
+    warnings: list[str] = []
 
     if security_settings.CSRF_SECRET_KEY == "default-csrf-secret":
         errors.append("CSRF_SECRET_KEY debe ser configurado en producción")

@@ -228,6 +228,14 @@ def _fetch_one(db, sql: str, params: Optional[Dict[str, Any]] = None) -> Optiona
     return {k: _plain(v) for k, v in row.items()} if row else None
 
 
+def _count_project_tables(db, project_id: str) -> int:
+    """Número de tablas del proyecto (COUNT(*) siempre devuelve una fila)."""
+    row = _fetch_one(
+        db, "SELECT COUNT(*) AS c FROM tables WHERE project_id = :pid", {"pid": project_id}
+    )
+    return int(row["c"]) if row else 0
+
+
 def _describe_import_path(data: Any, path) -> str:
     """Ubicación legible (neutral al idioma) de un error de esquema en el JSON importado.
 
@@ -1183,13 +1191,7 @@ async def save_mapping(
         MAX_COLS = 200 if has_pro else 60
 
         # 1) Tablas totales
-        total_tables = int(
-            _fetch_one(
-                db_orm,
-                "SELECT COUNT(*) AS c FROM tables WHERE project_id = :pid",
-                {"pid": project_id},
-            )["c"]
-        )
+        total_tables = _count_project_tables(db_orm, project_id)
         if total_tables > MAX_TABLES:
             return redirect_with_flash(_("schemas.max_pro") if has_pro else _("schemas.max_free"))
 
@@ -1720,13 +1722,7 @@ async def delete_mapping(
         MAX_COLS = 200 if has_pro else 60
 
         # 1) Tablas totales
-        total_tables = int(
-            _fetch_one(
-                db_orm,
-                "SELECT COUNT(*) AS c FROM tables WHERE project_id = :pid",
-                {"pid": project_id},
-            )["c"]
-        )
+        total_tables = _count_project_tables(db_orm, project_id)
         if total_tables > MAX_TABLES:
             return redirect_with_flash(_("schemas.max_pro") if has_pro else _("schemas.max_free"))
 
@@ -2359,11 +2355,7 @@ async def import_structure(
         new_needed = sum(1 for k in desired_keys if k not in existing_tables)
 
         # Cuenta actual
-        current_count = int(
-            _fetch_one(
-                db, "SELECT COUNT(*) AS c FROM tables WHERE project_id = :pid", {"pid": project_id}
-            )["c"]
-        )
+        current_count = _count_project_tables(db, project_id)
 
         if current_count + new_needed > max_tables:
             # Límite de número de tablas
