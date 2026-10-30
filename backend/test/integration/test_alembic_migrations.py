@@ -12,9 +12,11 @@ Python. Estos tests lo comprueban:
 - T4  funciones de BD que la app invoca existen tras upgrade head y funcionan
 - T5  esquema de Alembic equivalente al de Base.metadata.create_all
 - T6  efecto de los triggers de actividad (versiones y comentarios)
+- T7  ejecutar alembic en el proceso no deshabilita los loggers ya creados
 """
 
 import ast
+import logging
 import os
 import re
 import uuid
@@ -604,3 +606,22 @@ def test_t6_root_comment_logs_activity_and_reply_does_not(session):
     rows = _activity(session, project.id, "comment_added")
     assert len(rows) == 1, "Una respuesta no debe registrar actividad"
     assert rows[0].activity_metadata["comment_id"] == str(root.id)
+
+
+# ============================================================================
+# T7: logging tras ejecutar alembic en el proceso
+# ============================================================================
+
+
+def test_t7_alembic_no_deshabilita_los_loggers_existentes(empty_db):
+    """
+    env.py aplica el logging de alembic.ini con fileConfig, que por defecto deshabilita
+    todos los loggers ya creados. El conftest ejecuta alembic en el proceso de los tests:
+    sin disable_existing_loggers=False, los loggers de app.* dejaban de emitir y caplog
+    no veía nada (o los tests de ausencia de logs pasaban en vacío).
+    """
+    logger = logging.getLogger("app.test_alembic_logging_probe")
+
+    command.current(empty_db.config)
+
+    assert logger.disabled is False
