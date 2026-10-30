@@ -74,9 +74,7 @@ def get_user_activity(
     return activity_crud.get_user_activity_orm(db, user_id, project_id, limit)
 
 
-def get_global_activity(
-    db, user_id: str, limit: int = 20, offset: int = 0
-) -> List[Dict[str, Any]]:
+def get_global_activity(db, user_id: str, limit: int = 20, offset: int = 0) -> List[Dict[str, Any]]:
     """Get activity across all projects accessible to the user"""
     return activity_crud.get_global_activity_orm(db, user_id, limit, offset)
 

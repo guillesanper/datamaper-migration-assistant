@@ -883,9 +883,7 @@ class TestUpdateProjectLastAccessedOrm:
     def test_silent_for_nonexistent_project(self, db_session, test_user):
         """Proyecto inexistente no lanza excepción"""
         # No debe lanzar ninguna excepción
-        ProjectCRUD.update_project_last_accessed_orm(
-            db_session, str(uuid4()), str(test_user.id)
-        )
+        ProjectCRUD.update_project_last_accessed_orm(db_session, str(uuid4()), str(test_user.id))
 
 
 # ============================================================================
@@ -948,16 +946,28 @@ class TestGetRecentProjectsForUserOrm:
         now = datetime.now(timezone.utc).replace(tzinfo=None)
 
         p1 = ProjectCRUD.create_project_orm(
-            db_session, owner_id=str(test_user.id), name="Oldest", description="",
-            origin_db="PG", destination_db="MySQL",
+            db_session,
+            owner_id=str(test_user.id),
+            name="Oldest",
+            description="",
+            origin_db="PG",
+            destination_db="MySQL",
         )
         p2 = ProjectCRUD.create_project_orm(
-            db_session, owner_id=str(test_user.id), name="Middle", description="",
-            origin_db="PG", destination_db="MySQL",
+            db_session,
+            owner_id=str(test_user.id),
+            name="Middle",
+            description="",
+            origin_db="PG",
+            destination_db="MySQL",
         )
         p3 = ProjectCRUD.create_project_orm(
-            db_session, owner_id=str(test_user.id), name="Newest", description="",
-            origin_db="PG", destination_db="MySQL",
+            db_session,
+            owner_id=str(test_user.id),
+            name="Newest",
+            description="",
+            origin_db="PG",
+            destination_db="MySQL",
         )
 
         # Asignar timestamps distintos directamente en la BD
@@ -982,12 +992,20 @@ class TestGetRecentProjectsForUserOrm:
         now = datetime.now(timezone.utc).replace(tzinfo=None)
 
         p_null = ProjectCRUD.create_project_orm(
-            db_session, owner_id=str(test_user.id), name="NullAccess", description="",
-            origin_db="PG", destination_db="MySQL",
+            db_session,
+            owner_id=str(test_user.id),
+            name="NullAccess",
+            description="",
+            origin_db="PG",
+            destination_db="MySQL",
         )
         p_recent = ProjectCRUD.create_project_orm(
-            db_session, owner_id=str(test_user.id), name="RecentAccess", description="",
-            origin_db="PG", destination_db="MySQL",
+            db_session,
+            owner_id=str(test_user.id),
+            name="RecentAccess",
+            description="",
+            origin_db="PG",
+            destination_db="MySQL",
         )
         db_session.query(Project).filter(Project.id == p_recent["id"]).update(
             {"last_accessed_at": now}, synchronize_session="fetch"
@@ -1004,8 +1022,12 @@ class TestGetRecentProjectsForUserOrm:
         """El parámetro limit controla cuántos proyectos se devuelven"""
         for i in range(6):
             ProjectCRUD.create_project_orm(
-                db_session, owner_id=str(test_user.id), name=f"Limit Project {i}",
-                description="", origin_db="PG", destination_db="MySQL",
+                db_session,
+                owner_id=str(test_user.id),
+                name=f"Limit Project {i}",
+                description="",
+                origin_db="PG",
+                destination_db="MySQL",
             )
 
         results = ProjectCRUD.get_recent_projects_for_user_orm(
@@ -1029,9 +1051,7 @@ class TestGetRecentProjectsForUserOrm:
         db_session.add(lonely_user)
         db_session.commit()
 
-        results = ProjectCRUD.get_recent_projects_for_user_orm(
-            db_session, str(lonely_user.id)
-        )
+        results = ProjectCRUD.get_recent_projects_for_user_orm(db_session, str(lonely_user.id))
         assert results == []
 
     def test_excludes_deleted_projects(self, db_session, test_user, test_project):

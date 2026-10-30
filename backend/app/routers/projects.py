@@ -174,9 +174,7 @@ async def get_recent_projects(
     Query params:
         - limit: Número máximo de proyectos (1-20, por defecto 5)
     """
-    projects = ProjectService.get_recent_projects(
-        db=db, user_id=current_user["id"], limit=limit
-    )
+    projects = ProjectService.get_recent_projects(db=db, user_id=current_user["id"], limit=limit)
 
     return {"success": True, "data": {"projects": projects, "total": len(projects)}}
 

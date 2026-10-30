@@ -59,7 +59,10 @@ class PrimaryKeyConstraint(Base):
     __tablename__ = "primary_key_constraints"
 
     id = Column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, server_default=text("gen_random_uuid()")
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        server_default=text("gen_random_uuid()"),
     )
 
     # Relación con tabla

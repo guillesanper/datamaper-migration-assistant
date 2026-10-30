@@ -215,9 +215,7 @@ def cancel_subscription(
     if not proj:
         raise HTTPException(status_code=404, detail=make_error(ErrorCode.PROJECT_NOT_FOUND))
     if str(proj["owner_id"]) != str(current_user["id"]):
-        raise HTTPException(
-            status_code=403, detail=make_error(ErrorCode.BILLING_NOT_OWNER)
-        )
+        raise HTTPException(status_code=403, detail=make_error(ErrorCode.BILLING_NOT_OWNER))
 
     # 2) Buscar suscripción activa/trialing usando CRUD ORM
     sub = get_user_subscription_orm(db, current_user["id"], project_id)

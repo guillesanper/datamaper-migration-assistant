@@ -16,12 +16,12 @@ from pydantic import (
 )
 
 from app.crud import notification_crud, user_crud
-from app.utils.error_codes import ErrorCode, make_error
 
 # CRUDs ORM
 from app.crud.project_crud import ProjectCRUD
 from app.database.session import get_db_session
 from app.routers.dependencies import get_current_user
+from app.utils.error_codes import ErrorCode, make_error
 
 router = APIRouter()
 

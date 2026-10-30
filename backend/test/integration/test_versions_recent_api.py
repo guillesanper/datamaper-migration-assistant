@@ -15,7 +15,6 @@ import uuid
 import pytest
 from fastapi import status
 
-
 # ============================================================================
 # HELPERS
 # ============================================================================
@@ -70,7 +69,16 @@ def test_recent_versions_success(authenticated_client, test_project, test_user, 
     assert len(data["data"]) >= 1
 
     entry = data["data"][0]
-    for field in ("id", "project_id", "project_name", "entity_type", "change_type", "message", "created_at", "created_by_username"):
+    for field in (
+        "id",
+        "project_id",
+        "project_name",
+        "entity_type",
+        "change_type",
+        "message",
+        "created_at",
+        "created_by_username",
+    ):
         assert field in entry, f"Missing field: {field}"
 
 
