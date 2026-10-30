@@ -148,5 +148,9 @@ services:
   - type: redis
     name: datamap-redis
     plan: starter  # $7/mes - 25MB RAM, 10 conexiones
-    maxmemoryPolicy: allkeys-lru  # Evict least recently used keys when memory limit reached
+    # noeviction: con la memoria llena las escrituras fallan en vez de expulsar claves en
+    # silencio. Con allkeys-lru se podía expulsar el índice de sesiones de un usuario (user
+    # index) y dejar viva la sesión de cifrado: invalidate_user_sessions ya no la encontraba.
+    # Todas las claves llevan TTL, así que la memoria se libera sola al expirar.
+    maxmemoryPolicy: noeviction
     ipAllowList: []  # Vacío = solo conexiones internas (más seguro)
