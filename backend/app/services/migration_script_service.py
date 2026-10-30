@@ -18,7 +18,7 @@ import hashlib
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 from app.services.connector_resolver import (  # noqa: F401 (re-export)
     ConnectorNameResolver,
@@ -567,7 +567,7 @@ class MigrationScriptService:
             return ("BEGIN;", "COMMIT;")
 
     @staticmethod
-    def _generate_constraint_disabling(tables: List[NameLike], dialect: str) -> str:
+    def _generate_constraint_disabling(tables: Sequence[NameLike], dialect: str) -> str:
         """
         Genera SQL para deshabilitar constraints y triggers antes de la migración.
 
@@ -609,7 +609,7 @@ class MigrationScriptService:
         return "\n".join(lines)
 
     @staticmethod
-    def _generate_constraint_enabling(tables: List[NameLike], dialect: str) -> str:
+    def _generate_constraint_enabling(tables: Sequence[NameLike], dialect: str) -> str:
         """
         Genera SQL para habilitar constraints y triggers después de la migración.
 
@@ -760,7 +760,7 @@ class MigrationScriptService:
     @staticmethod
     def _generate_batched_insert(
         table_name: NameLike,
-        columns: List[NameLike],
+        columns: Sequence[NameLike],
         select_clause: str,
         total_rows: Optional[int],
         batch_size: int,

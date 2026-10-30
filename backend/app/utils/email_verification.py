@@ -38,7 +38,7 @@ SMTP_USE_STARTTLS = _env_flag("SMTP_USE_STARTTLS", default=True)
 SMTP_TIMEOUT_SECONDS = 10
 
 
-def generate_numeric_code():
+def generate_numeric_code() -> str:
     """Genera un código OTP seguro de 8 caracteres alfanuméricos"""
     from app.utils.security import SecurityUtils
 

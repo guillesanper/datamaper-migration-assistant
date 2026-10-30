@@ -8,7 +8,7 @@ NO ejecuta queries sobre datos de usuario.
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TypedDict
 
 import psycopg2
 import psycopg2.extras
@@ -43,6 +43,13 @@ from .type_mappers import PostgreSQLTypeMapper
 from .validators import validate_metadata_name
 
 logger = logging.getLogger(__name__)
+
+
+class _SslParams(TypedDict, total=False):
+    """Parámetros SSL de libpq que se pasan a psycopg2.connect"""
+
+    sslmode: str
+    sslrootcert: str
 
 
 class PostgreSQLAdapter(BaseDBAdapter):
@@ -97,7 +104,7 @@ class PostgreSQLAdapter(BaseDBAdapter):
         except Exception as e:
             raise DBConnectionError(f"Unexpected error connecting to PostgreSQL: {str(e)}")
 
-    def _ssl_params(self, root_cert: str) -> Dict[str, str]:
+    def _ssl_params(self, root_cert: str) -> _SslParams:
         """
         Parámetros SSL de libpq según la política TLS de la conexión.
 
