@@ -9,6 +9,7 @@ Tests for rate limit CRUD ORM functions:
 - Cleanup old records
 """
 
+import ipaddress
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -17,6 +18,18 @@ from sqlalchemy.orm import Session
 
 from app.crud import rate_limit_crud
 from app.models.orm import SecurityRateLimit
+
+
+def _unique_ip() -> str:
+    """
+    IP distinta en cada llamada.
+
+    La tabla tiene un índice único (ip_address, endpoint) y casi todos los tests usan el
+    mismo endpoint: con "192.168.1.<3 hex>" dos tests podían repetir IP (1 entre 4096) y el
+    INSERT del limitador chocaba (RuntimeError intermitente con xdist).
+    """
+    return str(ipaddress.IPv6Address(uuid.uuid4().int))
+
 
 # ============================================================================
 # TESTS: CHECK LIMIT
@@ -27,7 +40,7 @@ def test_check_limit_orm_first_request(db_session: Session):
     """Test checking rate limit for the first request"""
     unique_id = str(uuid.uuid4())[:8]
     identifier = f"user_{unique_id}@example.com"
-    ip_address = f"192.168.1.{unique_id[:3]}"
+    ip_address = _unique_ip()
     endpoint = "/api/test"
 
     result = rate_limit_crud.check_limit_orm(
@@ -52,7 +65,7 @@ def test_check_limit_orm_within_limit(db_session: Session):
     """Test multiple requests within the limit"""
     unique_id = str(uuid.uuid4())[:8]
     identifier = f"user_{unique_id}@example.com"
-    ip_address = f"192.168.1.{unique_id[:3]}"
+    ip_address = _unique_ip()
     endpoint = "/api/test"
 
     # Make 5 requests
@@ -76,7 +89,7 @@ def test_check_limit_orm_exceed_limit(db_session: Session):
     """Test exceeding the rate limit and getting blocked"""
     unique_id = str(uuid.uuid4())[:8]
     identifier = f"user_{unique_id}@example.com"
-    ip_address = f"192.168.1.{unique_id[:3]}"
+    ip_address = _unique_ip()
     endpoint = "/api/test"
 
     # Make requests up to the limit
@@ -112,7 +125,7 @@ def test_check_limit_orm_blocked_request(db_session: Session):
     """Test that blocked identifier cannot make requests"""
     unique_id = str(uuid.uuid4())[:8]
     identifier = f"user_{unique_id}@example.com"
-    ip_address = f"192.168.1.{unique_id[:3]}"
+    ip_address = _unique_ip()
     endpoint = "/api/test"
 
     # Exceed limit to get blocked
@@ -145,7 +158,7 @@ def test_check_limit_orm_window_expired(db_session: Session):
     """Test that counter resets when window expires"""
     unique_id = str(uuid.uuid4())[:8]
     identifier = f"user_{unique_id}@example.com"
-    ip_address = f"192.168.1.{unique_id[:3]}"
+    ip_address = _unique_ip()
     endpoint = "/api/test"
 
     # Make some requests
@@ -189,7 +202,7 @@ def test_check_limit_orm_different_endpoints(db_session: Session):
     """Test that rate limits are separate per endpoint"""
     unique_id = str(uuid.uuid4())[:8]
     identifier = f"user_{unique_id}@example.com"
-    ip_address = f"192.168.1.{unique_id[:3]}"
+    ip_address = _unique_ip()
 
     # Make requests to endpoint 1
     result1 = rate_limit_crud.check_limit_orm(
@@ -227,7 +240,7 @@ def test_update_orm(db_session: Session):
     """Test updating rate limit counter"""
     unique_id = str(uuid.uuid4())[:8]
     identifier = f"user_{unique_id}@example.com"
-    ip_address = f"192.168.1.{unique_id[:3]}"
+    ip_address = _unique_ip()
     endpoint = "/api/test"
 
     # Create initial rate limit record
@@ -265,7 +278,7 @@ def test_update_orm_multiple_increments(db_session: Session):
     """Test multiple incremental updates"""
     unique_id = str(uuid.uuid4())[:8]
     identifier = f"user_{unique_id}@example.com"
-    ip_address = f"192.168.1.{unique_id[:3]}"
+    ip_address = _unique_ip()
     endpoint = "/api/test"
 
     # Create initial rate limit record
@@ -293,7 +306,7 @@ def test_get_info_orm(db_session: Session):
     """Test getting rate limit information"""
     unique_id = str(uuid.uuid4())[:8]
     identifier = f"user_{unique_id}@example.com"
-    ip_address = f"192.168.1.{unique_id[:3]}"
+    ip_address = _unique_ip()
     endpoint = "/api/test"
 
     # Create rate limit record
@@ -328,7 +341,7 @@ def test_get_info_orm_after_updates(db_session: Session):
     """Test getting info after multiple updates"""
     unique_id = str(uuid.uuid4())[:8]
     identifier = f"user_{unique_id}@example.com"
-    ip_address = f"192.168.1.{unique_id[:3]}"
+    ip_address = _unique_ip()
     endpoint = "/api/test"
 
     # Create and update
@@ -357,7 +370,7 @@ def test_reset_orm(db_session: Session):
     """Test resetting rate limit counter"""
     unique_id = str(uuid.uuid4())[:8]
     identifier = f"user_{unique_id}@example.com"
-    ip_address = f"192.168.1.{unique_id[:3]}"
+    ip_address = _unique_ip()
     endpoint = "/api/test"
 
     # Create rate limit with multiple requests
@@ -382,7 +395,7 @@ def test_reset_orm_blocked(db_session: Session):
     """Test resetting a blocked rate limit"""
     unique_id = str(uuid.uuid4())[:8]
     identifier = f"user_{unique_id}@example.com"
-    ip_address = f"192.168.1.{unique_id[:3]}"
+    ip_address = _unique_ip()
     endpoint = "/api/test"
 
     # Exceed limit to get blocked
@@ -424,7 +437,7 @@ def test_reset_orm_and_new_requests(db_session: Session):
     """Test that after reset, new requests work normally"""
     unique_id = str(uuid.uuid4())[:8]
     identifier = f"user_{unique_id}@example.com"
-    ip_address = f"192.168.1.{unique_id[:3]}"
+    ip_address = _unique_ip()
     endpoint = "/api/test"
 
     # Make some requests
@@ -463,7 +476,7 @@ def test_cleanup_orm(db_session: Session):
     # Create old rate limit record
     old_record = SecurityRateLimit(
         identifier=f"old_{unique_id}@example.com",
-        ip_address=f"192.168.1.{unique_id[:3]}",
+        ip_address=_unique_ip(),
         endpoint="/api/old",
         request_count=5,
         attempt_count=5,
@@ -510,7 +523,7 @@ def test_cleanup_orm_keep_blocked(db_session: Session):
     # Create old but currently blocked record
     blocked_record = SecurityRateLimit(
         identifier=f"blocked_{unique_id}@example.com",
-        ip_address=f"192.168.1.{unique_id[:3]}",
+        ip_address=_unique_ip(),
         endpoint="/api/blocked",
         request_count=100,
         attempt_count=100,
@@ -541,7 +554,7 @@ def test_cleanup_orm_no_old_records(db_session: Session):
     rate_limit_crud.check_limit_orm(
         db_session,
         identifier=f"recent_{unique_id}@example.com",
-        ip_address=f"192.168.1.{unique_id[:3]}",
+        ip_address=_unique_ip(),
         endpoint="/api/recent",
     )
 
@@ -562,7 +575,7 @@ def test_cleanup_orm_custom_days(db_session: Session):
     # Create record 20 days old
     record_20_days = SecurityRateLimit(
         identifier=f"user20_{unique_id}@example.com",
-        ip_address=f"192.168.1.{unique_id[:3]}",
+        ip_address=_unique_ip(),
         endpoint="/api/test",
         request_count=5,
         attempt_count=5,
