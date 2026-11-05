@@ -54,8 +54,10 @@ def client(service):
     app = FastAPI()
     app.include_router(router)
     app.dependency_overrides[get_db_connection_service] = lambda: service
-    # Cada Depends(CurrentUser()) es una instancia distinta: se sustituyen todas
-    for route in app.routes:
+    # Cada Depends(CurrentUser()) es una instancia distinta: se sustituyen todas.
+    # Se recorren las rutas del router: desde FastAPI 0.142 app.routes no las incluye
+    # (include_router las envuelve en un _IncludedRouter)
+    for route in router.routes:
         dependant = getattr(route, "dependant", None)
         if dependant is None:
             continue
