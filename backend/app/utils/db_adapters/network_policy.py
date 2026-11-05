@@ -11,13 +11,17 @@ Configuración (variables de entorno):
   permitidas explícitamente (ej: "10.20.0.0/16,192.168.5.10/32").
 
 Nota: la validación se repite cada vez que se crea un adapter (no solo al crear la
-sesión), lo que reduce la ventana de DNS rebinding entre validación y conexión.
+sesión) y devuelve la IP validada para que el adapter conecte a ella en vez de volver a
+resolver el nombre: así un DNS rebinding entre validación y conexión no lleva a una IP
+interna. PostgreSQL, MySQL y SQL Server conectan a esa IP y verifican el certificado
+TLS contra el nombre original; el driver de Oracle solo verifica contra el host al que
+conecta, así que Oracle sigue resolviendo el nombre (queda la revalidación).
 """
 
 import ipaddress
 import os
 import socket
-from typing import List, Union
+from typing import List, Optional, Union
 
 from .exceptions import DBHostNotAllowedError
 
@@ -60,24 +64,30 @@ def _resolve(host: str, port: int) -> List[IPAddress]:
     return addresses
 
 
-def validate_connection_host(host: str, port: int) -> None:
+def validate_connection_host(host: str, port: int) -> Optional[str]:
     """
     Verifica que el host esté permitido por la política de red.
 
     Todas las direcciones a las que resuelve el host deben ser públicas o estar en
     DB_CONNECTOR_ALLOWED_NETWORKS.
 
+    Returns:
+        Una de las IPs validadas, a la que debe conectarse el adapter (pinning contra
+        DNS rebinding); None si la política permite cualquier destino y no se valida.
+
     Raises:
         DBHostNotAllowedError: Si el host no resuelve o resuelve a una dirección interna
     """
     if _private_hosts_allowed():
-        return
+        return None
 
     allowed_networks = _allowed_networks()
-    for address in _resolve(host, port):
+    addresses = _resolve(host, port)
+    for address in addresses:
         if any(address in network for network in allowed_networks):
             continue
         if not address.is_global or address.is_multicast:
             raise DBHostNotAllowedError(
                 f"Connections to internal or reserved addresses are not allowed (host '{host}')"
             )
+    return str(addresses[0])

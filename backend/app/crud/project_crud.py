@@ -318,6 +318,27 @@ class ProjectCRUD:
         return bool(result > 0)
 
     @staticmethod
+    def accessible_project_ids_orm(db, user_id: str):
+        """
+        SELECT con los ids de los proyectos no borrados a los que el usuario tiene acceso
+        (owner o miembro), para filtrar consultas con `.in_(...)`.
+        """
+        from sqlalchemy import or_
+
+        from app.models.orm import Project, ProjectMember
+
+        return (
+            db.query(Project.id)
+            .outerjoin(ProjectMember, ProjectMember.project_id == Project.id)
+            .filter(
+                Project.is_deleted == False,  # noqa: E712
+                or_(Project.owner_id == user_id, ProjectMember.user_id == user_id),
+            )
+            .subquery()
+            .select()
+        )
+
+    @staticmethod
     def check_user_access_orm(db, project_id: str, user_id: str) -> Optional[Dict[str, Any]]:
         """
         Verifica si un usuario tiene acceso a un proyecto y con qué rol (ORM version)

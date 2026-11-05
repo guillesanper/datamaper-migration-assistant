@@ -61,17 +61,21 @@ def get_grouped_activity(
 
 
 def get_entity_activity(
-    db, entity_id: str, entity_type: str, limit: int = 50
+    db, entity_id: str, entity_type: str, limit: int = 50, viewer_id: Optional[str] = None
 ) -> List[Dict[str, Any]]:
-    """Get activity for a specific entity"""
-    return activity_crud.get_entity_activity_orm(db, entity_id, entity_type, limit)
+    """Get activity for a specific entity (con viewer_id, solo de proyectos accesibles)"""
+    return activity_crud.get_entity_activity_orm(db, entity_id, entity_type, limit, viewer_id)
 
 
 def get_user_activity(
-    db, user_id: str, project_id: Optional[str] = None, limit: int = 50
+    db,
+    user_id: str,
+    project_id: Optional[str] = None,
+    limit: int = 50,
+    viewer_id: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
-    """Get activity for a specific user"""
-    return activity_crud.get_user_activity_orm(db, user_id, project_id, limit)
+    """Get activity for a specific user (con viewer_id, solo de proyectos accesibles)"""
+    return activity_crud.get_user_activity_orm(db, user_id, project_id, limit, viewer_id)
 
 
 def get_global_activity(db, user_id: str, limit: int = 20, offset: int = 0) -> List[Dict[str, Any]]:

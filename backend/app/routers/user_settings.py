@@ -53,6 +53,11 @@ try:
 except AttributeError:
     _LANCZOS = Image.LANCZOS  # type: ignore[attr-defined]
 
+# Avatar: tamaño máximo del fichero, formatos reales aceptados y tamaño máximo del lienzo
+AVATAR_MAX_BYTES = 2 * 1024 * 1024
+AVATAR_FORMATS = {"JPEG", "PNG", "WEBP", "GIF"}
+AVATAR_MAX_PIXELS = 4096 * 4096
+
 
 # ─── Pydantic request models ──────────────────────────────────────────────────
 
@@ -154,14 +159,22 @@ async def upload_avatar(
     if file.content_type not in allowed_types:
         raise HTTPException(400, detail=make_error(ErrorCode.USER_IMAGE_FORMAT))
 
-    content = await file.read()
-    if len(content) > 2 * 1024 * 1024:
+    # Leer como mucho un byte más del límite: no cargar en memoria ficheros enormes
+    content = await file.read(AVATAR_MAX_BYTES + 1)
+    if len(content) > AVATAR_MAX_BYTES:
         raise HTTPException(400, detail=make_error(ErrorCode.USER_IMAGE_SIZE))
 
     user_id = str(current_user["id"])
 
     try:
         img = Image.open(BytesIO(content))
+        # El content_type lo pone el cliente: el formato real sale de la propia imagen
+        if img.format not in AVATAR_FORMATS:
+            raise HTTPException(400, detail=make_error(ErrorCode.USER_IMAGE_FORMAT))
+        # Dimensiones de la cabecera, antes de decodificar: un PNG de pocos KB puede
+        # declarar un lienzo de cientos de megapíxeles (bomba de descompresión)
+        if img.width * img.height > AVATAR_MAX_PIXELS:
+            raise HTTPException(400, detail=make_error(ErrorCode.USER_IMAGE_SIZE))
         img = img.convert("RGB")  # type: ignore[assignment]
         # Recorte centrado a cuadrado, luego resize a 200x200
         width, height = img.size
@@ -170,6 +183,10 @@ async def upload_avatar(
         top = (height - min_dim) // 2
         img = img.crop((left, top, left + min_dim, top + min_dim))  # type: ignore[assignment]
         img = img.resize((200, 200), _LANCZOS)  # type: ignore[assignment]
+    except HTTPException:
+        raise
+    except Image.DecompressionBombError:
+        raise HTTPException(400, detail=make_error(ErrorCode.USER_IMAGE_SIZE))
     except Exception:
         raise HTTPException(400, detail=make_error(ErrorCode.USER_IMAGE_PROCESS))
 

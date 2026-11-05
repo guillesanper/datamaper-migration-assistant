@@ -1,5 +1,5 @@
 # Multi-stage build para optimizar tamaño de imagen
-FROM python:3.11-slim as builder
+FROM python:3.11-slim AS builder
 
 # Instalar dependencias de compilación
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -46,12 +46,19 @@ COPY --chown=datamap:datamap . .
 # Cambiar a usuario no-root
 USER datamap
 
+# Puerto y workers/timeout/reciclado de gunicorn, configurables como en render.yaml
+ENV PORT=8000 \
+    WEB_CONCURRENCY=2 \
+    GUNICORN_TIMEOUT=120 \
+    GUNICORN_MAX_REQUESTS=1000
+
 # Exponer puerto
 EXPOSE 8000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=40s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
+    CMD curl -f http://localhost:${PORT}/health || exit 1
 
-# Comando por defecto (para desarrollo con hot reload)
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+# Comando por defecto: producción (gunicorn + workers uvicorn, sin --reload).
+# El hot reload de desarrollo lo pone docker-compose.yml con su propio `command`.
+CMD ["sh", "-c", "exec gunicorn main:app -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:${PORT} --workers ${WEB_CONCURRENCY} --timeout ${GUNICORN_TIMEOUT} --max-requests ${GUNICORN_MAX_REQUESTS}"]

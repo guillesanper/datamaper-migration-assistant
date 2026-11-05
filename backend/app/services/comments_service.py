@@ -134,10 +134,16 @@ def remove_reaction(db, comment_id: str, user_id: str, emoji: str) -> bool:
 
 
 def get_comments(
-    db, entity_id: str, entity_type: str, filters: Optional[Dict[str, Any]] = None
+    db,
+    entity_id: str,
+    entity_type: str,
+    filters: Optional[Dict[str, Any]] = None,
+    viewer_id: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """
     Get comments with optional filters and build tree structure.
+
+    Con viewer_id solo se devuelven comentarios de proyectos a los que ese usuario tiene acceso.
     """
     filters = filters or {}
 
@@ -148,6 +154,7 @@ def get_comments(
         include_resolved=filters.get("include_resolved", True),
         include_replies=filters.get("include_replies", True),
         parent_id=filters.get("parent_id"),
+        viewer_id=viewer_id,
     )
 
     # Get reactions for each comment

@@ -196,8 +196,13 @@ def get_comments_orm(
     include_resolved: bool = True,
     include_replies: bool = True,
     parent_id: Optional[str] = None,
+    viewer_id: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
-    """Get comments for an entity with filters (ORM version)"""
+    """
+    Get comments for an entity with filters (ORM version).
+
+    Con viewer_id solo se devuelven comentarios de proyectos a los que ese usuario tiene acceso.
+    """
     from sqlalchemy import func, literal
 
     from app.models.orm.comment import Comment, CommentReaction
@@ -240,6 +245,13 @@ def get_comments_orm(
         query = query.filter(Comment.parent_id.is_(None))
     elif parent_id:
         query = query.filter(Comment.parent_id == parent_id)
+
+    if viewer_id:
+        from app.crud.project_crud import ProjectCRUD
+
+        query = query.filter(
+            Comment.project_id.in_(ProjectCRUD.accessible_project_ids_orm(db, viewer_id))
+        )
 
     # Group and order
     query = query.group_by(Comment.id, User.username, User.email)

@@ -191,12 +191,14 @@ class DBConnectionService:
             DBHostNotAllowedError: Si el host resuelve a una red interna no permitida
         """
         # Política de red anti-SSRF: se revalida en cada conexión, no solo al crear
-        # la sesión, para acotar ataques de DNS rebinding
-        validate_connection_host(config.host, config.port)
+        # la sesión, y el adapter conecta a la IP validada (pinning contra DNS rebinding)
+        pinned_address = validate_connection_host(config.host, config.port)
 
         adapter_config = config.to_adapter_config()
         if long_running:
             adapter_config["read_timeout"] = None
+        if pinned_address:
+            adapter_config["hostaddr"] = pinned_address
 
         if config.dialect == "postgresql":
             return PostgreSQLAdapter(adapter_config)

@@ -1,5 +1,6 @@
 # app/routers/dependencies.py
 import os
+import uuid
 from datetime import datetime
 from typing import Optional
 
@@ -229,3 +230,48 @@ async def validate_encryption_session(
 
     # Limpiar sesión pendiente
     delattr(request.state, "_pending_encryption_session")
+
+
+# ============================================================================
+# Autorización por proyecto
+# ============================================================================
+
+# Orden de privilegio de los roles de proyecto (el owner del proyecto cuenta como "owner")
+PROJECT_ROLE_LEVELS = {"viewer": 1, "editor": 2, "owner": 3}
+
+
+def require_project_access(db: Session, project_id, user_id, min_role: str = "viewer") -> dict:
+    """
+    Comprueba que el usuario sea owner o miembro del proyecto con al menos `min_role`.
+
+    Sin acceso (o si el proyecto no existe o el id no es válido) responde 404, para no
+    revelar qué proyectos existen; con acceso pero rol insuficiente responde 403.
+
+    Returns:
+        dict {is_owner: bool, role: str} con el rol efectivo del usuario
+
+    Raises:
+        HTTPException: 404 sin acceso, 403 con rol insuficiente
+    """
+    from app.crud.project_crud import ProjectCRUD
+
+    try:
+        uuid.UUID(str(project_id))
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, detail=make_error(ErrorCode.PROJECT_NOT_FOUND)
+        )
+
+    access = ProjectCRUD.check_user_access_orm(db, str(project_id), str(user_id))
+    if not access:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, detail=make_error(ErrorCode.PROJECT_NOT_FOUND)
+        )
+
+    role = "owner" if access.get("is_owner") else (access.get("role") or "viewer")
+    if PROJECT_ROLE_LEVELS.get(role, 0) < PROJECT_ROLE_LEVELS[min_role]:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, detail=make_error(ErrorCode.PROJECT_FORBIDDEN)
+        )
+
+    return {"is_owner": bool(access.get("is_owner")), "role": role}

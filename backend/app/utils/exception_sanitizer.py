@@ -20,6 +20,8 @@ import re
 import traceback
 from typing import Any, Dict, List, Optional
 
+from fastapi import HTTPException
+
 logger = logging.getLogger(__name__)
 
 
@@ -420,3 +422,22 @@ if __name__ == "__main__":
         print("User Message:", safe_exc.user_message)
         print("Internal Message:", safe_exc.internal_message)
         print("Error Code:", safe_exc.error_code)
+
+
+def internal_server_error(
+    exception: Exception, logger_instance: logging.Logger, message: str
+) -> HTTPException:
+    """
+    Loggea (sanitizada) una excepción inesperada y devuelve un 500 con un mensaje genérico.
+
+    El detalle de la excepción (SQL, rutas, mensajes del driver...) se queda en el log del
+    servidor y no llega al cliente.
+
+    Example:
+        ```python
+        except Exception as e:
+            raise internal_server_error(e, logger, "Error fetching activity") from e
+        ```
+    """
+    safe_log_exception(exception, logger_instance, level="error", user_friendly_message=message)
+    return HTTPException(status_code=500, detail=message)
